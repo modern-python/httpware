@@ -1,0 +1,108 @@
+[project]
+name = "httpware"
+description = "Resilience-first async HTTP client framework for Python"
+authors = [{ name = "Artur Shiriev", email = "me@shiriev.ru" }]
+requires-python = ">=3.11,<4"
+license = "MIT"
+readme = "README.md"
+keywords = [
+    "http",
+    "async",
+    "client",
+    "resilience",
+    "retry",
+    "circuit-breaker",
+    "middleware",
+    "httpx",
+    "pydantic",
+]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Internet :: WWW/HTTP",
+    "Framework :: AsyncIO",
+]
+version = "0"
+dependencies = [
+    "httpx2>=2.0.0,<3.0",
+    "pydantic>=2.0,<3.0",
+]
+
+[project.optional-dependencies]
+msgspec = ["msgspec>=0.18"]
+otel = [
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+]
+niquests = ["niquests>=3.18"]
+all = [
+    "msgspec>=0.18",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "niquests>=3.18",
+]
+
+[project.urls]
+repository = "https://github.com/modern-python/httpware"
+docs = "https://httpware.readthedocs.io"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "httpware"
+module-root = "src"
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "pytest-repeat",
+    "pytest-benchmark",
+    "hypothesis",
+]
+lint = [
+    "ruff",
+    "ty",
+    "eof-fixer",
+    "typing-extensions",
+]
+
+[tool.ruff]
+fix = true
+unsafe-fixes = true
+line-length = 120
+target-version = "py311"
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D1",     # allow missing docstrings
+    "S101",   # allow asserts
+    "TCH",    # ignore flake8-type-checking
+    "FBT",    # allow boolean args
+    "D203",   # "one-blank-line-before-class" conflicting with D211
+    "D213",   # "multi-line-summary-second-line" conflicting with D212
+    "COM812", # flake8-commas "Trailing comma missing"
+    "ISC001", # flake8-implicit-str-concat
+]
+isort.lines-after-imports = 2
+isort.no-lines-before = ["standard-library", "local-folder"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=src/httpware --cov-report term-missing"
+asyncio_mode = "auto"
+pythonpath = ["src"]
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage]
+run.concurrency = ["thread"]
+run.omit = ["benchmarks/*"]
+report.exclude_also = ["if typing.TYPE_CHECKING:"]
