@@ -15,5 +15,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `SECURITY.md` with 90-day private-disclosure window.
 - `CONTRIBUTING.md` with development workflow.
 - `CLAUDE.md` with AI-agent guidance.
+- Core data types: `Request`, `Response`, `Limits`, `Timeout`, `ClientConfig` — frozen+slotted dataclasses with `with_*` immutability helpers on `Request` and computed `text`/`json()` accessors on `Response` (Story 1.2).
 
 [Unreleased]: https://github.com/modern-python/httpware/compare/HEAD...HEAD
