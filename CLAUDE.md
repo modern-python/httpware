@@ -6,13 +6,15 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 `httpware` is a Python async HTTP client framework for building resilient service clients. It supersedes `community-of-python/base-client` and ships under the `modern-python` org. The framework owns the abstraction layer above the underlying HTTP client (`httpx2` by default); consumers never import the transport.
 
-**Source-of-truth planning artifacts** live in the sibling `base-client` repo (until httpware is fully self-hosted):
+**Source-of-truth planning artifacts** live in this repo under `docs/`:
 
-- `base-client/docs/prd.md` — Product Requirements Document (47 FRs, 25 NFRs)
-- `base-client/docs/architecture.md` — 12 architectural decisions, 5 protocol seams, full module layout
-- `base-client/docs/epics.md` — 6 epics, 32 stories with Given/When/Then acceptance criteria
+- `docs/prd.md` — Product Requirements Document (47 FRs, 25 NFRs)
+- `docs/architecture.md` — 12 architectural decisions, 5 protocol seams, full module layout
+- `docs/epics.md` — 6 epics, 32 stories with Given/When/Then acceptance criteria
+- `docs/product-brief-httpware.md` — executive brief (history of how the project was scoped)
+- `docs/product-brief-httpware-distillate.md` — PRD-ready detail pack with verified facts, API patterns, performance specifics, rejected alternatives, open questions
 
-Stories under active dev live in `httpware/docs/stories/`.
+Stories under active dev live in `docs/stories/`. (Initial planning artifacts were authored in the predecessor repo `community-of-python/base-client` and copied here at the end of Story 1.1; both copies are kept in sync until base-client is archived.)
 
 ## Commands
 

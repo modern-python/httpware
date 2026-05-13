@@ -7,9 +7,9 @@ status: review
 created: 2026-05-12
 completed: 2026-05-13
 input_documents:
-  - /Users/kevinsmith/src/pypi/base-client/docs/prd.md
-  - /Users/kevinsmith/src/pypi/base-client/docs/architecture.md
-  - /Users/kevinsmith/src/pypi/base-client/docs/epics.md
+  - docs/prd.md
+  - docs/architecture.md
+  - docs/epics.md
 ---
 
 # Story 1.1: Project scaffold and tooling
@@ -83,7 +83,7 @@ input_documents:
 
 ## Dev Notes
 
-**Architecture references** (all in `/Users/kevinsmith/src/pypi/base-client/docs/`):
+**Architecture references** (all in `docs/`):
 
 - `architecture.md` § Starter Template Evaluation — selected starter is `uv init --lib` + port from `modern-python/modern-di`
 - `architecture.md` § Project Structure & Boundaries — full directory tree and root-file enumeration
