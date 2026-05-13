@@ -22,6 +22,7 @@ Optional extras:
 ```bash
 pip install httpware[msgspec]    # msgspec ResponseDecoder
 pip install httpware[otel]       # OpenTelemetry instrumentation
+pip install httpware[niquests]   # niquests transport
 pip install httpware[all]        # all of the above
 ```
 
