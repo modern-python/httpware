@@ -48,6 +48,36 @@ def test_response_text_falls_back_to_utf8_on_missing_charset() -> None:
     assert resp.text == '{"x": 1}'
 
 
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        'text/plain; charset="latin-1"',
+        "text/plain; charset='latin-1'",
+    ],
+)
+def test_response_text_strips_quotes_around_charset(content_type: str) -> None:
+    body = "café".encode("latin-1")
+    resp = Response(
+        status=200,
+        headers={"content-type": content_type},
+        content=body,
+        url="/",
+        elapsed=0.0,
+    )
+    assert resp.text == "café"
+
+
+def test_response_text_falls_back_to_utf8_on_unknown_charset() -> None:
+    resp = Response(
+        status=200,
+        headers={"content-type": "text/plain; charset=not-a-real-codec"},
+        content=b"hello",
+        url="/",
+        elapsed=0.0,
+    )
+    assert resp.text == "hello"
+
+
 def test_response_json_parses_body() -> None:
     resp = Response(status=200, headers={}, content=b'{"a": 1, "b": [2, 3]}', url="/", elapsed=0.0)
     assert resp.json() == {"a": 1, "b": [2, 3]}
@@ -57,3 +87,5 @@ def test_response_equality_on_identical_fields() -> None:
     r1 = Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)
     r2 = Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)
     assert r1 == r2
+    assert r1 != Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.6)
+    assert r1 != Response(status=201, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)

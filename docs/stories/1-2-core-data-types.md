@@ -3,7 +3,7 @@ story_key: 1-2-core-data-types
 epic: 1
 story: 2
 title: Core data types
-status: ready-for-dev
+status: done
 created: 2026-05-13
 input_documents:
   - docs/prd.md
@@ -197,7 +197,7 @@ Followed TDD per module: write failing tests → confirm collection failure (RED
 - **AC5** ✓ `Timeout`, `Limits`, `ClientConfig` in `src/httpware/config.py` are all `@dataclass(frozen=True, slots=True)`. Defaults exactly match the spec. `ClientConfig.timeout` and `.limits` use `field(default_factory=Timeout)` / `field(default_factory=Limits)` — never bare instances. `Redactor` is intentionally not present (Story 5.3).
 - **AC6** ✓ `src/httpware/__init__.py` re-exports all five via explicit absolute imports; `__all__` is the sorted list `["ClientConfig", "Limits", "Request", "Response", "Timeout"]`. Smoke import succeeds.
 - **AC7** ✓ `just lint-ci` reports zero diagnostics across `eof-fixer`, `ruff format --check`, `ruff check --no-fix`, `ty check`.
-- **AC8** ✓ 24 tests cover every documented case: frozen on all 4 dataclasses, `with_*` immutability + new-instance identity + replace-semantics on `with_header`, equality, independent default mappings, charset case-insensitivity (parametrized over three casings), UTF-8 / latin-1 / missing-charset paths, JSON round-trip, default constructor returns documented defaults. `pytest` exits 0; coverage 100%.
+- **AC8** ✓ 24 tests cover every documented case: frozen on all 5 dataclasses, `with_*` immutability + new-instance identity + replace-semantics on `with_header`, equality, independent default mappings, charset case-insensitivity (parametrized over three casings), UTF-8 / latin-1 / missing-charset paths, JSON round-trip, default constructor returns documented defaults. `pytest` exits 0; coverage 100%.
 
 **Deviations from the story spec (worth flagging for reviewer):**
 
@@ -229,4 +229,26 @@ Followed TDD per module: write failing tests → confirm collection failure (RED
 
 ## Status
 
-`review`
+`done`
+
+### Review Findings
+
+_Code review run: 2026-05-13. Reviewers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. Acceptance Auditor reported **no AC violations**. 5 patches applied, 11 deferred, 36 dismissed as noise. Post-patch verification: `just lint-ci` clean, 27 tests pass (+3 new), 100% coverage retained._
+
+- [x] [Review][Patch] `Response.text` now wraps `bytes.decode` in `try/except LookupError` and falls back to UTF-8 when the declared charset is unknown. [`src/httpware/response.py:42-46`] — applied
+- [x] [Review][Patch] `Response` class docstring now documents `elapsed` as wall-clock seconds from request send to response receipt. [`src/httpware/response.py:29-32`] — applied
+- [x] [Review][Patch] Added `test_response_text_strips_quotes_around_charset` (parametrized over `"latin-1"` and `'latin-1'`) covering the quote-stripping branch. [`tests/test_response.py`] — applied
+- [x] [Review][Patch] Equality tests now also assert `!=` against per-field variants (Request and Response). [`tests/test_request.py`, `tests/test_response.py`] — applied
+- [x] [Review][Patch] Completion Notes AC8 — "frozen on all 4 dataclasses" → "all 5". [`docs/stories/1-2-core-data-types.md:200`] — applied
+
+- [x] [Review][Defer] Charset parser robustness — whitespace inside quotes, mismatched quotes, multiple `charset=` directives, `charset=` substring inside a quoted boundary param. [`src/httpware/response.py:21-26`] — deferred, pragmatic v0; revisit when transport tests reveal real-world breakage
+- [x] [Review][Defer] Header name/value validation (CR/LF injection, `None`, empty string) on `Request.with_header`. [`src/httpware/request.py:21-23`] — deferred to header-handling story (2.3 or later)
+- [x] [Review][Defer] URL validation — `with_url("")` accepts empty, `base_url` has no trailing-slash normalization. [`src/httpware/request.py:25-27`, `src/httpware/config.py:27-33`] — deferred, lands when transport composes URLs
+- [x] [Review][Defer] `with_query(None)` is currently accepted and breaks downstream iteration. [`src/httpware/request.py:33-35`] — deferred, type system already says `Mapping[str, str]`
+- [x] [Review][Defer] `Timeout` / `Limits` accept negative or zero values silently (no `__post_init__`). [`src/httpware/config.py:10-22`] — deferred, validation lands with transport integration
+- [x] [Review][Defer] `params: Mapping[str, str]` cannot express multi-valued query strings (`?tag=a&tag=b`). [`src/httpware/request.py:8`] — deferred, type widening tracked separately
+- [x] [Review][Defer] `body: bytes | None` precludes streaming / async-iterable bodies. [`src/httpware/request.py:11`] — deferred, intentional minimal scope; revisit in transport stories
+- [x] [Review][Defer] No `with_headers` / `with_cookie` / `with_extension` merge helpers; only `with_header` (single) and `with_query` (replace). [`src/httpware/request.py:20-35`] — deferred to Story 2.3 (merge/case-insensitive helpers)
+- [x] [Review][Defer] `Response.json()` ignores declared charset; `json.loads(bytes)` auto-detects only UTF-8/16/32 by BOM. [`src/httpware/response.py:44-45`] — deferred, most APIs are UTF-8; revisit if a real backend breaks
+- [x] [Review][Defer] `Request.body` / `Response.content` (bytes) render verbatim in the default dataclass `__repr__`, leaking large payloads / secrets into logs. [`src/httpware/request.py`, `src/httpware/response.py`] — deferred to Story 5.3 (`Redactor`)
+- [x] [Review][Defer] No `@final` decorator — frozen+slots subclassing is fragile and the spec doesn't bless it; an explicit `@final` would prevent the footgun. [`src/httpware/request.py`, `src/httpware/response.py`, `src/httpware/config.py`] — deferred, no current subclasser
