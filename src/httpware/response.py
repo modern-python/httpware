@@ -26,7 +26,10 @@ def _parse_charset(content_type: str) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class Response:
-    """Immutable HTTP response value type."""
+    """Immutable HTTP response value type.
+
+    `elapsed` is wall-clock seconds from request send to response receipt.
+    """
 
     status: int
     headers: Mapping[str, str]
@@ -38,7 +41,10 @@ class Response:
     def text(self) -> str:
         """Decode `content` using the response's declared charset (default UTF-8)."""
         charset = _parse_charset(_get_content_type(self.headers)) or "utf-8"
-        return self.content.decode(charset)
+        try:
+            return self.content.decode(charset)
+        except LookupError:
+            return self.content.decode("utf-8")
 
     def json(self) -> Any:  # noqa: ANN401
         """Parse `content` as JSON."""

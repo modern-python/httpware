@@ -28,6 +28,9 @@ def test_request_equality_on_identical_fields() -> None:
     r1 = Request(method="GET", url="/x", headers={"a": "1"})
     r2 = Request(method="GET", url="/x", headers={"a": "1"})
     assert r1 == r2
+    assert r1 != Request(method="POST", url="/x", headers={"a": "1"})
+    assert r1 != Request(method="GET", url="/y", headers={"a": "1"})
+    assert r1 != Request(method="GET", url="/x", headers={"a": "2"})
 
 
 def test_with_header_adds_when_absent() -> None:

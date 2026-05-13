@@ -3,7 +3,7 @@ story_key: 1-1-project-scaffold-and-tooling
 epic: 1
 story: 1
 title: Project scaffold and tooling
-status: review
+status: done
 created: 2026-05-12
 completed: 2026-05-13
 input_documents:
@@ -168,7 +168,7 @@ input_documents:
 
 ## File List
 
-Files added (15 total):
+Files added (14 total):
 
 - `.github/workflows/ci.yml` — CI workflow (ruff/ty/pytest, Python 3.11-3.14 matrix)
 - `.gitignore` — modern-di convention + project-specific ignores
@@ -201,4 +201,25 @@ Generated/transient (not committed):
 
 ## Status
 
-`review`
+`done`
+
+### Review Findings
+
+_Code review run: 2026-05-13. Reviewers: Blind Hunter, Edge Case Hunter, Acceptance Auditor. 6 patches applied, 3 dismissed by maintainer (not errors), 6 deferred, 20 dismissed as noise (2 decision-needed items were resolved → dismissed: `.gitignore plan.md` blacklist is intentional convention; AC6 lint-on-single-version matches modern-di canon and is accepted)._
+
+- [x] [Review][Patch] CHANGELOG declared `httpx2>=2.0.0b1,<3.0` while pyproject shipped `>=2.0.0,<3.0`. [`CHANGELOG.md:13`] — applied
+- [x] [Review][Patch] CHANGELOG `[Unreleased]` link was `compare/HEAD...HEAD` — replaced with `commits/main` until first tag. [`CHANGELOG.md:20`] — applied
+- [x] [Review][Dismissed] `version = "0"` placeholder. [`pyproject.toml:29`] — dismissed by maintainer, not an error
+- [x] [Review][Patch] `[all]` extra refactored to self-reference siblings: `all = ["httpware[msgspec,otel,niquests]"]`. [`pyproject.toml:42-47`] — applied
+- [x] [Review][Patch] README "Optional extras" snippet — added `pip install httpware[niquests]`. [`README.md:22-26`] — applied
+- [x] [Review][Dismissed] CI `timeout-minutes`. [`.github/workflows/ci.yml:14, 26`] — dismissed by maintainer, not an error
+- [x] [Review][Dismissed] CI explicit `permissions:` block. [`.github/workflows/ci.yml:1-12`] — dismissed by maintainer, not an error
+- [x] [Review][Patch] Duplicate `--cov` flag — dropped `--cov=src/httpware` from CI invocation; `addopts` is now the single source of `--cov` source. [`.github/workflows/ci.yml:45`] — applied
+- [x] [Review][Patch] File List header `15 total` → `14 total`. [`docs/stories/1-1-project-scaffold-and-tooling.md:171`] — applied
+
+- [x] [Review][Defer] Codecov upload fails on fork PRs without `CODECOV_TOKEN`; matches modern-di pattern, accepted tradeoff. [`.github/workflows/ci.yml:46-52`] — deferred, pre-existing
+- [x] [Review][Defer] `just publish` does not validate `GITHUB_REF_NAME` / `PYPI_TOKEN`; local invocation could corrupt the version. [`Justfile:25-29`] — deferred, release-flow hygiene
+- [x] [Review][Defer] `uv_build>=0.11,<0.12` is a one-minor-version window that will expire fast. [`pyproject.toml:54`] — deferred, will bump on release
+- [x] [Review][Defer] Python 3.14 in CI matrix; httpx2 / pydantic / uv_build wheels may not yet exist on 3.14, causing the matrix entry to fail. [`.github/workflows/ci.yml:30-33`] — deferred, wait-and-see
+- [x] [Review][Defer] `[tool.ruff.lint] select = ["ALL"]` paired with unpinned `ruff`/`ty` — any new ruff release adds rules and breaks CI overnight. [`pyproject.toml:70-72, 84-85`] — deferred, matches modern-di
+- [x] [Review][Defer] No `[test]` extra declared; CI relies on `--all-extras`, so any future heavy extra is pulled into every CI run. [`pyproject.toml:35-47`] — deferred, scope creep concern
