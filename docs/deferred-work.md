@@ -2,6 +2,12 @@
 
 Items raised in reviews that are real but not actionable now.
 
+## Deferred from: code review of story-1-3 (2026-05-13)
+
+- **`request_method` / `request_url` CRLF / log-injection** — fields stored verbatim; `repr` echoes embedded `\r\n`. Transport seam should validate before crafting the request. (`src/httpware/errors.py:55,58`) — revisit in Story 1.4.
+- **Header case-folding contract** — `Mapping[str, str]` doesn't pin case-sensitivity. `exc.headers["Content-Type"]` may `KeyError` if `httpx2.Headers` hands in lowercased keys. (`src/httpware/errors.py:33`) — Story 1.4 transport seam decides.
+- **`request_method` casing normalization** — `repr` faithfully echoes `"get"` / `"Get"` if middleware lowercases. Document expected casing or normalize at the seam. (`src/httpware/errors.py:35`) — Story 1.4.
+
 ## Deferred from: code review of story-1-2 (2026-05-13)
 
 - **Charset parser robustness** — quoted whitespace, mismatched quotes, multi-`charset=` directives, substring false-positives (e.g. `boundary` containing `charset=`). (`src/httpware/response.py:21-26`)
