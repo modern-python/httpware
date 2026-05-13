@@ -22,7 +22,7 @@ input_documents:
 
 ## Acceptance Criteria
 
-**AC1.** **Given** a fresh checkout of a new GitHub repo at `modern-python/httpware`, **When** I run `uv init --lib httpware` followed by the org-convention port from `modern-python/modern-di`, **Then** the repo has `src/httpware/__init__.py`, `src/httpware/py.typed`, and a `pyproject.toml` declaring `httpx2>=2.0.0b1,<3.0` and `pydantic>=2.0,<3.0` as dependencies.
+**AC1.** **Given** a fresh checkout of a new GitHub repo at `modern-python/httpware`, **When** I run `uv init --lib httpware` followed by the org-convention port from `modern-python/modern-di`, **Then** the repo has `src/httpware/__init__.py`, `src/httpware/py.typed`, and a `pyproject.toml` declaring `httpx2>=2.0.0,<3.0` and `pydantic>=2.0,<3.0` as dependencies.
 
 **AC2.** **And** extras `[msgspec]`, `[otel]`, `[niquests]`, `[all]` are declared.
 
@@ -134,7 +134,7 @@ input_documents:
 ### Debug Log
 
 - `uv init --lib` auto-created `py.typed` (good — no need to add manually as originally planned in subtask 1.3).
-- Initial `httpx2>=2.0.0b1,<3.0` constraint caused `uv pip install` (without `--prerelease=allow`) to skip httpx2 in clean-venv smoke test. Tightened to `>=2.0.0,<3.0` after verifying `httpx2==2.0.0` GA is published on PyPI. Updated PRD and architecture should follow in a future cleanup pass (the docs currently say `>=2.0.0b1,<3.0`; not blocking).
+- Initial `httpx2>=2.0.0b1,<3.0` constraint (from the original AC1) caused `uv pip install` (without `--prerelease=allow`) to skip httpx2 in clean-venv smoke test. Tightened to `>=2.0.0,<3.0` after verifying `httpx2==2.0.0` GA was published on PyPI on 2026-05-12. AC1, base-client/docs/{prd,architecture,epics}.md, and this story file have all been updated in a follow-up commit to match the implemented constraint.
 - `uv build` warned about `[build-system] requires = ["uv_build"]` lacking an upper bound. Pinned to `>=0.11,<0.12` to silence the warning and prevent future breakage when uv_build 0.12 ships.
 - `git add` initially refused `.python-version` (in `.gitignore` from modern-di's convention); kept it untracked. Same for `uv.lock` (added to `.gitignore` after initial commit attempt staged it).
 
@@ -161,7 +161,7 @@ input_documents:
 
 **Deviations from PRD/Architecture docs (worth noting for future cleanup):**
 
-- PRD and Architecture currently specify `httpx2>=2.0.0b1,<3.0` (set when only the beta was published). Story tightened to `>=2.0.0,<3.0` after verifying GA. Update planning artifacts in a follow-up pass.
+- Original AC1 specified `httpx2>=2.0.0b1,<3.0` (written when only the beta was published). Story tightened to `>=2.0.0,<3.0` after verifying GA shipped on PyPI 2026-05-12; planning artifacts (PRD, Architecture, Epics, AC1) updated to match in a follow-up commit. Deviation resolved.
 - `module-name = "httpware"` and `module-root = "src"` (src/ layout) chosen over modern-di's flat layout, per architecture decision §Starter Template (rationale: src/ layout prevents test code from accidentally importing local source).
 
 **Tests written:** None — scaffold story has no library code. Tests begin in Story 1.2.
