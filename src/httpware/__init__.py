@@ -20,7 +20,9 @@ from httpware.errors import (
     UnprocessableEntityError,
 )
 from httpware.request import Request
-from httpware.response import Response
+from httpware.response import Response, StreamResponse
+from httpware.transports import Transport
+from httpware.transports.httpx2 import Httpx2Transport
 
 
 __all__ = [
@@ -31,6 +33,7 @@ __all__ = [
     "ClientStatusError",
     "ConflictError",
     "ForbiddenError",
+    "Httpx2Transport",
     "InternalServerError",
     "Limits",
     "NotFoundError",
@@ -40,8 +43,10 @@ __all__ = [
     "ServerStatusError",
     "ServiceUnavailableError",
     "StatusError",
+    "StreamResponse",
     "Timeout",
     "TimeoutError",
+    "Transport",
     "TransportError",
     "UnauthorizedError",
     "UnprocessableEntityError",
