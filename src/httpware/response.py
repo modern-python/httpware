@@ -49,3 +49,12 @@ class Response:
     def json(self) -> Any:  # noqa: ANN401
         """Parse `content` as JSON."""
         return json.loads(self.content)
+
+
+@dataclass(frozen=True, slots=True)
+class StreamResponse:
+    """Placeholder for the streaming response type — fleshed out in Story 4.1."""
+
+    status: int
+    headers: Mapping[str, str]
+    url: str
