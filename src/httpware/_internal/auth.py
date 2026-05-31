@@ -10,12 +10,7 @@ from httpware.request import Request
 
 _MIDDLEWARE_ARITY = 2
 
-AuthValue: TypeAlias = (
-    str
-    | Callable[[], str | Awaitable[str]]
-    | Middleware
-    | None
-)
+AuthValue: TypeAlias = str | Callable[[], str | Awaitable[str]] | Middleware | None
 
 
 def _normalize_auth(value: AuthValue) -> Middleware | None:
@@ -35,20 +30,14 @@ def _normalize_auth(value: AuthValue) -> Middleware | None:
     if isinstance(value, str):
         return _bearer(value)
     if not callable(value):
-        msg = (
-            "`auth=` must be a string, zero-arg callable, Middleware, or None; "
-            f"got {type(value).__name__}"
-        )
+        msg = f"`auth=` must be a string, zero-arg callable, Middleware, or None; got {type(value).__name__}"
         raise TypeError(msg)
     n_params = len(inspect.signature(value).parameters)
     if n_params == 0:
         return _bearer_from_provider(value)  # ty: ignore[invalid-argument-type]
     if n_params == _MIDDLEWARE_ARITY:
         return value  # ty: ignore[invalid-return-type]
-    msg = (
-        "`auth=` callable must take 0 args (token provider) or 2 args "
-        f"(Middleware); got {n_params}"
-    )
+    msg = f"`auth=` callable must take 0 args (token provider) or 2 args (Middleware); got {n_params}"
     raise TypeError(msg)
 
 

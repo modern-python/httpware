@@ -155,9 +155,7 @@ async def test_per_call_timeout_propagates_to_request_extensions() -> None:
 
 
 async def test_string_auth_sends_authorization_header() -> None:
-    transport = RecordedTransport(
-        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
-    )
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
     client = AsyncClient(transport=transport, auth="tok")
 
     await client.get("/foo")
@@ -167,9 +165,7 @@ async def test_string_auth_sends_authorization_header() -> None:
 
 
 async def test_per_call_authorization_header_wins_over_auth_param() -> None:
-    transport = RecordedTransport(
-        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
-    )
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
     client = AsyncClient(transport=transport, auth="default-tok")
 
     await client.get("/foo", headers={"Authorization": "Bearer override"})
@@ -179,9 +175,7 @@ async def test_per_call_authorization_header_wins_over_auth_param() -> None:
 
 
 async def test_callable_auth_calls_provider_per_request() -> None:
-    transport = RecordedTransport(
-        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
-    )
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
     calls = 0
 
     def _provider() -> str:

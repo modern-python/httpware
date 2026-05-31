@@ -117,9 +117,7 @@ async def test_with_options_overrides_decoder() -> None:
 
 
 async def test_auth_runs_inside_user_middleware() -> None:
-    transport = RecordedTransport(
-        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
-    )
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
 
     user_seen_headers: list[Mapping[str, str]] = []
 
@@ -139,9 +137,7 @@ async def test_auth_runs_inside_user_middleware() -> None:
 
 
 async def test_with_options_auth_replaces_auth_middleware() -> None:
-    transport = RecordedTransport(
-        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
-    )
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
     client = AsyncClient(transport=transport, auth="parent")
     view = client.with_options(auth="view")
 
@@ -155,9 +151,7 @@ async def test_with_options_auth_replaces_auth_middleware() -> None:
 
 
 async def test_with_options_middleware_keeps_existing_auth() -> None:
-    transport = RecordedTransport(
-        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
-    )
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
 
     class _M:
         async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002

@@ -71,13 +71,9 @@ class AsyncClient:
     ) -> None:
         normalized_timeout = _normalize_timeout(timeout)
         resolved_limits = limits or Limits()
-        resolved_transport: Transport = transport or Httpx2Transport(
-            limits=resolved_limits, timeout=normalized_timeout
-        )
+        resolved_transport: Transport = transport or Httpx2Transport(limits=resolved_limits, timeout=normalized_timeout)
         resolved_decoder = decoder or PydanticDecoder()
-        resolved_user_middleware: tuple[Middleware, ...] = (
-            tuple(middleware) if middleware is not None else ()
-        )
+        resolved_user_middleware: tuple[Middleware, ...] = tuple(middleware) if middleware is not None else ()
         resolved_auth_middleware = _normalize_auth(auth)
         composed_middleware: tuple[Middleware, ...] = (
             resolved_user_middleware
@@ -631,9 +627,7 @@ class AsyncClient:
 
         new_auth_middleware = _normalize_auth(new_auth)
         new_composed: tuple[Middleware, ...] = (
-            new_user_middleware
-            if new_auth_middleware is None
-            else (*new_user_middleware, new_auth_middleware)
+            new_user_middleware if new_auth_middleware is None else (*new_user_middleware, new_auth_middleware)
         )
         changes["middleware"] = new_composed
 

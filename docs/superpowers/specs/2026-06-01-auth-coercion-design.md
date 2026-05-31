@@ -290,7 +290,7 @@ User middleware sees the Request without the auth header (so it can rewrite, ski
 from httpware._internal.auth import AuthValue
 ```
 
-`AuthValue` joins `__all__` in alphabetic position (sorts after `"AsyncClient"`, before `"BadRequestError"` — `'A' < 'A' < 'B'`; `"AuthValue"` < `"BadRequestError"` by second character).
+`AuthValue` joins `__all__` in alphabetic position: between `"AsyncClient"` (which sorts before it, by third character `s` < `u`) and `"BadRequestError"` (which sorts after, by first character `A` < `B`). Ruff's `RUF022` will reorder if the implementer places it elsewhere; running `uv run ruff check --fix src/httpware/__init__.py` resolves any drift.
 
 `_normalize_auth`, `_bearer`, `_bearer_from_provider`, `_has_authorization` are NOT exported. The underscore prefix communicates "internal" even though the module path is reachable.
 

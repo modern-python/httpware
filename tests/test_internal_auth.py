@@ -142,7 +142,7 @@ async def test_middleware_returned_unchanged() -> None:
 
 def test_one_arg_callable_raises_typeerror() -> None:
     with pytest.raises(TypeError, match=r"`auth=`.*0 args.*2 args.*1"):
-        _normalize_auth(lambda x: "tok")  # noqa: ARG005 — intentional 1-arg callable
+        _normalize_auth(lambda x: "tok")  # noqa: ARG005  # ty: ignore[invalid-argument-type]
 
 
 def test_non_callable_non_string_non_middleware_raises_typeerror() -> None:
