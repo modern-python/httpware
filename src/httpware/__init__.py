@@ -21,6 +21,7 @@ from httpware.errors import (
     UnauthorizedError,
     UnprocessableEntityError,
 )
+from httpware.middleware import Middleware, Next
 from httpware.request import Request
 from httpware.response import Response, StreamResponse
 from httpware.transports import Transport
@@ -38,6 +39,8 @@ __all__ = [
     "Httpx2Transport",
     "InternalServerError",
     "Limits",
+    "Middleware",
+    "Next",
     "NotFoundError",
     "PydanticDecoder",
     "RateLimitedError",
