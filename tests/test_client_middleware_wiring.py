@@ -91,3 +91,37 @@ async def test_view_does_not_own_transport() -> None:
     client = AsyncClient()
     view = client.with_options(timeout=10)
     assert view._owns_transport is False  # noqa: SLF001
+
+
+async def test_with_options_overrides_base_url() -> None:
+    transport = _RecordingTransport()
+    client = AsyncClient(transport=transport, base_url="https://api.test/v1")
+    view = client.with_options(base_url="https://other.test/v2")
+    assert view._config.base_url == "https://other.test/v2"  # noqa: SLF001
+
+
+async def test_with_options_overrides_default_headers() -> None:
+    transport = _RecordingTransport()
+    client = AsyncClient(transport=transport, default_headers={"x-old": "1"})
+    view = client.with_options(default_headers={"x-new": "2"})
+    assert view._config.default_headers == {"x-new": "2"}  # noqa: SLF001
+
+
+async def test_with_options_overrides_default_query() -> None:
+    transport = _RecordingTransport()
+    client = AsyncClient(transport=transport, default_query={"old": "1"})
+    view = client.with_options(default_query={"new": "2"})
+    assert view._config.default_query == {"new": "2"}  # noqa: SLF001
+
+
+async def test_with_options_overrides_decoder() -> None:
+    transport = _RecordingTransport()
+
+    class _NoopDecoder:
+        def decode(self, content: bytes, model: type) -> object:  # pragma: no cover  # noqa: ARG002
+            return content
+
+    new_decoder = _NoopDecoder()
+    client = AsyncClient(transport=transport)
+    view = client.with_options(decoder=new_decoder)
+    assert view._config.decoder is new_decoder  # noqa: SLF001

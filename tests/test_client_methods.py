@@ -161,3 +161,11 @@ async def test_request_method_uses_first_positional_method_arg() -> None:
     await client.request("CUSTOM", "/foo")
     assert transport.last_request is not None
     assert transport.last_request.method == "CUSTOM"
+
+
+async def test_per_call_timeout_propagates_to_request_extensions() -> None:
+    transport = _RecordingTransport()
+    client = AsyncClient(transport=transport)
+    await client.get("/foo", timeout=2.5)
+    assert transport.last_request is not None
+    assert "timeout" in transport.last_request.extensions
