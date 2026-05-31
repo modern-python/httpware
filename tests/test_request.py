@@ -118,3 +118,28 @@ def test_with_cookies_merges_new_cookies() -> None:
     new = r.with_cookies({"replace": "new", "add": "2"})
     assert new.cookies == {"keep": "1", "replace": "new", "add": "2"}
     assert r.cookies == {"keep": "1", "replace": "old"}
+
+
+def test_with_extension_adds_single_entry() -> None:
+    r = Request(method="GET", url="/")
+    new = r.with_extension("timeout", 5.0)
+    assert new.extensions == {"timeout": 5.0}
+    assert r.extensions == {}
+
+
+def test_with_extensions_merges_new_entries() -> None:
+    r = Request(method="GET", url="/", extensions={"keep": 1, "replace": "old"})
+    new = r.with_extensions({"replace": "new", "add": [1, 2]})
+    assert new.extensions == {"keep": 1, "replace": "new", "add": [1, 2]}
+    assert r.extensions == {"keep": 1, "replace": "old"}
+
+
+def test_with_extension_accepts_any_value_type() -> None:
+    class _Marker:
+        pass
+
+    marker = _Marker()
+    r = Request(method="GET", url="/")
+    new = r.with_extension("marker", marker)
+    assert new.extensions == {"marker": marker}
+    assert new.extensions["marker"] is marker

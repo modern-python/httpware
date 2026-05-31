@@ -45,3 +45,11 @@ class Request:
     def with_cookies(self, cookies: Mapping[str, str]) -> Self:
         """Return a copy with the given cookies merged in (incoming keys override existing)."""
         return dataclasses.replace(self, cookies={**self.cookies, **cookies})
+
+    def with_extension(self, name: str, value: Any) -> Self:  # noqa: ANN401
+        """Return a copy with the given extension entry added or replaced."""
+        return dataclasses.replace(self, extensions={**self.extensions, name: value})
+
+    def with_extensions(self, extensions: Mapping[str, Any]) -> Self:
+        """Return a copy with the given extensions merged in (incoming keys override existing)."""
+        return dataclasses.replace(self, extensions={**self.extensions, **extensions})
