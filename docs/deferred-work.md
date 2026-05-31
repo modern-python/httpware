@@ -2,6 +2,13 @@
 
 Items raised in reviews that are real but not actionable now.
 
+## Deferred from: retrospective review of stories 1-1 through 1-5 (2026-05-31)
+
+- **`PydanticDecoder.decode` `TypeError` fallback is unreachable through normal usage** — the `except TypeError` branch only triggers when `_get_adapter(model)` raises during `lru_cache` lookup, which requires `model` to be unhashable; every concrete `type[T]` is hashable. Revisit when Story 1-6 (`msgspec` decoder) re-examines the `ResponseDecoder` protocol surface. (`src/httpware/decoders/pydantic.py:22-26`)
+- **`_get_adapter` `lru_cache` is module-global, not per-decoder instance** — keyed by `model` only; two `PydanticDecoder()` instances with different configurations (none today) would share adapters, and the cache survives across tests unless explicitly cleared. Revisit if/when a configurable `PydanticDecoder(mode=..., strict=...)` lands. (`src/httpware/decoders/pydantic.py:12-14`)
+- **`extensions=dict(request.extensions)` forwards opaque payloads to httpx2 verbatim** — `httpx2` interprets specific keys (e.g. `timeout`, `sni_hostname`); a typo or unknown key silently bypasses our timeout/limits config. Epic 2 (middleware) and Story 3-1 (per-request timeout) will own the extensions contract surface; introducing an allowlist now risks blocking legitimate forward-compat uses. (`src/httpware/transports/httpx2.py:121`)
+- **`Response.json()` raises raw and ignores charset** — `json.loads(self.content)` raises `json.JSONDecodeError` raw to callers and ignores any declared charset (`text` honors it); inconsistent with `_try_decode_json` in the transport which never raises. Revisit once `AsyncClient` lands (Story 1-7) and the call sites become observable. Partially overlaps with the existing story-1-2 charset entry, but the call-path inconsistency is the new angle. (`src/httpware/response.py:49-51`)
+
 ## Deferred from: code review of story-1-5 (2026-05-14)
 
 - **Empty/malformed payload tests** — `b""`, `b"null"`, `b"{}"`, invalid UTF-8: current pydantic-core behavior is correct but unpinned; a future pydantic upgrade could change error types undetected. (`tests/test_decoders_pydantic.py`)
