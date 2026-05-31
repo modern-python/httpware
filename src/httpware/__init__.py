@@ -1,6 +1,8 @@
 """httpware — resilience-first async HTTP client framework for Python."""
 
 from httpware.config import ClientConfig, Limits, Timeout
+from httpware.decoders import ResponseDecoder
+from httpware.decoders.pydantic import PydanticDecoder
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
@@ -37,9 +39,11 @@ __all__ = [
     "InternalServerError",
     "Limits",
     "NotFoundError",
+    "PydanticDecoder",
     "RateLimitedError",
     "Request",
     "Response",
+    "ResponseDecoder",
     "ServerStatusError",
     "ServiceUnavailableError",
     "StatusError",

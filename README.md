@@ -58,6 +58,12 @@ async def main() -> None:
 
 Full docs (in progress): https://httpware.readthedocs.io
 
+## Part of `modern-python`
+
+Browse the full list of templates and libraries in
+[`modern-python`](https://github.com/modern-python) — see the org profile for the
+categorized index.
+
 ## License
 
 MIT — see [LICENSE](./LICENSE).

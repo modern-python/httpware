@@ -2,6 +2,13 @@
 
 Items raised in reviews that are real but not actionable now.
 
+## Deferred from: code review of story-1-5 (2026-05-14)
+
+- **Empty/malformed payload tests** — `b""`, `b"null"`, `b"{}"`, invalid UTF-8: current pydantic-core behavior is correct but unpinned; a future pydantic upgrade could change error types undetected. (`tests/test_decoders_pydantic.py`)
+- **`PLR2004` per-file-ignores** — `# noqa: PLR2004` repeated 4× in this test file; idiomatic fix is `tool.ruff.lint.per-file-ignores` for `tests/*`. Project-wide lint-config tidy. (`tests/test_decoders_pydantic.py:48,57,68,82`)
+- **CHANGELOG bullet tone** — leaks `_get_adapter` / "zero adapter-construction cost" implementation detail into a user-facing log; AC14 has no wording constraint. Pre-v1 tone pass. (`CHANGELOG.md:19`)
+- **`@runtime_checkable` isinstance cost in Story 1.7** — `_ProtocolMeta.__instancecheck__` is ~µs-scale; matters only if `AsyncClient(decoder=...)` validation runs per-request rather than per-construction. Defer to Story 1.7 design.
+
 ## Deferred from: code review of story-1-4 (2026-05-14)
 
 - **Unbounded error body size** — `StatusError.body` holds the full `resp.content` with no cap; large 5xx pages stay pinned in memory through exception lifetimes (Sentry payloads, logs, retained tracebacks). Revisit with retry/observability middleware. (`src/httpware/transports/httpx2.py:117-124`)

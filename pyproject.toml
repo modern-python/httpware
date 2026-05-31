@@ -92,10 +92,13 @@ isort.lines-after-imports = 2
 isort.no-lines-before = ["standard-library", "local-folder"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/httpware --cov-report term-missing"
+addopts = "--cov=src/httpware --cov-report term-missing -m 'not perf'"
 asyncio_mode = "auto"
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "perf: assertive performance tests (skipped by default; run with `pytest -m perf`)",
+]
 
 [tool.coverage]
 run.concurrency = ["thread"]
