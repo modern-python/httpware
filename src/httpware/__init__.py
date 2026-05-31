@@ -27,6 +27,7 @@ from httpware.request import Request
 from httpware.response import Response, StreamResponse
 from httpware.transports import Transport
 from httpware.transports.httpx2 import Httpx2Transport
+from httpware.transports.recorded import RecordedTransport
 
 
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "NotFoundError",
     "PydanticDecoder",
     "RateLimitedError",
+    "RecordedTransport",
     "Request",
     "Response",
     "ResponseDecoder",

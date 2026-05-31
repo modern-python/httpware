@@ -2,29 +2,12 @@
 
 # ruff: noqa: SLF001
 
-from contextlib import AbstractAsyncContextManager
-
-from httpware import AsyncClient, Limits, Timeout
+from httpware import AsyncClient, Limits, RecordedTransport, Timeout
 from httpware.decoders.pydantic import PydanticDecoder
 from httpware.middleware import Middleware
 from httpware.request import Request
-from httpware.response import Response, StreamResponse
+from httpware.response import Response
 from httpware.transports.httpx2 import Httpx2Transport
-
-
-class _FakeTransport:
-    """Minimal Transport for construction tests; never actually called."""
-
-    async def __call__(self, request: Request) -> Response:  # pragma: no cover - not used
-        raise NotImplementedError
-
-    def stream(  # pragma: no cover - not used
-        self, request: Request
-    ) -> AbstractAsyncContextManager[StreamResponse]:
-        raise NotImplementedError
-
-    async def aclose(self) -> None:  # pragma: no cover - not used
-        return None
 
 
 def test_init_defaults_provide_transport_and_decoder() -> None:
@@ -35,7 +18,7 @@ def test_init_defaults_provide_transport_and_decoder() -> None:
 
 
 def test_init_accepts_explicit_transport() -> None:
-    transport = _FakeTransport()
+    transport = RecordedTransport()
     client = AsyncClient(transport=transport)
     assert client._transport is transport
 

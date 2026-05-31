@@ -8,6 +8,7 @@ from typing import get_type_hints
 import pytest
 
 import httpware
+from httpware import RecordedTransport
 from httpware._internal.chain import compose
 from httpware.middleware import Middleware, Next, after_response, before_request, on_error
 from httpware.request import Request
@@ -39,25 +40,16 @@ def test_next_annotation_on_signal_middleware() -> None:
     assert hints["next"] == Next
 
 
-class _OkTransport:
-    """Minimal Transport: returns a fixed Response, no streaming, no aclose work."""
-
-    async def __call__(self, request: Request) -> Response:
-        return Response(
+def _ok_transport() -> RecordedTransport:
+    return RecordedTransport(
+        default=Response(
             status=200,
             headers={"x-from": "transport"},
             content=b"transport",
-            url=request.url,
+            url="/",
             elapsed=0.0,
         )
-
-    def stream(  # pragma: no cover - not exercised in 2-1
-        self, request: Request
-    ) -> AbstractAsyncContextManager[StreamResponse]:
-        raise NotImplementedError
-
-    async def aclose(self) -> None:  # pragma: no cover - not exercised in 2-1
-        return None
+    )
 
 
 def _make_request(method: str = "GET", url: str = "https://example.test/") -> Request:
@@ -66,7 +58,7 @@ def _make_request(method: str = "GET", url: str = "https://example.test/") -> Re
 
 async def test_empty_list_composes_to_transport_call() -> None:
     """compose([], transport) yields a callable that behaves like transport(req)."""
-    transport = _OkTransport()
+    transport = _ok_transport()
     dispatch = compose([], transport)
 
     request = _make_request()
@@ -86,7 +78,7 @@ async def test_single_middleware_wraps_transport() -> None:
             seen.append(request)
             return await next(request)
 
-    transport = _OkTransport()
+    transport = _ok_transport()
     request = _make_request()
 
     response = await compose([Tap()], transport)(request)
@@ -109,7 +101,7 @@ async def test_chain_runs_outer_to_inner() -> None:
 
         return Labeled()
 
-    dispatch = compose([labeled("A"), labeled("B"), labeled("C")], _OkTransport())
+    dispatch = compose([labeled("A"), labeled("B"), labeled("C")], _ok_transport())
     await dispatch(_make_request())
 
     assert log == [
@@ -136,7 +128,7 @@ async def test_middleware_can_transform_request_before_forwarding() -> None:
             seen.append(request)
             return await next(request)
 
-    await compose([Stamp(), Inspect()], _OkTransport())(_make_request())
+    await compose([Stamp(), Inspect()], _ok_transport())(_make_request())
 
     assert seen[0].headers["x-trace"] == "abc123"
 
@@ -155,7 +147,7 @@ async def test_middleware_can_transform_response_before_returning() -> None:
                 elapsed=response.elapsed,
             )
 
-    response = await compose([AddHeader()], _OkTransport())(_make_request())
+    response = await compose([AddHeader()], _ok_transport())(_make_request())
 
     assert response.headers["x-trace"] == "abc123"
     assert response.headers["x-from"] == "transport"  # original still present
@@ -165,11 +157,23 @@ async def test_short_circuit_returns_synthesized_response() -> None:
     """A middleware that does NOT call next returns a synthesized Response; transport never runs."""
     transport_calls = 0
 
-    class CountingTransport(_OkTransport):
-        async def __call__(self, request: Request) -> Response:
+    class CountingTransport:
+        async def __call__(self, request: Request) -> Response:  # noqa: ARG002
             nonlocal transport_calls
             transport_calls += 1
-            return await super().__call__(request)
+            return Response(
+                status=200,
+                headers={"x-from": "transport"},
+                content=b"transport",
+                url="/",
+                elapsed=0.0,
+            )
+
+        def stream(self, request: Request) -> AbstractAsyncContextManager[StreamResponse]:  # pragma: no cover
+            raise NotImplementedError
+
+        async def aclose(self) -> None:  # pragma: no cover
+            return None
 
     class ShortCircuit:
         async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
@@ -205,7 +209,7 @@ async def test_exception_in_middleware_propagates() -> None:
             raise CustomError(msg)
 
     with pytest.raises(CustomError, match="boom"):
-        await compose([Boom()], _OkTransport())(_make_request())
+        await compose([Boom()], _ok_transport())(_make_request())
 
 
 async def test_exception_in_transport_propagates_through_chain() -> None:
@@ -244,7 +248,7 @@ async def test_cancelled_error_propagates_through_chain() -> None:
             return await next(request)
 
     with pytest.raises(asyncio.CancelledError):
-        await compose([Passthrough(), Cancel()], _OkTransport())(_make_request())
+        await compose([Passthrough(), Cancel()], _ok_transport())(_make_request())
 
 
 async def test_compose_returned_callable_is_reusable() -> None:
@@ -257,7 +261,7 @@ async def test_compose_returned_callable_is_reusable() -> None:
             count += 1
             return await next(request)
 
-    dispatch = compose([Counter()], _OkTransport())
+    dispatch = compose([Counter()], _ok_transport())
 
     for _ in range(3):
         response = await dispatch(_make_request())
@@ -280,7 +284,7 @@ async def test_before_request_transforms_request() -> None:
             seen.append(request)
             return await next(request)
 
-    await compose([stamp, Inspect()], _OkTransport())(_make_request())
+    await compose([stamp, Inspect()], _ok_transport())(_make_request())
 
     assert seen[0].headers["x-trace"] == "abc123"
 
@@ -298,7 +302,7 @@ async def test_after_response_transforms_response() -> None:
             elapsed=response.elapsed,
         )
 
-    response = await compose([add_header], _OkTransport())(_make_request())
+    response = await compose([add_header], _ok_transport())(_make_request())
 
     assert response.headers["x-trace"] == "abc123"
     assert response.headers["x-from"] == "transport"  # original still present
@@ -310,24 +314,6 @@ def test_middleware_and_next_are_reexported_at_package_root() -> None:
     assert httpware.Next is Next
     assert "Middleware" in httpware.__all__
     assert "Next" in httpware.__all__
-
-
-class _FailingTransport:
-    """Transport whose __call__ raises a chosen exception."""
-
-    def __init__(self, exc: BaseException) -> None:
-        self._exc = exc
-
-    async def __call__(self, request: Request) -> Response:  # noqa: ARG002
-        raise self._exc
-
-    def stream(  # pragma: no cover - not exercised in 2-2
-        self, request: Request
-    ) -> AbstractAsyncContextManager[StreamResponse]:
-        raise NotImplementedError
-
-    async def aclose(self) -> None:  # pragma: no cover - not exercised in 2-2
-        return None
 
 
 async def test_on_error_returns_response_swallows_exception() -> None:
@@ -343,7 +329,7 @@ async def test_on_error_returns_response_swallows_exception() -> None:
             elapsed=0.0,
         )
 
-    transport = _FailingTransport(RuntimeError("boom"))
+    transport = RecordedTransport(default=RuntimeError("boom"))
     response = await compose([recover], transport)(_make_request())
 
     assert response.status == 503  # noqa: PLR2004
@@ -358,7 +344,7 @@ async def test_on_error_returns_none_reraises() -> None:
     async def pass_through(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
         return None
 
-    transport = _FailingTransport(RuntimeError("boom"))
+    transport = RecordedTransport(default=RuntimeError("boom"))
 
     with pytest.raises(RuntimeError, match="boom"):
         await compose([pass_through], transport)(_make_request())
@@ -378,7 +364,7 @@ async def test_on_error_does_not_catch_cancelled_error() -> None:
             raise asyncio.CancelledError
 
     with pytest.raises(asyncio.CancelledError):
-        await compose([should_not_run, Cancel()], _OkTransport())(_make_request())
+        await compose([should_not_run, Cancel()], _ok_transport())(_make_request())
 
     assert invocations == []
 
@@ -394,7 +380,7 @@ async def test_on_error_handler_receives_correct_exception_instance() -> None:
         return None
 
     with pytest.raises(RuntimeError):
-        await compose([capture], _FailingTransport(raised))(_make_request())
+        await compose([capture], RecordedTransport(default=raised))(_make_request())
 
     assert seen == [raised]
     assert seen[0] is raised
@@ -444,7 +430,7 @@ async def test_decorated_middlewares_compose_in_chain() -> None:
             seen_headers.append(request.headers.get("x-stamp", ""))
             return await next(request)
 
-    response = await compose([stamp, Inspect(), tag], _OkTransport())(_make_request())
+    response = await compose([stamp, Inspect(), tag], _ok_transport())(_make_request())
 
     assert seen_headers == ["1"]  # stamp ran before Inspect
     assert response.headers["x-tag"] == "1"  # tag ran after the chain

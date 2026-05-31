@@ -1,38 +1,26 @@
 """Unit tests for AsyncClient response_model integration with ResponseDecoder."""
 
-from contextlib import AbstractAsyncContextManager
 from typing import TypeVar
 
 from pydantic import BaseModel
 
-from httpware import AsyncClient
-from httpware.request import Request
-from httpware.response import Response, StreamResponse
+from httpware import AsyncClient, RecordedTransport
+from httpware.response import Response
 
 
 T = TypeVar("T")
 
 
-class _RecordingTransport:
-    def __init__(self, content: bytes) -> None:
-        self._content = content
-
-    async def __call__(self, request: Request) -> Response:
-        return Response(
+def _transport(content: bytes) -> RecordedTransport:
+    return RecordedTransport(
+        default=Response(
             status=200,
             headers={},
-            content=self._content,
-            url=request.url,
+            content=content,
+            url="/",
             elapsed=0.0,
         )
-
-    def stream(  # pragma: no cover
-        self, request: Request
-    ) -> AbstractAsyncContextManager[StreamResponse]:
-        raise NotImplementedError
-
-    async def aclose(self) -> None:  # pragma: no cover
-        return None
+    )
 
 
 class _Item(BaseModel):
@@ -41,7 +29,7 @@ class _Item(BaseModel):
 
 
 async def test_response_model_none_returns_raw_response() -> None:
-    transport = _RecordingTransport(content=b'{"name":"x","qty":1}')
+    transport = _transport(content=b'{"name":"x","qty":1}')
     client = AsyncClient(transport=transport)
     result = await client.get("/foo")
     assert isinstance(result, Response)
@@ -49,7 +37,7 @@ async def test_response_model_none_returns_raw_response() -> None:
 
 
 async def test_response_model_invokes_decoder() -> None:
-    transport = _RecordingTransport(content=b'{"name":"x","qty":1}')
+    transport = _transport(content=b'{"name":"x","qty":1}')
     client = AsyncClient(transport=transport)
     result = await client.get("/foo", response_model=_Item)
     assert isinstance(result, _Item)
@@ -57,7 +45,7 @@ async def test_response_model_invokes_decoder() -> None:
 
 
 async def test_response_model_uses_supplied_decoder() -> None:
-    transport = _RecordingTransport(content=b'{"name":"x","qty":1}')
+    transport = _transport(content=b'{"name":"x","qty":1}')
     seen: list[tuple[bytes, type]] = []
 
     class _SpyDecoder:
