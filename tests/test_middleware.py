@@ -8,7 +8,7 @@ from typing import get_type_hints
 import pytest
 
 from httpware._internal.chain import compose
-from httpware.middleware import Middleware, Next, before_request
+from httpware.middleware import Middleware, Next, after_response, before_request
 from httpware.request import Request
 from httpware.response import Response, StreamResponse
 
@@ -282,6 +282,25 @@ async def test_before_request_transforms_request() -> None:
     await compose([stamp, Inspect()], _OkTransport())(_make_request())
 
     assert seen[0].headers["x-trace"] == "abc123"
+
+
+async def test_after_response_transforms_response() -> None:
+    """@after_response wraps an async response transform; caller sees the modification."""
+
+    @after_response
+    async def add_header(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return Response(
+            status=response.status,
+            headers={**response.headers, "x-trace": "abc123"},
+            content=response.content,
+            url=response.url,
+            elapsed=response.elapsed,
+        )
+
+    response = await compose([add_header], _OkTransport())(_make_request())
+
+    assert response.headers["x-trace"] == "abc123"
+    assert response.headers["x-from"] == "transport"  # original still present
 
 
 def test_middleware_and_next_are_reexported_at_package_root() -> None:

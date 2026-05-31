@@ -43,4 +43,22 @@ def before_request(f: Callable[[Request], Awaitable[Request]]) -> Middleware:
     return _BeforeRequestMiddleware()
 
 
-__all__ = ["Middleware", "Next", "before_request"]
+def after_response(f: Callable[[Request, Response], Awaitable[Response]]) -> Middleware:
+    """Wrap an async response transform into a Middleware.
+
+    The decorated function receives the original Request and the Response
+    returned by the chain, and returns a (possibly modified) Response.
+    """
+
+    class _AfterResponseMiddleware:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            response = await next(request)
+            return await f(request, response)
+
+        def __repr__(self) -> str:
+            return f"<after_response({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+
+    return _AfterResponseMiddleware()
+
+
+__all__ = ["Middleware", "Next", "after_response", "before_request"]
