@@ -2,7 +2,6 @@
 
 import msgspec
 import pytest
-from pydantic import BaseModel
 
 from httpware._internal import import_checker
 from httpware.decoders import ResponseDecoder
@@ -14,11 +13,6 @@ class _Item(msgspec.Struct):
     qty: int
 
 
-class _ItemModel(BaseModel):
-    name: str
-    qty: int
-
-
 def test_decoder_satisfies_response_decoder_protocol() -> None:
     assert isinstance(MsgspecDecoder(), ResponseDecoder)
 
@@ -26,11 +20,6 @@ def test_decoder_satisfies_response_decoder_protocol() -> None:
 def test_decode_into_msgspec_struct() -> None:
     result = MsgspecDecoder().decode(b'{"name":"x","qty":1}', _Item)
     assert result == _Item(name="x", qty=1)
-
-
-def test_decode_into_pydantic_model() -> None:
-    result = MsgspecDecoder().decode(b'{"name":"y","qty":2}', _ItemModel)
-    assert result == _ItemModel(name="y", qty=2)
 
 
 def test_decode_into_builtin_type() -> None:

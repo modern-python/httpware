@@ -31,11 +31,5 @@ class MsgspecDecoder:
             raise ImportError(MISSING_DEPENDENCY_MESSAGE)
 
     def decode(self, content: bytes, model: type[T]) -> T:
-        """Validate `content` as JSON against `model` in a single parse pass.
-
-        Falls back to `model.model_validate_json` for Pydantic BaseModel types,
-        since msgspec cannot natively decode into Pydantic models.
-        """
-        if hasattr(model, "model_validate_json"):
-            return model.model_validate_json(content)  # ty: ignore[call-non-callable]
-        return msgspec.json.decode(content, type=model)  # guarded by import_checker above
+        """Validate `content` as JSON against `model` in a single parse pass."""
+        return msgspec.json.decode(content, type=model)
