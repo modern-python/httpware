@@ -2,6 +2,7 @@
 
 import pytest
 
+import httpware
 from httpware.request import Request
 from httpware.response import Response
 from httpware.transports import Transport
@@ -159,3 +160,9 @@ async def test_routes_fire_indefinitely_on_repeat_calls() -> None:
     assert r1 is canned
     assert r2 is canned
     assert r3 is canned
+
+
+def test_recorded_transport_reexported_at_package_root() -> None:
+    """`from httpware import RecordedTransport` works in addition to the subpackage path."""
+    assert httpware.RecordedTransport is RecordedTransport
+    assert "RecordedTransport" in httpware.__all__
