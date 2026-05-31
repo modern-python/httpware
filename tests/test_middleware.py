@@ -322,7 +322,9 @@ class _FailingTransport:
     async def __call__(self, request: Request) -> Response:  # noqa: ARG002
         raise self._exc
 
-    def stream(self, request: Request) -> None:  # pragma: no cover - not exercised in 2-2
+    def stream(  # pragma: no cover - not exercised in 2-2
+        self, request: Request
+    ) -> AbstractAsyncContextManager[StreamResponse]:
         raise NotImplementedError
 
     async def aclose(self) -> None:  # pragma: no cover - not exercised in 2-2
