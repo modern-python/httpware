@@ -90,6 +90,7 @@ ignore = [
 ]
 isort.lines-after-imports = 2
 isort.no-lines-before = ["standard-library", "local-folder"]
+pylint.max-args = 10  # HTTP-method APIs are kwarg-rich (headers, params, cookies, timeout, json, content, response_model, …); default 5 is too strict.
 
 [tool.pytest.ini_options]
 addopts = "--cov=src/httpware --cov-report term-missing -m 'not perf'"
