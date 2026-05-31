@@ -97,3 +97,24 @@ def test_with_headers_empty_mapping_returns_distinct_copy() -> None:
     new = r.with_headers({})
     assert new == r
     assert new is not r
+
+
+def test_with_cookie_adds_single_cookie() -> None:
+    r = Request(method="GET", url="/")
+    new = r.with_cookie("session", "abc")
+    assert new.cookies == {"session": "abc"}
+    assert r.cookies == {}
+
+
+def test_with_cookie_replaces_existing_cookie() -> None:
+    r = Request(method="GET", url="/", cookies={"session": "old"})
+    new = r.with_cookie("session", "new")
+    assert new.cookies == {"session": "new"}
+    assert r.cookies == {"session": "old"}
+
+
+def test_with_cookies_merges_new_cookies() -> None:
+    r = Request(method="GET", url="/", cookies={"keep": "1", "replace": "old"})
+    new = r.with_cookies({"replace": "new", "add": "2"})
+    assert new.cookies == {"keep": "1", "replace": "new", "add": "2"}
+    assert r.cookies == {"keep": "1", "replace": "old"}

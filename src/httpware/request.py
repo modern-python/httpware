@@ -37,3 +37,11 @@ class Request:
     def with_headers(self, headers: Mapping[str, str]) -> Self:
         """Return a copy with the given headers merged in (incoming keys override existing)."""
         return dataclasses.replace(self, headers={**self.headers, **headers})
+
+    def with_cookie(self, name: str, value: str) -> Self:
+        """Return a copy with the given cookie added or replaced."""
+        return dataclasses.replace(self, cookies={**self.cookies, name: value})
+
+    def with_cookies(self, cookies: Mapping[str, str]) -> Self:
+        """Return a copy with the given cookies merged in (incoming keys override existing)."""
+        return dataclasses.replace(self, cookies={**self.cookies, **cookies})
