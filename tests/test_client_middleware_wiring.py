@@ -1,34 +1,21 @@
 """Unit tests for AsyncClient middleware wiring through compose() and with_options."""
 
-from contextlib import AbstractAsyncContextManager
-
-from httpware import AsyncClient
+from httpware import AsyncClient, RecordedTransport
 from httpware.middleware import Middleware, Next
 from httpware.request import Request
-from httpware.response import Response, StreamResponse
+from httpware.response import Response
 
 
-class _RecordingTransport:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def __call__(self, request: Request) -> Response:
-        self.calls += 1
-        return Response(
+def _make_transport() -> RecordedTransport:
+    return RecordedTransport(
+        default=Response(
             status=200,
             headers={},
             content=b"",
-            url=request.url,
+            url="/",
             elapsed=0.0,
         )
-
-    def stream(  # pragma: no cover
-        self, request: Request
-    ) -> AbstractAsyncContextManager[StreamResponse]:
-        raise NotImplementedError
-
-    async def aclose(self) -> None:  # pragma: no cover
-        return None
+    )
 
 
 def _make_recording_middleware(label: str, log: list[str]) -> Middleware:
@@ -41,7 +28,7 @@ def _make_recording_middleware(label: str, log: list[str]) -> Middleware:
 
 
 async def test_middleware_runs_per_request() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
     log: list[str] = []
     client = AsyncClient(
         transport=transport,
@@ -49,11 +36,11 @@ async def test_middleware_runs_per_request() -> None:
     )
     await client.get("/foo")
     assert log == ["A"]
-    assert transport.calls == 1
+    assert len(transport.requests) == 1
 
 
 async def test_with_options_recomposes_middleware() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
     parent_log: list[str] = []
     view_log: list[str] = []
     client = AsyncClient(
@@ -69,7 +56,7 @@ async def test_with_options_recomposes_middleware() -> None:
 
 
 async def test_with_options_inherits_middleware_when_unset() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
     log: list[str] = []
     client = AsyncClient(
         transport=transport,
@@ -81,7 +68,7 @@ async def test_with_options_inherits_middleware_when_unset() -> None:
 
 
 async def test_view_shares_transport_with_parent() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
     client = AsyncClient(transport=transport)
     view = client.with_options(timeout=10)
     assert view._transport is client._transport  # noqa: SLF001
@@ -94,28 +81,28 @@ async def test_view_does_not_own_transport() -> None:
 
 
 async def test_with_options_overrides_base_url() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
     client = AsyncClient(transport=transport, base_url="https://api.test/v1")
     view = client.with_options(base_url="https://other.test/v2")
     assert view._config.base_url == "https://other.test/v2"  # noqa: SLF001
 
 
 async def test_with_options_overrides_default_headers() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
     client = AsyncClient(transport=transport, default_headers={"x-old": "1"})
     view = client.with_options(default_headers={"x-new": "2"})
     assert view._config.default_headers == {"x-new": "2"}  # noqa: SLF001
 
 
 async def test_with_options_overrides_default_query() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
     client = AsyncClient(transport=transport, default_query={"old": "1"})
     view = client.with_options(default_query={"new": "2"})
     assert view._config.default_query == {"new": "2"}  # noqa: SLF001
 
 
 async def test_with_options_overrides_decoder() -> None:
-    transport = _RecordingTransport()
+    transport = _make_transport()
 
     class _NoopDecoder:
         def decode(self, content: bytes, model: type) -> object:  # pragma: no cover  # noqa: ARG002

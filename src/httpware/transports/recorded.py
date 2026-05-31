@@ -35,9 +35,7 @@ class RecordedTransport:
         default: Response | BaseException | None = None,
     ) -> None:
         self._routes: dict[tuple[str, str], Response | BaseException] = (
-            {(m.upper(), u): v for (m, u), v in routes.items()}
-            if routes is not None
-            else {}
+            {(m.upper(), u): v for (m, u), v in routes.items()} if routes is not None else {}
         )
         self._default = default
         self.requests: list[Request] = []
