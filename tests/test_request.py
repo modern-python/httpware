@@ -70,3 +70,30 @@ def test_with_query_replaces_params() -> None:
     assert new.params == {"b": "2"}
     assert r.params == {"a": "1"}
     assert new is not r
+
+
+def test_with_headers_merges_new_headers() -> None:
+    r = Request(method="GET", url="/")
+    new = r.with_headers({"X-Trace": "abc", "X-Other": "1"})
+    assert new.headers == {"X-Trace": "abc", "X-Other": "1"}
+    assert r.headers == {}
+
+
+def test_with_headers_overrides_existing_key() -> None:
+    r = Request(method="GET", url="/", headers={"X-Trace": "old"})
+    new = r.with_headers({"X-Trace": "new"})
+    assert new.headers == {"X-Trace": "new"}
+    assert r.headers == {"X-Trace": "old"}
+
+
+def test_with_headers_preserves_other_keys() -> None:
+    r = Request(method="GET", url="/", headers={"Keep": "1", "Replace": "old"})
+    new = r.with_headers({"Replace": "new", "Add": "2"})
+    assert new.headers == {"Keep": "1", "Replace": "new", "Add": "2"}
+
+
+def test_with_headers_empty_mapping_returns_distinct_copy() -> None:
+    r = Request(method="GET", url="/", headers={"A": "1"})
+    new = r.with_headers({})
+    assert new == r
+    assert new is not r

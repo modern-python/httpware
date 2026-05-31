@@ -33,3 +33,7 @@ class Request:
     def with_query(self, params: Mapping[str, str]) -> Self:
         """Return a copy with the given query params replacing the existing ones."""
         return dataclasses.replace(self, params=params)
+
+    def with_headers(self, headers: Mapping[str, str]) -> Self:
+        """Return a copy with the given headers merged in (incoming keys override existing)."""
+        return dataclasses.replace(self, headers={**self.headers, **headers})
