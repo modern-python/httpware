@@ -142,7 +142,7 @@ Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/
 ### Epic 2 — Compose request-handling logic via middleware
 
 - **2-1** `Middleware` protocol, `Next` type, chain composition.
-- **2-2** Phase shortcut decorators (`@on_request`, `@on_response`, `@on_error`).
+- **2-2** Phase shortcut decorators (`@before_request`, `@after_response`, `@on_error`).
 - **2-3** `Request` immutability helpers (`with_headers`, `with_cookie`, `with_extension`, etc.).
 - **2-4** Auth coercion as middleware.
 - **2-5** Wire middleware into `AsyncClient`.

@@ -459,3 +459,15 @@ def test_repr_shows_original_function_name() -> None:
     text = repr(my_stamp)
     assert "before_request" in text
     assert "my_stamp" in text
+
+
+def test_decorators_reexported_at_package_root() -> None:
+    """`from httpware import before_request, after_response, on_error` works."""
+    import httpware  # noqa: PLC0415
+
+    assert httpware.before_request is before_request
+    assert httpware.after_response is after_response
+    assert httpware.on_error is on_error
+    assert "before_request" in httpware.__all__
+    assert "after_response" in httpware.__all__
+    assert "on_error" in httpware.__all__
