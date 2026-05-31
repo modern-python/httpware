@@ -1,0 +1,93 @@
+# generated: 2026-05-14
+# last_updated: 2026-05-14  # story 1-5 → done (code review applied)
+# project: httpware
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: docs/stories
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-05-14
+last_updated: 2026-05-14  # story 1-5 → done (code review applied)
+project: httpware
+project_key: NOKEY
+tracking_system: file-system
+story_location: docs/stories
+
+development_status:
+  epic-1: in-progress
+  1-1-project-scaffold-and-tooling: done
+  1-2-core-data-types: done
+  1-3-exception-hierarchy-with-plain-fields: done
+  1-4-transport-protocol-and-httpx2transport-adapter: done
+  1-5-responsedecoder-protocol-and-pydantic-adapter: done
+  1-6-msgspec-decoder-via-extras: backlog
+  1-7-asyncclient-with-http-methods-response-model-with-options-lifecycle: backlog
+  1-8-recordedtransport-for-testing: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-middleware-protocol-next-type-and-chain-composition: backlog
+  2-2-phase-shortcut-decorators: backlog
+  2-3-request-immutability-helpers: backlog
+  2-4-auth-coercion-as-middleware: backlog
+  2-5-wire-middleware-into-asyncclient: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-timeout-middleware-per-attempt: backlog
+  3-2-retry-middleware: backlog
+  3-3-retrybudget-data-structure: backlog
+  3-4-retrybudget-middleware-integration: backlog
+  3-5-bulkhead-middleware: backlog
+  3-6-document-the-extension-slot: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-streamresponse-type: backlog
+  4-2-transport-stream-implementation-in-httpx2transport: backlog
+  4-3-asyncclient-stream-context-manager: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-layer-1-observability-middleware-lifecycle-hooks: backlog
+  5-2-wire-emission-into-resilience-middlewares: backlog
+  5-3-redactor-class-and-integration: backlog
+  5-4-opentelemetry-middleware: backlog
+  5-5-logging-policy-enforcement: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-migration-guide-from-base-client: backlog
+  6-2-documentation-site-mkdocs: backlog
+  6-3-public-benchmark-suite: backlog
+  6-4-ci-enforcement-gates: backlog
+  6-5-release-flow-with-trusted-publishers-and-sigstore: backlog
+  epic-6-retrospective: optional
