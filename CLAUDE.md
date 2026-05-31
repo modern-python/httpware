@@ -6,15 +6,14 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 `httpware` is a Python async HTTP client framework for building resilient service clients. It supersedes `community-of-python/base-client` and ships under the `modern-python` org. The framework owns the abstraction layer above the underlying HTTP client (`httpx2` by default); consumers never import the transport.
 
-**Source-of-truth planning artifacts** live in this repo under `docs/`:
+**Where to find what:**
 
-- `docs/prd.md` — Product Requirements Document (47 FRs, 25 NFRs)
-- `docs/architecture.md` — 12 architectural decisions, 5 protocol seams, full module layout
-- `docs/epics.md` — 6 epics, 32 stories with Given/When/Then acceptance criteria
-- `docs/product-brief-httpware.md` — executive brief (history of how the project was scoped)
-- `docs/product-brief-httpware-distillate.md` — PRD-ready detail pack with verified facts, API patterns, performance specifics, rejected alternatives, open questions
+- [`docs/engineering.md`](docs/engineering.md) — the distilled design reference: invariants and *why*, the five protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
+- [`docs/deferred-work.md`](docs/deferred-work.md) — review-surfaced items that are real but not actionable now.
+- [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`docs/superpowers/plans/`](docs/superpowers/plans/) — per-feature design specs and implementation plans (active work).
+- [`docs/archive/`](docs/archive/) — historical bmad-era planning bundle (PRD, architecture, epics, product briefs, per-story specs for 1-1 through 1-5). Consult only for original rationale or specific FR/NFR citations.
 
-Stories under active dev live in `docs/stories/`. (Initial planning artifacts were authored in the predecessor repo `community-of-python/base-client` and copied here at the end of Story 1.1; both copies are kept in sync until base-client is archived.)
+**Per-feature workflow:** brainstorming → spec in `docs/superpowers/specs/` → writing-plans → plan in `docs/superpowers/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
 
 ## Commands
 
@@ -100,5 +99,5 @@ Five documented internal boundaries. AI agents must respect them — never cross
 
 ## When in doubt
 
-- Check the architecture document (`base-client/docs/architecture.md`) before adding a new module or extension point.
+- Check [`docs/engineering.md`](docs/engineering.md) before adding a new module or extension point; `docs/archive/architecture.md` has the deeper historical rationale if needed.
 - Surface ambiguity as a documentation gap rather than improvising.
