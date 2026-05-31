@@ -5,6 +5,7 @@ import json as _json
 import typing
 from collections.abc import Mapping, Sequence
 
+from httpware._internal.auth import AuthValue, _normalize_auth
 from httpware._internal.chain import compose
 from httpware.config import ClientConfig, Limits, Timeout
 from httpware.decoders import ResponseDecoder
@@ -52,6 +53,8 @@ class AsyncClient:
     _transport: Transport
     _dispatch: Next
     _owns_transport: bool
+    _user_middleware: tuple[Middleware, ...]
+    _auth: AuthValue
 
     def __init__(
         self,
@@ -64,12 +67,19 @@ class AsyncClient:
         transport: Transport | None = None,
         decoder: ResponseDecoder | None = None,
         middleware: Sequence[Middleware] | None = None,
+        auth: AuthValue = None,
     ) -> None:
         normalized_timeout = _normalize_timeout(timeout)
         resolved_limits = limits or Limits()
         resolved_transport: Transport = transport or Httpx2Transport(limits=resolved_limits, timeout=normalized_timeout)
         resolved_decoder = decoder or PydanticDecoder()
-        resolved_middleware = tuple(middleware) if middleware is not None else ()
+        resolved_user_middleware: tuple[Middleware, ...] = tuple(middleware) if middleware is not None else ()
+        resolved_auth_middleware = _normalize_auth(auth)
+        composed_middleware: tuple[Middleware, ...] = (
+            resolved_user_middleware
+            if resolved_auth_middleware is None
+            else (*resolved_user_middleware, resolved_auth_middleware)
+        )
 
         self._config = ClientConfig(
             base_url=base_url,
@@ -78,11 +88,13 @@ class AsyncClient:
             timeout=normalized_timeout,
             limits=resolved_limits,
             decoder=resolved_decoder,
-            middleware=resolved_middleware,
+            middleware=composed_middleware,
         )
         self._transport = resolved_transport
-        self._dispatch = compose(resolved_middleware, resolved_transport)
+        self._dispatch = compose(composed_middleware, resolved_transport)
         self._owns_transport = True
+        self._user_middleware = resolved_user_middleware
+        self._auth = auth
 
     @classmethod
     def from_url(cls, base_url: str, **kwargs: object) -> "AsyncClient":
@@ -582,6 +594,7 @@ class AsyncClient:
         timeout: Timeout | float | None = _UNSET,
         decoder: ResponseDecoder | None = _UNSET,
         middleware: Sequence[Middleware] | None = _UNSET,
+        auth: AuthValue | object = _UNSET,
     ) -> "AsyncClient":
         """Return a new AsyncClient sharing the same transport with overridden config.
 
@@ -603,18 +616,44 @@ class AsyncClient:
             changes["timeout"] = _normalize_timeout(timeout)
         if decoder is not _UNSET:
             changes["decoder"] = decoder or PydanticDecoder()
+
+        new_user_middleware = self._user_middleware
         if middleware is not _UNSET:
-            changes["middleware"] = tuple(middleware) if middleware is not None else ()
+            new_user_middleware = tuple(middleware) if middleware is not None else ()
+
+        new_auth: AuthValue = self._auth
+        if auth is not _UNSET:
+            new_auth = auth  # ty: ignore[invalid-assignment]
+
+        new_auth_middleware = _normalize_auth(new_auth)
+        new_composed: tuple[Middleware, ...] = (
+            new_user_middleware if new_auth_middleware is None else (*new_user_middleware, new_auth_middleware)
+        )
+        changes["middleware"] = new_composed
 
         new_config = dataclasses.replace(self._config, **changes)
-        return AsyncClient._from_view(new_config, self._transport)
+        return AsyncClient._from_view(
+            new_config,
+            self._transport,
+            user_middleware=new_user_middleware,
+            auth=new_auth,
+        )
 
     @classmethod
-    def _from_view(cls, config: ClientConfig, transport: Transport) -> "AsyncClient":
+    def _from_view(
+        cls,
+        config: ClientConfig,
+        transport: Transport,
+        *,
+        user_middleware: tuple[Middleware, ...],
+        auth: AuthValue,
+    ) -> "AsyncClient":
         """Construct a view sharing an existing transport. Bypasses __init__."""
         client = cls.__new__(cls)
         client._config = config  # noqa: SLF001
         client._transport = transport  # noqa: SLF001
         client._dispatch = compose(config.middleware, transport)  # noqa: SLF001
         client._owns_transport = False  # noqa: SLF001
+        client._user_middleware = user_middleware  # noqa: SLF001
+        client._auth = auth  # noqa: SLF001
         return client

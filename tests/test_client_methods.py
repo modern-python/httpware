@@ -152,3 +152,40 @@ async def test_per_call_timeout_propagates_to_request_extensions() -> None:
     await client.get("/foo", timeout=2.5)
     assert transport.last_request is not None
     assert "timeout" in transport.last_request.extensions
+
+
+async def test_string_auth_sends_authorization_header() -> None:
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
+    client = AsyncClient(transport=transport, auth="tok")
+
+    await client.get("/foo")
+
+    assert transport.last_request is not None
+    assert transport.last_request.headers["Authorization"] == "Bearer tok"
+
+
+async def test_per_call_authorization_header_wins_over_auth_param() -> None:
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
+    client = AsyncClient(transport=transport, auth="default-tok")
+
+    await client.get("/foo", headers={"Authorization": "Bearer override"})
+
+    assert transport.last_request is not None
+    assert transport.last_request.headers["Authorization"] == "Bearer override"
+
+
+async def test_callable_auth_calls_provider_per_request() -> None:
+    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
+    calls = 0
+
+    def _provider() -> str:
+        nonlocal calls
+        calls += 1
+        return f"tok-{calls}"
+
+    client = AsyncClient(transport=transport, auth=_provider)
+
+    await client.get("/a")
+    await client.get("/b")
+
+    assert calls == 2  # noqa: PLR2004

@@ -76,3 +76,37 @@ def test_construction_does_not_create_httpx2_client() -> None:
     # Httpx2Transport stores `_client` lazily; until first call, _client is None.
     # The attribute is private; we check it via getattr to keep the test resilient.
     assert getattr(client._transport, "_client", "missing") is None
+
+
+def test_init_no_auth_means_no_auth_middleware() -> None:
+    transport = RecordedTransport()
+    client = AsyncClient(transport=transport)
+    assert client._config.middleware == ()
+    assert client._auth is None
+    assert client._user_middleware == ()
+
+
+def test_init_with_string_auth_appends_bearer_middleware() -> None:
+    transport = RecordedTransport()
+    client = AsyncClient(transport=transport, auth="tok")
+    assert len(client._config.middleware) == 1
+    assert isinstance(client._config.middleware[0], Middleware)
+    assert client._auth == "tok"
+    assert client._user_middleware == ()
+
+
+def test_init_with_user_middleware_plus_auth() -> None:
+    class _M:
+        async def __call__(self, request, next) -> Response:  # noqa: A002, ANN001
+            return await next(request)
+
+    m1 = _M()
+    m2 = _M()
+    transport = RecordedTransport()
+    client = AsyncClient(transport=transport, middleware=[m1, m2], auth="tok")
+    _expected_len = 3
+    assert len(client._config.middleware) == _expected_len
+    assert client._config.middleware[0] is m1
+    assert client._config.middleware[1] is m2
+    # The third entry is the auth middleware; identity-test that user_middleware excludes it.
+    assert client._user_middleware == (m1, m2)

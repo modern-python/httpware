@@ -1,5 +1,6 @@
 """httpware — resilience-first async HTTP client framework for Python."""
 
+from httpware._internal.auth import AuthValue
 from httpware.client import AsyncClient
 from httpware.config import ClientConfig, Limits, Timeout
 from httpware.decoders import ResponseDecoder
@@ -33,6 +34,7 @@ from httpware.transports.recorded import RecordedTransport
 __all__ = [
     "STATUS_TO_EXCEPTION",
     "AsyncClient",
+    "AuthValue",
     "BadRequestError",
     "ClientConfig",
     "ClientError",

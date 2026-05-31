@@ -1,0 +1,372 @@
+# Auth coercion (design)
+
+- **Date:** 2026-06-01
+- **Status:** approved, ready for plan
+- **Scope:** Story 2-4 (final unshipped story of Epic 2). Adds an `auth=` parameter to `AsyncClient.__init__` and `with_options` that accepts `str | Callable[[], str | Awaitable[str]] | Middleware | None`. Implements `_normalize_auth` at `src/httpware/_internal/auth.py` and the helper bearer-middleware factories. Out of scope: OAuth flows, refresh tokens, mTLS, signature schemes (HMAC, AWS Sigv4), per-call `auth=` on HTTP methods.
+- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
+
+## Why
+
+Story 1-7 (`AsyncClient`) deliberately deferred the `auth=` parameter. The middleware seam (Story 2-1) and the phase decorators (Story 2-2) shipped without an auth handler. Story 2-4 closes the gap with a coercion function that turns common auth shapes (string bearer, token-provider callable, full Middleware) into a `Middleware` and wires it into `AsyncClient`'s composed chain at the inner-most user-controllable position (right before the transport).
+
+The shape is decided by the archived AC (`docs/archive/epics.md` Story 2.4). This spec ports it forward and resolves the design ambiguities the archive left open: how to disambiguate a zero-arg token-provider callable from a `Middleware` instance (both satisfy `runtime_checkable Middleware` structurally), what to do when the request already carries an `Authorization` header, and whether `with_options(auth=...)` is supported.
+
+## Decisions
+
+| Decision | Choice |
+| --- | --- |
+| Module location | `src/httpware/_internal/auth.py`. Matches `_internal/chain.py` and `_internal/import_checker.py` — cross-module private helper. |
+| `_normalize_auth` signature | `(value: AuthValue) -> Middleware \| None`. Returns `None` ↔ no auth middleware. |
+| `AuthValue` type alias | `str \| Callable[[], str \| Awaitable[str]] \| Middleware \| None`. Public (re-exported as `httpware.AuthValue`) so consumers can type-annotate their config. |
+| Callable-vs-Middleware dispatch | Signature inspection: `len(inspect.signature(value).parameters) == 0` → token provider; `== 2` → `Middleware` passthrough; anything else → `TypeError`. |
+| Header name on the wire | `"Authorization"` (Pascal case, matches HTTP convention). Skip-check is case-insensitive. |
+| Behavior when `Authorization` already present | Skip. Auth middleware leaves the existing header untouched and does NOT call the token provider. User middleware setting `Authorization` upstream wins; per-call `headers={"Authorization": …}` wins. |
+| Position in middleware chain | Appended at the END of the user-supplied middleware list (so it runs LAST before the transport — "second-to-innermost (just outside transport)" per archive AC). User middleware sees the Request without the auth header on the way down; sees the Response on the way up. |
+| `with_options(auth=...)` | Supported. Added to the `with_options` keyword allowlist. View re-composes the chain against the shared transport. |
+| Token caching | None at this layer. Token provider is called per request. Caching is the provider's responsibility. |
+| Bearer middleware implementation | Built via `@before_request` from Story 2-2. Gives a `<before_request(<qualname>)>` repr and reuses the established decorator lifecycle. |
+| Empty token (`auth=""`) | Pass-through. Server rejects; caller sees the upstream error. No client-side validation. |
+| `_normalize_auth` and bearer helpers | Underscore-prefixed; not exported. Only `AuthValue` is public. |
+| `__all__` in `_internal/auth.py` | None. Project convention — only `__init__.py` files get `__all__`. |
+| AsyncClient private state | Two new private attrs: `self._user_middleware: tuple[Middleware, ...]` and `self._auth: AuthValue`. Lets `with_options` recompute composition from the raw user inputs. `ClientConfig.middleware` continues to hold the composed list (what actually runs). |
+
+## File structure
+
+**New files:**
+- `src/httpware/_internal/auth.py` — `AuthValue` alias, `_normalize_auth`, `_bearer`, `_bearer_from_provider`, `_has_authorization`.
+- `tests/test_internal_auth.py` — 10 tests for `_normalize_auth` in isolation.
+
+**Modified files:**
+- `src/httpware/client.py` — add `auth: AuthValue = None` to `__init__`; new private attrs (`_user_middleware`, `_auth`); compose user middleware + auth middleware; add `auth=_UNSET` to `with_options` allowlist with view re-composition.
+- `src/httpware/__init__.py` — re-export `AuthValue` at package root; add to `__all__`.
+- `tests/test_client_construction.py` — 3 tests for the new param.
+- `tests/test_client_methods.py` — 3 tests for end-to-end auth header injection.
+- `tests/test_client_middleware_wiring.py` — 3 tests for composition ordering and `with_options(auth=...)`.
+
+**Files NOT touched:**
+- `pyproject.toml`, `Justfile`, `.github/workflows/`.
+- `src/httpware/middleware/__init__.py` — `@before_request`, `Middleware`, `Next` are reused, not modified.
+- `src/httpware/config.py` — `ClientConfig.middleware` already holds `tuple[Middleware, ...]`; the composed list fits.
+- `src/httpware/transports/*`, `src/httpware/decoders/*`, `src/httpware/errors.py`, `src/httpware/request.py`, `src/httpware/response.py`.
+
+## `src/httpware/_internal/auth.py` content
+
+```python
+"""Normalize the `auth=` value of AsyncClient into a Middleware (or None)."""
+
+import inspect
+from collections.abc import Awaitable, Callable
+from typing import TypeAlias
+
+from httpware.middleware import Middleware, before_request
+from httpware.request import Request
+
+
+AuthValue: TypeAlias = (
+    str
+    | Callable[[], str | Awaitable[str]]
+    | Middleware
+    | None
+)
+
+
+def _normalize_auth(value: AuthValue) -> Middleware | None:
+    """Coerce an `auth=` value into a Middleware.
+
+    - `None` → returns `None` (no auth middleware injected).
+    - `str` → returns a middleware that sets `Authorization: Bearer <str>`
+      on every request (skipping if Authorization is already present).
+    - `Callable[[], str | Awaitable[str]]` (zero-arg) → returns a middleware
+      that calls the provider per request (awaiting if it returns an
+      awaitable) and sets `Authorization: Bearer <result>` (skip-if-present).
+    - `Middleware` (two-arg `__call__(request, next)`) → returned unchanged.
+    - Any other callable shape → raises `TypeError` naming `auth=`.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return _bearer(value)
+    if not callable(value):
+        msg = (
+            "`auth=` must be a string, zero-arg callable, Middleware, or None; "
+            f"got {type(value).__name__}"
+        )
+        raise TypeError(msg)
+    n_params = len(inspect.signature(value).parameters)
+    if n_params == 0:
+        return _bearer_from_provider(value)
+    if n_params == 2:
+        return value
+    msg = (
+        "`auth=` callable must take 0 args (token provider) or 2 args "
+        f"(Middleware); got {n_params}"
+    )
+    raise TypeError(msg)
+
+
+def _bearer(token: str) -> Middleware:
+    """Middleware that sets `Authorization: Bearer <token>` (skip-if-present)."""
+
+    @before_request
+    async def _add_static_bearer(request: Request) -> Request:
+        if _has_authorization(request):
+            return request
+        return request.with_header("Authorization", f"Bearer {token}")
+
+    return _add_static_bearer
+
+
+def _bearer_from_provider(
+    provider: Callable[[], str | Awaitable[str]],
+) -> Middleware:
+    """Middleware that calls `provider()` per request and sets the header."""
+
+    @before_request
+    async def _add_dynamic_bearer(request: Request) -> Request:
+        if _has_authorization(request):
+            return request
+        token = provider()
+        if inspect.isawaitable(token):
+            token = await token
+        return request.with_header("Authorization", f"Bearer {token}")
+
+    return _add_dynamic_bearer
+
+
+def _has_authorization(request: Request) -> bool:
+    """Case-insensitive check for an existing Authorization header."""
+    return any(k.lower() == "authorization" for k in request.headers)
+```
+
+Notes:
+- `AuthValue` uses `TypeAlias` from `typing` (matches the `JsonValue` alias in `client.py`).
+- The TypeError messages explicitly name `auth=` so users see the parameter in the traceback.
+- `inspect.signature` of a callable instance drops `self` from the inspected signature — a `MyMiddleware()` instance reports `(request, next)` = 2 params; a `lambda: "token"` reports `()` = 0 params. Bound methods behave the same way.
+- The skip-check is `any(k.lower() == "authorization" for k in request.headers)` — case-insensitive scan. Linear in header count; headers are small.
+- Both helper middlewares are built via `@before_request`. Their reprs render as `<before_request(_add_static_bearer)>` / `<before_request(_add_dynamic_bearer)>`, which makes a debug-printed chain readable.
+
+## AsyncClient integration
+
+Constructor:
+
+```python
+def __init__(
+    self,
+    *,
+    base_url: str | None = None,
+    default_headers: Mapping[str, str] | None = None,
+    default_query: Mapping[str, str] | None = None,
+    timeout: Timeout | float | None = None,
+    limits: Limits | None = None,
+    transport: Transport | None = None,
+    decoder: ResponseDecoder | None = None,
+    middleware: Sequence[Middleware] | None = None,
+    auth: AuthValue = None,    # NEW
+) -> None:
+    normalized_timeout = _normalize_timeout(timeout)
+    resolved_limits = limits or Limits()
+    resolved_transport: Transport = transport or Httpx2Transport(
+        limits=resolved_limits, timeout=normalized_timeout,
+    )
+    resolved_decoder = decoder or PydanticDecoder()
+    resolved_user_middleware = tuple(middleware) if middleware is not None else ()
+    resolved_auth_middleware = _normalize_auth(auth)
+
+    composed_middleware: tuple[Middleware, ...] = (
+        resolved_user_middleware
+        if resolved_auth_middleware is None
+        else (*resolved_user_middleware, resolved_auth_middleware)
+    )
+
+    self._config = ClientConfig(
+        base_url=base_url,
+        default_headers=dict(default_headers or {}),
+        default_query=dict(default_query or {}),
+        timeout=normalized_timeout,
+        limits=resolved_limits,
+        decoder=resolved_decoder,
+        middleware=composed_middleware,
+    )
+    self._transport = resolved_transport
+    self._dispatch = compose(composed_middleware, resolved_transport)
+    self._owns_transport = True
+    self._user_middleware = resolved_user_middleware
+    self._auth = auth
+```
+
+`with_options`:
+
+```python
+def with_options(
+    self,
+    *,
+    base_url: str | None = _UNSET,
+    default_headers: Mapping[str, str] | None = _UNSET,
+    default_query: Mapping[str, str] | None = _UNSET,
+    timeout: Timeout | float | None = _UNSET,
+    decoder: ResponseDecoder | None = _UNSET,
+    middleware: Sequence[Middleware] | None = _UNSET,
+    auth: AuthValue | object = _UNSET,    # NEW
+) -> "AsyncClient":
+    """..."""
+    changes: dict[str, typing.Any] = {}
+    if base_url is not _UNSET:
+        changes["base_url"] = base_url
+    if default_headers is not _UNSET:
+        changes["default_headers"] = dict(default_headers or {})
+    if default_query is not _UNSET:
+        changes["default_query"] = dict(default_query or {})
+    if timeout is not _UNSET:
+        changes["timeout"] = _normalize_timeout(timeout)
+    if decoder is not _UNSET:
+        changes["decoder"] = decoder or PydanticDecoder()
+
+    new_user_middleware = self._user_middleware
+    if middleware is not _UNSET:
+        new_user_middleware = tuple(middleware) if middleware is not None else ()
+
+    new_auth = self._auth
+    if auth is not _UNSET:
+        new_auth = auth
+
+    new_auth_middleware = _normalize_auth(new_auth)
+    new_composed: tuple[Middleware, ...] = (
+        new_user_middleware
+        if new_auth_middleware is None
+        else (*new_user_middleware, new_auth_middleware)
+    )
+    changes["middleware"] = new_composed
+
+    new_config = dataclasses.replace(self._config, **changes)
+    return AsyncClient._from_view(
+        new_config,
+        self._transport,
+        user_middleware=new_user_middleware,
+        auth=new_auth,
+    )
+```
+
+`_from_view` gains two new keyword params:
+
+```python
+@classmethod
+def _from_view(
+    cls,
+    config: ClientConfig,
+    transport: Transport,
+    *,
+    user_middleware: tuple[Middleware, ...],
+    auth: AuthValue,
+) -> "AsyncClient":
+    """Construct a view sharing an existing transport. Bypasses __init__."""
+    client = cls.__new__(cls)
+    client._config = config
+    client._transport = transport
+    client._dispatch = compose(config.middleware, transport)
+    client._owns_transport = False
+    client._user_middleware = user_middleware
+    client._auth = auth
+    return client
+```
+
+Composition order:
+
+```
+outer   user_mw_1
+        user_mw_2
+        ...
+inner   user_mw_N
+        auth_mw           ← appended; "second-to-innermost" per archive AC
+        transport         ← bottom of chain
+```
+
+User middleware sees the Request without the auth header (so it can rewrite, skip, or set its own auth). User middleware sees the Response after the transport produces it.
+
+## Public exports
+
+`src/httpware/__init__.py` gains one new line:
+
+```python
+from httpware._internal.auth import AuthValue
+```
+
+`AuthValue` joins `__all__` in alphabetic position: between `"AsyncClient"` (which sorts before it, by third character `s` < `u`) and `"BadRequestError"` (which sorts after, by first character `A` < `B`). Ruff's `RUF022` will reorder if the implementer places it elsewhere; running `uv run ruff check --fix src/httpware/__init__.py` resolves any drift.
+
+`_normalize_auth`, `_bearer`, `_bearer_from_provider`, `_has_authorization` are NOT exported. The underscore prefix communicates "internal" even though the module path is reachable.
+
+## Testing
+
+### `tests/test_internal_auth.py` — 10 tests
+
+| Test | Verifies |
+| --- | --- |
+| `test_none_returns_none` | `_normalize_auth(None)` returns `None`. |
+| `test_string_returns_bearer_middleware` | `_normalize_auth("token")` returns a Middleware; calling it sets `Authorization: Bearer token`. |
+| `test_string_bearer_skips_if_authorization_already_present` | If request has `Authorization` (any case), middleware leaves it alone. |
+| `test_sync_callable_returns_token_provider_middleware` | `_normalize_auth(lambda: "tok")` calls per request, sets the header. |
+| `test_async_callable_returns_token_provider_middleware` | `_normalize_auth(async_fetch_token)` awaits and sets the header. |
+| `test_callable_token_provider_skips_if_authorization_already_present` | Skip rule applies; provider is NOT called. |
+| `test_callable_token_provider_calls_provider_per_request` | Two sequential calls invoke provider twice. |
+| `test_middleware_returned_unchanged` | A 2-arg `Middleware` instance passes through identity-equal. |
+| `test_one_arg_callable_raises_typeerror` | `_normalize_auth(lambda x: ...)` raises `TypeError` naming `auth=`. |
+| `test_non_callable_non_string_non_middleware_raises_typeerror` | `_normalize_auth(42)` raises `TypeError`. |
+
+### `tests/test_client_construction.py` — 3 new tests
+
+| Test | Verifies |
+| --- | --- |
+| `test_init_no_auth_means_no_auth_middleware` | `AsyncClient(transport=...)` → `client._config.middleware == ()`. |
+| `test_init_with_string_auth_appends_bearer_middleware` | `AsyncClient(auth="tok")` — last middleware is a Middleware-conforming object. |
+| `test_init_with_user_middleware_plus_auth` | `AsyncClient(middleware=[m1, m2], auth="tok")` — composed middleware length is 3; m1, m2 are at positions 0, 1. |
+
+### `tests/test_client_methods.py` — 3 new tests
+
+| Test | Verifies |
+| --- | --- |
+| `test_string_auth_sends_authorization_header` | `AsyncClient(transport=recorded, auth="tok")` + `client.get("/foo")` — `transport.last_request.headers["Authorization"] == "Bearer tok"`. |
+| `test_per_call_authorization_header_wins_over_auth_param` | Default `auth="default"` + per-call `headers={"Authorization": "Bearer override"}` — transport sees the override. |
+| `test_callable_auth_calls_provider_per_request` | Provider mock called once per request across multiple `client.get(...)` invocations. |
+
+### `tests/test_client_middleware_wiring.py` — 3 new tests
+
+| Test | Verifies |
+| --- | --- |
+| `test_auth_runs_inside_user_middleware` | Outer user middleware records request seen on the way down (NO auth header) and response on the way up. Auth header is observable on `transport.last_request`. Confirms ordering: user → auth → transport. |
+| `test_with_options_auth_replaces_auth_middleware` | `client = AsyncClient(auth="parent")`; `view = client.with_options(auth="view")`; view sends `Bearer view`; client still sends `Bearer parent`. |
+| `test_with_options_middleware_keeps_existing_auth` | `client = AsyncClient(auth="tok", middleware=[m1])`; `view = client.with_options(middleware=[m2])` — view sends `Bearer tok` (auth preserved). |
+
+Total new tests: **19**. `just test` total: 273 → 292.
+
+## Constraints and invariants
+
+- **No `httpx2` import.** `tests/test_no_httpx2_leakage.py` continues to pass.
+- **No `from __future__ import annotations`.**
+- **No `print()`, no `logging.basicConfig`.**
+- **No `# type: ignore`.** `# ty: ignore[<rule>]` not expected.
+- **No `__all__` in `_internal/auth.py`.**
+- **Existing 273 tests continue to pass unchanged.**
+
+## Risks and mitigations
+
+| Risk | Mitigation |
+| --- | --- |
+| `inspect.signature` rejects some valid callables (e.g., C-implemented builtins). | Documented as a TypeError when arity inspection fails. Users wrap such callables in a Python function (`auth=lambda: getattr(...)`). The 0-or-2 rule is explicit in the error message. |
+| User passes a `Callable[[Request, Next], Awaitable[Response]]` function (NOT a `Middleware` instance) and the signature shows 2 params — treated as Middleware passthrough. | Intended. A bare async function with `(request, next)` shape IS a Middleware structurally. Compose handles it. |
+| Token provider raises during `provider()` invocation. | Exception propagates through the chain via the standard cancellation rules from Story 2-1 (`compose` adds no try/except). User sees the original exception with the original traceback. Document in the helper's docstring. |
+| User middleware downstream of auth (i.e., closer to transport than the auth slot) — impossible by construction. | The auth middleware is appended at the END of the user-supplied list. There's no "downstream of auth" position. If a user needs that, they pass a full Middleware via `auth=my_middleware` instead. |
+| `with_options(middleware=...)` drops the auth middleware. | Mitigated by tracking `_user_middleware` and `_auth` separately. `with_options(middleware=[...])` only replaces user middleware; auth is preserved (re-applied during recomposition). |
+| Skip-if-present misses headers with weird whitespace. | The `.lower()` comparison handles case but not whitespace. The v0 contract specifies `Mapping[str, str]` keys without whitespace; the deferred case-insensitive Mapping work will eventually handle this comprehensively. |
+| Sensitive token leaks via `__repr__` of the middleware. | The bearer middleware's `__repr__` is `<before_request(_add_static_bearer)>` — does NOT include the token. The provider variant similarly only shows the wrapped function's qualname. Tokens are not exposed via repr at any layer. |
+| Token leaks via `StatusError.request_url` or other exception fields. | Outside this story's scope. The Redactor (Story 5-3) is the dedicated mitigation; the existing deferred-work entries about URL/userinfo redaction track it. |
+
+## Definition of done
+
+- `src/httpware/_internal/auth.py` exists with `AuthValue`, `_normalize_auth`, `_bearer`, `_bearer_from_provider`, `_has_authorization`. No `__all__`.
+- `src/httpware/__init__.py` re-exports `AuthValue` at the package root and adds it to `__all__`.
+- `src/httpware/client.py` `__init__` accepts `auth: AuthValue = None`; tracks `_user_middleware` and `_auth`; composes user middleware + auth at the END before `compose()`. `with_options` accepts `auth=` and recomposes. `_from_view` accepts the two new keyword params.
+- All 19 new tests pass; existing 273 tests still pass.
+- 100% line coverage on `_internal/auth.py` and the changed regions of `client.py`.
+- `just test` shows 292 passed, 1 deselected, 100% line coverage on the modified source.
+- `just lint-ci` clean.
+- `tests/test_no_httpx2_leakage.py` and `tests/test_optional_extras_isolation.py` still pass.
+- Story 2-4 lands as a single PR off `main` via the branch `story/2-4-auth-coercion`. After this merge, Epic 2 is fully complete.
