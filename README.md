@@ -5,11 +5,11 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/httpware.svg)](https://pypi.org/project/httpware/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Resilience-first async HTTP client framework for Python.**
+**Async HTTP client framework for Python.**
 
-`httpware` is to Python what Polly is to .NET and resilience4j is to the JVM — a canonical resilience-first HTTP framework. The public API is transport-agnostic (the underlying client is `httpx2` by default, sitting behind a swappable `Transport` protocol). Retries, timeouts, bulkheads, and a Finagle-style **retry budget** ship as composable middleware. Tests use a `RecordedTransport` and never see the underlying client.
+`httpware` is a typed, async HTTP client library built on `httpx2` with a protocol-based seam so the transport is swappable. Middleware composes via an onion model. Pydantic and msgspec response decoding ship out of the box. `RecordedTransport` replaces respx for transport-level tests.
 
-> **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0. See [CHANGELOG.md](./CHANGELOG.md).
+> **Status:** Pre-1.0 (0.1.0 alpha). Public API is subject to change between minor releases until v1.0. Resilience middleware (retry / timeout / bulkhead), streaming, and observability are not yet shipped — track progress on GitHub.
 
 ## Install
 
@@ -20,11 +20,10 @@ pip install httpware
 Optional extras:
 
 ```bash
-pip install httpware[msgspec]    # msgspec ResponseDecoder
-pip install httpware[otel]       # OpenTelemetry instrumentation
-pip install httpware[niquests]   # niquests transport
-pip install httpware[all]        # all of the above
+pip install httpware[msgspec]    # MsgspecDecoder
 ```
+
+(`otel`, `niquests`, and `all` extras are declared but their integrations have not shipped yet.)
 
 ## Quickstart
 
@@ -44,25 +43,19 @@ async def main() -> None:
         print(user.name)
 ```
 
-## Highlights
+## What ships in 0.1.0
 
-- **Transport-agnostic API.** No `httpx2` symbols leak through `httpware`. Swap to a different backend with one constructor argument.
-- **Onion middleware** with phase shortcuts (`@before_request`, `@after_response`, `@on_error`). Built-in middleware: `Retry`, `RetryBudget`, `Bulkhead`, `Timeout`, `Observability`.
-- **Retry budget by default** — token-bucket admission control (Finagle defaults). Caps retry storms before they happen.
-- **Pluggable validation.** Default pydantic decoder with cached `TypeAdapter`; msgspec decoder via extras; bring your own.
-- **`RecordedTransport` for tests.** A 3-line fixture replaces respx routes and transport-level mocking.
-- **Status-keyed exceptions** with plain fields (`status: int`, `body: bytes`, `headers`, `json`). No transport exception types in user code.
-- **First-class OpenTelemetry** instrumentation via `httpware[otel]`.
-
-## Documentation
-
-Full docs (in progress): https://httpware.readthedocs.io
+- **`AsyncClient`** — eight HTTP method shortcuts (`get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `request`) with typed `response_model` overloads; per-call overrides for `headers`, `params`, `cookies`, `timeout`, `json`, `content`; httpx-style `base_url` join; `with_options(...)` returns a view sharing the same transport.
+- **Transport-agnostic seam.** `httpx2` is confined to `httpware.transports.httpx2.Httpx2Transport`. Implement the `Transport` protocol to swap backends.
+- **Middleware foundation.** `Middleware` protocol, `Next` type alias, recursive-closure `compose()` chain composition, and phase decorators (`@before_request`, `@after_response`, `@on_error`).
+- **Pluggable response decoding.** `PydanticDecoder` (default) with cached `TypeAdapter`; `MsgspecDecoder` via `httpware[msgspec]`.
+- **`RecordedTransport`** — built-in test double with a route table, observed-request list, and `aclose_calls` counter.
+- **Status-keyed exception hierarchy** — `StatusError`, 4xx / 5xx subclasses, plain typed fields (`status: int`, `body: bytes`, `headers`, `json`, `request_method`, `request_url`). Pickleable; userinfo redacted in `__repr__`.
+- **No `httpx2` exception types** leak through `httpware`. The transport seam maps them to `httpware` exceptions.
 
 ## Part of `modern-python`
 
-Browse the full list of templates and libraries in
-[`modern-python`](https://github.com/modern-python) — see the org profile for the
-categorized index.
+Browse the full list of templates and libraries in [`modern-python`](https://github.com/modern-python) — see the org profile for the categorized index.
 
 ## License
 

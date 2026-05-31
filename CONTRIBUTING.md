@@ -18,8 +18,7 @@ just test           # pytest with coverage
 2. **Branch from `main`**, use a descriptive name (`feat/retry-budget-jitter`, `fix/transport-cancel-leak`).
 3. **Run `just lint` and `just test`** locally before pushing. CI will reject changes that fail either.
 4. **Add tests** for any code change. Property-based tests (via Hypothesis) are required for concurrency-sensitive code (retry budget, bulkhead, retry interleaving).
-5. **Update `CHANGELOG.md`** in the `Unreleased` section.
-6. **Open a pull request** against `main`. PR titles use conventional-commits style (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
+5. **Open a pull request** against `main`. PR titles use conventional-commits style (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
 
 ## Code style
 
