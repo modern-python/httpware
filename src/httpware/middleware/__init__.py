@@ -26,4 +26,21 @@ class Middleware(Protocol):
         ...
 
 
-__all__ = ["Middleware", "Next"]
+def before_request(f: Callable[[Request], Awaitable[Request]]) -> Middleware:
+    """Wrap an async request transform into a Middleware.
+
+    The decorated function receives the incoming Request and returns a
+    (possibly modified) Request, which is then forwarded down the chain.
+    """
+
+    class _BeforeRequestMiddleware:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            return await next(await f(request))
+
+        def __repr__(self) -> str:
+            return f"<before_request({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+
+    return _BeforeRequestMiddleware()
+
+
+__all__ = ["Middleware", "Next", "before_request"]

@@ -8,7 +8,7 @@ from typing import get_type_hints
 import pytest
 
 from httpware._internal.chain import compose
-from httpware.middleware import Middleware, Next
+from httpware.middleware import Middleware, Next, before_request
 from httpware.request import Request
 from httpware.response import Response, StreamResponse
 
@@ -263,6 +263,25 @@ async def test_compose_returned_callable_is_reusable() -> None:
         assert response.status == 200  # noqa: PLR2004
 
     assert count == 3  # noqa: PLR2004
+
+
+async def test_before_request_transforms_request() -> None:
+    """@before_request wraps an async request transform; downstream sees the mutation."""
+
+    @before_request
+    async def stamp(request: Request) -> Request:
+        return request.with_header("x-trace", "abc123")
+
+    seen: list[Request] = []
+
+    class Inspect:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            seen.append(request)
+            return await next(request)
+
+    await compose([stamp, Inspect()], _OkTransport())(_make_request())
+
+    assert seen[0].headers["x-trace"] == "abc123"
 
 
 def test_middleware_and_next_are_reexported_at_package_root() -> None:
