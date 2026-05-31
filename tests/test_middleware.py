@@ -8,7 +8,7 @@ from typing import get_type_hints
 import pytest
 
 from httpware._internal.chain import compose
-from httpware.middleware import Middleware, Next, after_response, before_request
+from httpware.middleware import Middleware, Next, after_response, before_request, on_error
 from httpware.request import Request
 from httpware.response import Response, StreamResponse
 
@@ -311,3 +311,89 @@ def test_middleware_and_next_are_reexported_at_package_root() -> None:
     assert httpware.Next is Next
     assert "Middleware" in httpware.__all__
     assert "Next" in httpware.__all__
+
+
+class _FailingTransport:
+    """Transport whose __call__ raises a chosen exception."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    async def __call__(self, request: Request) -> Response:  # noqa: ARG002
+        raise self._exc
+
+    def stream(self, request: Request) -> None:  # pragma: no cover - not exercised in 2-2
+        raise NotImplementedError
+
+    async def aclose(self) -> None:  # pragma: no cover - not exercised in 2-2
+        return None
+
+
+async def test_on_error_returns_response_swallows_exception() -> None:
+    """When the handler returns a Response, the caller gets it; no exception escapes."""
+
+    @on_error
+    async def recover(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return Response(
+            status=503,
+            headers={"x-recovered": "true"},
+            content=b"recovered",
+            url=request.url,
+            elapsed=0.0,
+        )
+
+    transport = _FailingTransport(RuntimeError("boom"))
+    response = await compose([recover], transport)(_make_request())
+
+    assert response.status == 503  # noqa: PLR2004
+    assert response.headers["x-recovered"] == "true"
+    assert response.content == b"recovered"
+
+
+async def test_on_error_returns_none_reraises() -> None:
+    """When the handler returns None, the original exception is re-raised with traceback intact."""
+
+    @on_error
+    async def pass_through(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return None
+
+    transport = _FailingTransport(RuntimeError("boom"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await compose([pass_through], transport)(_make_request())
+
+
+async def test_on_error_does_not_catch_cancelled_error() -> None:
+    """asyncio.CancelledError is not Exception; the handler must not be invoked."""
+    invocations: list[Exception] = []
+
+    @on_error
+    async def should_not_run(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        invocations.append(exc)
+        return None
+
+    class Cancel:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await compose([should_not_run, Cancel()], _OkTransport())(_make_request())
+
+    assert invocations == []
+
+
+async def test_on_error_handler_receives_correct_exception_instance() -> None:
+    """The handler's `exc` parameter is the same instance the transport raised."""
+    raised = RuntimeError("specific instance")
+    seen: list[Exception] = []
+
+    @on_error
+    async def capture(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        seen.append(exc)
+        return None
+
+    with pytest.raises(RuntimeError):
+        await compose([capture], _FailingTransport(raised))(_make_request())
+
+    assert seen == [raised]
+    assert seen[0] is raised

@@ -61,4 +61,29 @@ def after_response(f: Callable[[Request, Response], Awaitable[Response]]) -> Mid
     return _AfterResponseMiddleware()
 
 
-__all__ = ["Middleware", "Next", "after_response", "before_request"]
+def on_error(f: Callable[[Request, Exception], Awaitable[Response | None]]) -> Middleware:
+    """Wrap an async error handler into a Middleware.
+
+    Catches Exception (not BaseException, so asyncio.CancelledError
+    propagates). If the handler returns a Response, that Response is
+    returned to the caller. If the handler returns None, the original
+    exception is re-raised.
+    """
+
+    class _OnErrorMiddleware:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            try:
+                return await next(request)
+            except Exception as exc:
+                result = await f(request, exc)
+                if result is None:
+                    raise
+                return result
+
+        def __repr__(self) -> str:
+            return f"<on_error({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+
+    return _OnErrorMiddleware()
+
+
+__all__ = ["Middleware", "Next", "after_response", "before_request", "on_error"]
