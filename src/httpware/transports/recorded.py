@@ -25,6 +25,11 @@ class RecordedTransport:
     swap the route between calls via `add_route(...)` or construct a new
     transport per call.
 
+    Route and default values may be `BaseException` (not just `Exception`) so
+    test code can express `asyncio.CancelledError`, `SystemExit`, or
+    `KeyboardInterrupt` — useful for cancellation/shutdown propagation tests.
+    These do NOT get caught by user code's `except Exception:`.
+
     `stream()` raises NotImplementedError; streaming lands in Epic 4 (Story 4-1).
     """
 
