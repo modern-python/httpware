@@ -7,6 +7,7 @@ from typing import get_type_hints
 
 import pytest
 
+import httpware
 from httpware._internal.chain import compose
 from httpware.middleware import Middleware, Next, after_response, before_request, on_error
 from httpware.request import Request
@@ -305,8 +306,6 @@ async def test_after_response_transforms_response() -> None:
 
 def test_middleware_and_next_are_reexported_at_package_root() -> None:
     """`from httpware import Middleware, Next` works in addition to the subpackage path."""
-    import httpware  # noqa: PLC0415
-
     assert httpware.Middleware is Middleware
     assert httpware.Next is Next
     assert "Middleware" in httpware.__all__
@@ -476,8 +475,6 @@ def test_repr_shows_original_function_name() -> None:
 
 def test_decorators_reexported_at_package_root() -> None:
     """`from httpware import before_request, after_response, on_error` works."""
-    import httpware  # noqa: PLC0415
-
     assert httpware.before_request is before_request
     assert httpware.after_response is after_response
     assert httpware.on_error is on_error
