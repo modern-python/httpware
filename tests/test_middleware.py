@@ -89,3 +89,69 @@ async def test_single_middleware_wraps_transport() -> None:
 
     assert seen == [request]
     assert response.content == b"transport"
+
+
+async def test_chain_runs_outer_to_inner() -> None:
+    """Three middlewares form an onion: outer→inner→transport→inner→outer."""
+    log: list[str] = []
+
+    def labeled(name: str) -> Middleware:
+        class Labeled:
+            async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+                log.append(f"{name}:before")
+                response = await next(request)
+                log.append(f"{name}:after")
+                return response
+
+        return Labeled()
+
+    dispatch = compose([labeled("A"), labeled("B"), labeled("C")], _OkTransport())
+    await dispatch(_make_request())
+
+    assert log == [
+        "A:before",
+        "B:before",
+        "C:before",
+        "C:after",
+        "B:after",
+        "A:after",
+    ]
+
+
+async def test_middleware_can_transform_request_before_forwarding() -> None:
+    """An outer middleware mutates the request via with_header; the inner sees the mutation."""
+    seen: list[Request] = []
+
+    class Stamp:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            stamped = request.with_header("x-trace", "abc123")
+            return await next(stamped)
+
+    class Inspect:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            seen.append(request)
+            return await next(request)
+
+    await compose([Stamp(), Inspect()], _OkTransport())(_make_request())
+
+    assert seen[0].headers["x-trace"] == "abc123"
+
+
+async def test_middleware_can_transform_response_before_returning() -> None:
+    """An outer middleware awaits next, then returns a modified Response; caller sees it."""
+
+    class AddHeader:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            response = await next(request)
+            return Response(
+                status=response.status,
+                headers={**response.headers, "x-trace": "abc123"},
+                content=response.content,
+                url=response.url,
+                elapsed=response.elapsed,
+            )
+
+    response = await compose([AddHeader()], _OkTransport())(_make_request())
+
+    assert response.headers["x-trace"] == "abc123"
+    assert response.headers["x-from"] == "transport"  # original still present
