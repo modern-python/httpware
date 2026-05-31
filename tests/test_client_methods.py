@@ -146,9 +146,7 @@ async def test_post_per_call_content_type_skips_auto_injection() -> None:
         ("options", "OPTIONS"),
     ],
 )
-async def test_each_method_emits_correct_wire_method(
-    client_method_name: str, expected_wire_method: str
-) -> None:
+async def test_each_method_emits_correct_wire_method(client_method_name: str, expected_wire_method: str) -> None:
     transport = _RecordingTransport()
     client = AsyncClient(transport=transport)
     method = getattr(client, client_method_name)

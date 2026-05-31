@@ -22,9 +22,7 @@ T = typing.TypeVar("T")
 
 # Recursive type alias for any JSON-serializable Python value. Used for the `json=` body parameter
 # on HTTP methods so we avoid `Any` while still accepting arbitrary nested structures.
-JsonValue: typing.TypeAlias = (
-    Mapping[str, "JsonValue"] | Sequence["JsonValue"] | str | int | float | bool | None
-)
+JsonValue: typing.TypeAlias = Mapping[str, "JsonValue"] | Sequence["JsonValue"] | str | int | float | bool | None
 
 
 def _normalize_timeout(value: Timeout | float | None) -> Timeout:
@@ -69,9 +67,7 @@ class AsyncClient:
     ) -> None:
         normalized_timeout = _normalize_timeout(timeout)
         resolved_limits = limits or Limits()
-        resolved_transport: Transport = transport or Httpx2Transport(
-            limits=resolved_limits, timeout=normalized_timeout
-        )
+        resolved_transport: Transport = transport or Httpx2Transport(limits=resolved_limits, timeout=normalized_timeout)
         resolved_decoder = decoder or PydanticDecoder()
         resolved_middleware = tuple(middleware) if middleware is not None else ()
 

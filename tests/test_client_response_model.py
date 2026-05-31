@@ -63,7 +63,7 @@ async def test_response_model_uses_supplied_decoder() -> None:
     class _SpyDecoder:
         def decode(self, content: bytes, model: type[T]) -> T:
             seen.append((content, model))
-            return model(name="spy", qty=999)  # ty: ignore[unknown-argument]
+            return model(name="spy", qty=999)
 
     client = AsyncClient(transport=transport, decoder=_SpyDecoder())
     result = await client.get("/foo", response_model=_Item)
