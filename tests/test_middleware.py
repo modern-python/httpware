@@ -263,3 +263,13 @@ async def test_compose_returned_callable_is_reusable() -> None:
         assert response.status == 200  # noqa: PLR2004
 
     assert count == 3  # noqa: PLR2004
+
+
+def test_middleware_and_next_are_reexported_at_package_root() -> None:
+    """`from httpware import Middleware, Next` works in addition to the subpackage path."""
+    import httpware  # noqa: PLC0415
+
+    assert httpware.Middleware is Middleware
+    assert httpware.Next is Next
+    assert "Middleware" in httpware.__all__
+    assert "Next" in httpware.__all__
