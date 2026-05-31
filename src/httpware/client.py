@@ -5,6 +5,7 @@ import json as _json
 import typing
 from collections.abc import Mapping, Sequence
 
+from httpware._internal.auth import AuthValue, _normalize_auth
 from httpware._internal.chain import compose
 from httpware.config import ClientConfig, Limits, Timeout
 from httpware.decoders import ResponseDecoder
@@ -52,6 +53,8 @@ class AsyncClient:
     _transport: Transport
     _dispatch: Next
     _owns_transport: bool
+    _user_middleware: tuple[Middleware, ...]
+    _auth: AuthValue
 
     def __init__(
         self,
@@ -64,12 +67,23 @@ class AsyncClient:
         transport: Transport | None = None,
         decoder: ResponseDecoder | None = None,
         middleware: Sequence[Middleware] | None = None,
+        auth: AuthValue = None,
     ) -> None:
         normalized_timeout = _normalize_timeout(timeout)
         resolved_limits = limits or Limits()
-        resolved_transport: Transport = transport or Httpx2Transport(limits=resolved_limits, timeout=normalized_timeout)
+        resolved_transport: Transport = transport or Httpx2Transport(
+            limits=resolved_limits, timeout=normalized_timeout
+        )
         resolved_decoder = decoder or PydanticDecoder()
-        resolved_middleware = tuple(middleware) if middleware is not None else ()
+        resolved_user_middleware: tuple[Middleware, ...] = (
+            tuple(middleware) if middleware is not None else ()
+        )
+        resolved_auth_middleware = _normalize_auth(auth)
+        composed_middleware: tuple[Middleware, ...] = (
+            resolved_user_middleware
+            if resolved_auth_middleware is None
+            else (*resolved_user_middleware, resolved_auth_middleware)
+        )
 
         self._config = ClientConfig(
             base_url=base_url,
@@ -78,11 +92,13 @@ class AsyncClient:
             timeout=normalized_timeout,
             limits=resolved_limits,
             decoder=resolved_decoder,
-            middleware=resolved_middleware,
+            middleware=composed_middleware,
         )
         self._transport = resolved_transport
-        self._dispatch = compose(resolved_middleware, resolved_transport)
+        self._dispatch = compose(composed_middleware, resolved_transport)
         self._owns_transport = True
+        self._user_middleware = resolved_user_middleware
+        self._auth = auth
 
     @classmethod
     def from_url(cls, base_url: str, **kwargs: object) -> "AsyncClient":
