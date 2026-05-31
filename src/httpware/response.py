@@ -1,9 +1,10 @@
 """Immutable response value type."""
 
+import dataclasses
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 
 _CHARSET_PREFIX = "charset="
@@ -49,6 +50,14 @@ class Response:
     def json(self) -> Any:  # noqa: ANN401
         """Parse `content` as JSON."""
         return json.loads(self.content)
+
+    def with_headers(self, headers: Mapping[str, str]) -> Self:
+        """Return a copy with the given headers merged in (incoming keys override existing)."""
+        return dataclasses.replace(self, headers={**self.headers, **headers})
+
+    def with_status(self, status: int) -> Self:
+        """Return a copy with the given status code."""
+        return dataclasses.replace(self, status=status)
 
 
 @dataclass(frozen=True, slots=True)

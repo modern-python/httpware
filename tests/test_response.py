@@ -89,3 +89,35 @@ def test_response_equality_on_identical_fields() -> None:
     assert r1 == r2
     assert r1 != Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.6)
     assert r1 != Response(status=201, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)
+
+
+def test_response_with_headers_merges_new_headers() -> None:
+    resp = Response(status=200, headers={"keep": "1"}, content=b"", url="/", elapsed=0.0)
+    new = resp.with_headers({"x-trace": "abc"})
+    assert new.headers == {"keep": "1", "x-trace": "abc"}
+    assert resp.headers == {"keep": "1"}
+
+
+def test_response_with_headers_overrides_existing_key() -> None:
+    resp = Response(status=200, headers={"x-trace": "old"}, content=b"", url="/", elapsed=0.0)
+    new = resp.with_headers({"x-trace": "new"})
+    assert new.headers == {"x-trace": "new"}
+    assert resp.headers == {"x-trace": "old"}
+
+
+def test_response_with_status_replaces_status() -> None:
+    resp = Response(status=200, headers={"a": "1"}, content=b"body", url="/x", elapsed=0.5)
+    new = resp.with_status(503)
+    assert new.status == 503  # noqa: PLR2004
+    assert new.headers == {"a": "1"}
+    assert new.content == b"body"
+    assert new.url == "/x"
+    assert new.elapsed == 0.5  # noqa: PLR2004
+    assert resp.status == 200  # noqa: PLR2004
+
+
+def test_response_with_status_accepts_arbitrary_int() -> None:
+    resp = Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
+    # No validation by design — value objects don't enforce protocol semantics.
+    new = resp.with_status(99)
+    assert new.status == 99  # noqa: PLR2004
