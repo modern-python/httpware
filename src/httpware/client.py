@@ -92,6 +92,18 @@ class AsyncClient:
         """Construct an AsyncClient with a base URL prefix."""
         return cls(base_url=base_url, **kwargs)  # ty: ignore[invalid-argument-type]
 
+    async def __aenter__(self) -> typing.Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
+        if self._owns_transport:
+            await self._transport.aclose()
+
     def _resolve_url(self, path: str) -> str:
         if path.startswith(("http://", "https://")):
             return path
