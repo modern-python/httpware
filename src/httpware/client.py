@@ -137,7 +137,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None,
         params: Mapping[str, str] | None,
         cookies: Mapping[str, str] | None,
-        timeout: Timeout | float | None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None,
         body: bytes | None,
         content_type: str | None,
         response_model: type[T] | None,
@@ -165,7 +165,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: None = None,
     ) -> Response: ...
 
@@ -177,7 +177,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T],
     ) -> T: ...
 
@@ -188,7 +188,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T] | None = None,
     ) -> Response | T:
         """Send a GET request."""
@@ -212,7 +212,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: None = None,
@@ -226,7 +226,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T],
@@ -239,7 +239,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T] | None = None,
@@ -266,7 +266,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: None = None,
@@ -280,7 +280,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T],
@@ -293,7 +293,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T] | None = None,
@@ -320,7 +320,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: None = None,
@@ -334,7 +334,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T],
@@ -347,7 +347,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T] | None = None,
@@ -374,7 +374,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: None = None,
     ) -> Response: ...
 
@@ -386,7 +386,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T],
     ) -> T: ...
 
@@ -397,7 +397,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T] | None = None,
     ) -> Response | T:
         """Send a DELETE request."""
@@ -421,7 +421,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: None = None,
     ) -> Response: ...
 
@@ -433,7 +433,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T],
     ) -> T: ...
 
@@ -444,7 +444,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T] | None = None,
     ) -> Response | T:
         """Send a HEAD request."""
@@ -468,7 +468,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: None = None,
     ) -> Response: ...
 
@@ -480,7 +480,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T],
     ) -> T: ...
 
@@ -491,7 +491,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         response_model: type[T] | None = None,
     ) -> Response | T:
         """Send an OPTIONS request."""
@@ -516,7 +516,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: None = None,
@@ -531,7 +531,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T],
@@ -545,7 +545,7 @@ class AsyncClient:
         headers: Mapping[str, str] | None = None,
         params: Mapping[str, str] | None = None,
         cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,  # noqa: ASYNC109 — config-value timeout, not asyncio.timeout
+        timeout: Timeout | float | None = None,
         json: JsonValue = None,
         content: bytes | None = None,
         response_model: type[T] | None = None,

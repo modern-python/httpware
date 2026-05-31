@@ -92,6 +92,12 @@ isort.lines-after-imports = 2
 isort.no-lines-before = ["standard-library", "local-folder"]
 pylint.max-args = 10  # HTTP-method APIs are kwarg-rich (headers, params, cookies, timeout, json, content, response_model, …); default 5 is too strict.
 
+[tool.ruff.lint.per-file-ignores]
+# AsyncClient's HTTP-method `timeout=` is a config-value parameter forwarded to the transport,
+# not asyncio.timeout territory. The rule fires on 24+ method signatures in this one file with
+# the same false-positive justification; per-file disable is cleaner than 24 per-line noqa.
+"src/httpware/client.py" = ["ASYNC109"]
+
 [tool.pytest.ini_options]
 addopts = "--cov=src/httpware --cov-report term-missing -m 'not perf'"
 asyncio_mode = "auto"
