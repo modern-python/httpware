@@ -598,6 +598,7 @@ class AsyncClient:
         timeout: Timeout | float | None = _UNSET,
         decoder: ResponseDecoder | None = _UNSET,
         middleware: Sequence[Middleware] | None = _UNSET,
+        auth: AuthValue | object = _UNSET,
     ) -> "AsyncClient":
         """Return a new AsyncClient sharing the same transport with overridden config.
 
@@ -619,18 +620,46 @@ class AsyncClient:
             changes["timeout"] = _normalize_timeout(timeout)
         if decoder is not _UNSET:
             changes["decoder"] = decoder or PydanticDecoder()
+
+        new_user_middleware = self._user_middleware
         if middleware is not _UNSET:
-            changes["middleware"] = tuple(middleware) if middleware is not None else ()
+            new_user_middleware = tuple(middleware) if middleware is not None else ()
+
+        new_auth: AuthValue = self._auth
+        if auth is not _UNSET:
+            new_auth = auth  # ty: ignore[invalid-assignment]
+
+        new_auth_middleware = _normalize_auth(new_auth)
+        new_composed: tuple[Middleware, ...] = (
+            new_user_middleware
+            if new_auth_middleware is None
+            else (*new_user_middleware, new_auth_middleware)
+        )
+        changes["middleware"] = new_composed
 
         new_config = dataclasses.replace(self._config, **changes)
-        return AsyncClient._from_view(new_config, self._transport)
+        return AsyncClient._from_view(
+            new_config,
+            self._transport,
+            user_middleware=new_user_middleware,
+            auth=new_auth,
+        )
 
     @classmethod
-    def _from_view(cls, config: ClientConfig, transport: Transport) -> "AsyncClient":
+    def _from_view(
+        cls,
+        config: ClientConfig,
+        transport: Transport,
+        *,
+        user_middleware: tuple[Middleware, ...],
+        auth: AuthValue,
+    ) -> "AsyncClient":
         """Construct a view sharing an existing transport. Bypasses __init__."""
         client = cls.__new__(cls)
         client._config = config  # noqa: SLF001
         client._transport = transport  # noqa: SLF001
         client._dispatch = compose(config.middleware, transport)  # noqa: SLF001
         client._owns_transport = False  # noqa: SLF001
+        client._user_middleware = user_middleware  # noqa: SLF001
+        client._auth = auth  # noqa: SLF001
         return client

@@ -1,5 +1,7 @@
 """Unit tests for AsyncClient middleware wiring through compose() and with_options."""
 
+from collections.abc import Mapping
+
 from httpware import AsyncClient, RecordedTransport
 from httpware.middleware import Middleware, Next
 from httpware.request import Request
@@ -112,3 +114,60 @@ async def test_with_options_overrides_decoder() -> None:
     client = AsyncClient(transport=transport)
     view = client.with_options(decoder=new_decoder)
     assert view._config.decoder is new_decoder  # noqa: SLF001
+
+
+async def test_auth_runs_inside_user_middleware() -> None:
+    transport = RecordedTransport(
+        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
+    )
+
+    user_seen_headers: list[Mapping[str, str]] = []
+
+    class _UserOuter:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            user_seen_headers.append(dict(request.headers))
+            return await next(request)
+
+    client = AsyncClient(transport=transport, middleware=[_UserOuter()], auth="tok")
+    await client.get("/foo")
+
+    # User middleware saw the request BEFORE auth header was applied.
+    assert "Authorization" not in user_seen_headers[0]
+    # Transport saw the request WITH the auth header.
+    assert transport.last_request is not None
+    assert transport.last_request.headers["Authorization"] == "Bearer tok"
+
+
+async def test_with_options_auth_replaces_auth_middleware() -> None:
+    transport = RecordedTransport(
+        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
+    )
+    client = AsyncClient(transport=transport, auth="parent")
+    view = client.with_options(auth="view")
+
+    await view.get("/foo")
+    assert transport.last_request is not None
+    assert transport.last_request.headers["Authorization"] == "Bearer view"
+
+    await client.get("/foo")
+    assert transport.last_request is not None
+    assert transport.last_request.headers["Authorization"] == "Bearer parent"
+
+
+async def test_with_options_middleware_keeps_existing_auth() -> None:
+    transport = RecordedTransport(
+        default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0)
+    )
+
+    class _M:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            return await next(request)
+
+    m1 = _M()
+    m2 = _M()
+    client = AsyncClient(transport=transport, auth="tok", middleware=[m1])
+    view = client.with_options(middleware=[m2])
+
+    await view.get("/foo")
+    assert transport.last_request is not None
+    assert transport.last_request.headers["Authorization"] == "Bearer tok"
