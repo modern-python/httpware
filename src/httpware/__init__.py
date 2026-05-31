@@ -1,5 +1,6 @@
 """httpware — resilience-first async HTTP client framework for Python."""
 
+from httpware.client import AsyncClient
 from httpware.config import ClientConfig, Limits, Timeout
 from httpware.decoders import ResponseDecoder
 from httpware.decoders.pydantic import PydanticDecoder
@@ -30,6 +31,7 @@ from httpware.transports.httpx2 import Httpx2Transport
 
 __all__ = [
     "STATUS_TO_EXCEPTION",
+    "AsyncClient",
     "BadRequestError",
     "ClientConfig",
     "ClientError",
