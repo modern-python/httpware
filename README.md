@@ -47,7 +47,7 @@ async def main() -> None:
 
 - **`AsyncClient`** — eight HTTP method shortcuts (`get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `request`) with typed `response_model` overloads; per-call overrides for `headers`, `params`, `cookies`, `timeout`, `json`, `content`; httpx-style `base_url` join; `with_options(...)` returns a view sharing the same transport.
 - **Transport-agnostic seam.** `httpx2` is confined to `httpware.transports.httpx2.Httpx2Transport`. Implement the `Transport` protocol to swap backends.
-- **Middleware foundation.** `Middleware` protocol, `Next` type alias, recursive-closure `compose()` chain composition, and phase decorators (`@before_request`, `@after_response`, `@on_error`).
+- **Middleware foundation.** `Middleware` protocol, `Next` type alias, and phase decorators (`@before_request`, `@after_response`, `@on_error`). The chain is composed at `AsyncClient` construction; consumers don't compose chains themselves.
 - **Pluggable response decoding.** `PydanticDecoder` (default) with cached `TypeAdapter`; `MsgspecDecoder` via `httpware[msgspec]`.
 - **`RecordedTransport`** — built-in test double with a route table, observed-request list, and `aclose_calls` counter.
 - **Status-keyed exception hierarchy** — `StatusError`, 4xx / 5xx subclasses, plain typed fields (`status: int`, `body: bytes`, `headers`, `json`, `request_method`, `request_url`). Pickleable; userinfo redacted in `__repr__`.
