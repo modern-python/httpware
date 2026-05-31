@@ -9,10 +9,7 @@ if import_checker.is_msgspec_installed:
     import msgspec
 
 
-MISSING_DEPENDENCY_MESSAGE = (
-    "MsgspecDecoder requires the 'msgspec' extra. "
-    "Install with: pip install httpware[msgspec]"
-)
+MISSING_DEPENDENCY_MESSAGE = "MsgspecDecoder requires the 'msgspec' extra. Install with: pip install httpware[msgspec]"
 
 T = TypeVar("T")
 
