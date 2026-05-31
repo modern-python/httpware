@@ -397,3 +397,65 @@ async def test_on_error_handler_receives_correct_exception_instance() -> None:
 
     assert seen == [raised]
     assert seen[0] is raised
+
+
+def test_decorators_satisfy_middleware_protocol() -> None:
+    """Each decorator returns an object that isinstance() recognizes as Middleware."""
+
+    @before_request
+    async def br(request: Request) -> Request:
+        return request
+
+    @after_response
+    async def ar(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return response
+
+    @on_error
+    async def oe(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return None
+
+    assert isinstance(br, Middleware)
+    assert isinstance(ar, Middleware)
+    assert isinstance(oe, Middleware)
+
+
+async def test_decorated_middlewares_compose_in_chain() -> None:
+    """Phase decorators interoperate with class-based middleware in one compose() call."""
+
+    @before_request
+    async def stamp(request: Request) -> Request:
+        return request.with_header("x-stamp", "1")
+
+    @after_response
+    async def tag(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return Response(
+            status=response.status,
+            headers={**response.headers, "x-tag": "1"},
+            content=response.content,
+            url=response.url,
+            elapsed=response.elapsed,
+        )
+
+    seen_headers: list[str] = []
+
+    class Inspect:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            seen_headers.append(request.headers.get("x-stamp", ""))
+            return await next(request)
+
+    response = await compose([stamp, Inspect(), tag], _OkTransport())(_make_request())
+
+    assert seen_headers == ["1"]  # stamp ran before Inspect
+    assert response.headers["x-tag"] == "1"  # tag ran after the chain
+
+
+def test_repr_shows_original_function_name() -> None:
+    """repr() includes the phase name and the original user function's qualname."""
+
+    @before_request
+    async def my_stamp(request: Request) -> Request:
+        return request
+
+    text = repr(my_stamp)
+    assert "before_request" in text
+    assert "my_stamp" in text
