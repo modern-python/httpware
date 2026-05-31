@@ -26,4 +26,64 @@ class Middleware(Protocol):
         ...
 
 
-__all__ = ["Middleware", "Next"]
+def before_request(f: Callable[[Request], Awaitable[Request]]) -> Middleware:
+    """Wrap an async request transform into a Middleware.
+
+    The decorated function receives the incoming Request and returns a
+    (possibly modified) Request, which is then forwarded down the chain.
+    """
+
+    class _BeforeRequestMiddleware:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            return await next(await f(request))
+
+        def __repr__(self) -> str:
+            return f"<before_request({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+
+    return _BeforeRequestMiddleware()
+
+
+def after_response(f: Callable[[Request, Response], Awaitable[Response]]) -> Middleware:
+    """Wrap an async response transform into a Middleware.
+
+    The decorated function receives the original Request and the Response
+    returned by the chain, and returns a (possibly modified) Response.
+    """
+
+    class _AfterResponseMiddleware:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            response = await next(request)
+            return await f(request, response)
+
+        def __repr__(self) -> str:
+            return f"<after_response({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+
+    return _AfterResponseMiddleware()
+
+
+def on_error(f: Callable[[Request, Exception], Awaitable[Response | None]]) -> Middleware:
+    """Wrap an async error handler into a Middleware.
+
+    Catches Exception (not BaseException, so asyncio.CancelledError
+    propagates). If the handler returns a Response, that Response is
+    returned to the caller. If the handler returns None, the original
+    exception is re-raised.
+    """
+
+    class _OnErrorMiddleware:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            try:
+                return await next(request)
+            except Exception as exc:
+                result = await f(request, exc)
+                if result is None:
+                    raise
+                return result
+
+        def __repr__(self) -> str:
+            return f"<on_error({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+
+    return _OnErrorMiddleware()
+
+
+__all__ = ["Middleware", "Next", "after_response", "before_request", "on_error"]

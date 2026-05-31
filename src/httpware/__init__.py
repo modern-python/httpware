@@ -21,7 +21,7 @@ from httpware.errors import (
     UnauthorizedError,
     UnprocessableEntityError,
 )
-from httpware.middleware import Middleware, Next
+from httpware.middleware import Middleware, Next, after_response, before_request, on_error
 from httpware.request import Request
 from httpware.response import Response, StreamResponse
 from httpware.transports import Transport
@@ -57,4 +57,7 @@ __all__ = [
     "TransportError",
     "UnauthorizedError",
     "UnprocessableEntityError",
+    "after_response",
+    "before_request",
+    "on_error",
 ]

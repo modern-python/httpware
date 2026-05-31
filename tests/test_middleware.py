@@ -7,8 +7,9 @@ from typing import get_type_hints
 
 import pytest
 
+import httpware
 from httpware._internal.chain import compose
-from httpware.middleware import Middleware, Next
+from httpware.middleware import Middleware, Next, after_response, before_request, on_error
 from httpware.request import Request
 from httpware.response import Response, StreamResponse
 
@@ -265,11 +266,218 @@ async def test_compose_returned_callable_is_reusable() -> None:
     assert count == 3  # noqa: PLR2004
 
 
+async def test_before_request_transforms_request() -> None:
+    """@before_request wraps an async request transform; downstream sees the mutation."""
+
+    @before_request
+    async def stamp(request: Request) -> Request:
+        return request.with_header("x-trace", "abc123")
+
+    seen: list[Request] = []
+
+    class Inspect:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            seen.append(request)
+            return await next(request)
+
+    await compose([stamp, Inspect()], _OkTransport())(_make_request())
+
+    assert seen[0].headers["x-trace"] == "abc123"
+
+
+async def test_after_response_transforms_response() -> None:
+    """@after_response wraps an async response transform; caller sees the modification."""
+
+    @after_response
+    async def add_header(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return Response(
+            status=response.status,
+            headers={**response.headers, "x-trace": "abc123"},
+            content=response.content,
+            url=response.url,
+            elapsed=response.elapsed,
+        )
+
+    response = await compose([add_header], _OkTransport())(_make_request())
+
+    assert response.headers["x-trace"] == "abc123"
+    assert response.headers["x-from"] == "transport"  # original still present
+
+
 def test_middleware_and_next_are_reexported_at_package_root() -> None:
     """`from httpware import Middleware, Next` works in addition to the subpackage path."""
-    import httpware  # noqa: PLC0415
-
     assert httpware.Middleware is Middleware
     assert httpware.Next is Next
     assert "Middleware" in httpware.__all__
     assert "Next" in httpware.__all__
+
+
+class _FailingTransport:
+    """Transport whose __call__ raises a chosen exception."""
+
+    def __init__(self, exc: BaseException) -> None:
+        self._exc = exc
+
+    async def __call__(self, request: Request) -> Response:  # noqa: ARG002
+        raise self._exc
+
+    def stream(  # pragma: no cover - not exercised in 2-2
+        self, request: Request
+    ) -> AbstractAsyncContextManager[StreamResponse]:
+        raise NotImplementedError
+
+    async def aclose(self) -> None:  # pragma: no cover - not exercised in 2-2
+        return None
+
+
+async def test_on_error_returns_response_swallows_exception() -> None:
+    """When the handler returns a Response, the caller gets it; no exception escapes."""
+
+    @on_error
+    async def recover(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return Response(
+            status=503,
+            headers={"x-recovered": "true"},
+            content=b"recovered",
+            url=request.url,
+            elapsed=0.0,
+        )
+
+    transport = _FailingTransport(RuntimeError("boom"))
+    response = await compose([recover], transport)(_make_request())
+
+    assert response.status == 503  # noqa: PLR2004
+    assert response.headers["x-recovered"] == "true"
+    assert response.content == b"recovered"
+
+
+async def test_on_error_returns_none_reraises() -> None:
+    """When the handler returns None, the original exception is re-raised with traceback intact."""
+
+    @on_error
+    async def pass_through(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return None
+
+    transport = _FailingTransport(RuntimeError("boom"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await compose([pass_through], transport)(_make_request())
+
+
+async def test_on_error_does_not_catch_cancelled_error() -> None:
+    """asyncio.CancelledError is not Exception; the handler must not be invoked."""
+    invocations: list[Exception] = []
+
+    @on_error
+    async def should_not_run(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        invocations.append(exc)
+        return None
+
+    class Cancel:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await compose([should_not_run, Cancel()], _OkTransport())(_make_request())
+
+    assert invocations == []
+
+
+async def test_on_error_handler_receives_correct_exception_instance() -> None:
+    """The handler's `exc` parameter is the same instance the transport raised."""
+    raised = RuntimeError("specific instance")
+    seen: list[Exception] = []
+
+    @on_error
+    async def capture(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        seen.append(exc)
+        return None
+
+    with pytest.raises(RuntimeError):
+        await compose([capture], _FailingTransport(raised))(_make_request())
+
+    assert seen == [raised]
+    assert seen[0] is raised
+
+
+def test_decorators_satisfy_middleware_protocol() -> None:
+    """Each decorator returns an object that isinstance() recognizes as Middleware."""
+
+    @before_request
+    async def br(request: Request) -> Request:
+        return request
+
+    @after_response
+    async def ar(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return response
+
+    @on_error
+    async def oe(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return None
+
+    assert isinstance(br, Middleware)
+    assert isinstance(ar, Middleware)
+    assert isinstance(oe, Middleware)
+
+
+async def test_decorated_middlewares_compose_in_chain() -> None:
+    """Phase decorators interoperate with class-based middleware in one compose() call."""
+
+    @before_request
+    async def stamp(request: Request) -> Request:
+        return request.with_header("x-stamp", "1")
+
+    @after_response
+    async def tag(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return Response(
+            status=response.status,
+            headers={**response.headers, "x-tag": "1"},
+            content=response.content,
+            url=response.url,
+            elapsed=response.elapsed,
+        )
+
+    seen_headers: list[str] = []
+
+    class Inspect:
+        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+            seen_headers.append(request.headers.get("x-stamp", ""))
+            return await next(request)
+
+    response = await compose([stamp, Inspect(), tag], _OkTransport())(_make_request())
+
+    assert seen_headers == ["1"]  # stamp ran before Inspect
+    assert response.headers["x-tag"] == "1"  # tag ran after the chain
+
+
+def test_repr_shows_original_function_name() -> None:
+    """repr() includes the phase name and the original user function's qualname."""
+
+    @before_request
+    async def my_stamp(request: Request) -> Request:
+        return request
+
+    @after_response
+    async def my_tag(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return response
+
+    @on_error
+    async def my_recover(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return None
+
+    assert "before_request" in repr(my_stamp)
+    assert "my_stamp" in repr(my_stamp)
+    assert "after_response" in repr(my_tag)
+    assert "my_tag" in repr(my_tag)
+    assert "on_error" in repr(my_recover)
+    assert "my_recover" in repr(my_recover)
+
+
+def test_decorators_reexported_at_package_root() -> None:
+    """`from httpware import before_request, after_response, on_error` works."""
+    assert httpware.before_request is before_request
+    assert httpware.after_response is after_response
+    assert httpware.on_error is on_error
+    assert "before_request" in httpware.__all__
+    assert "after_response" in httpware.__all__
+    assert "on_error" in httpware.__all__
