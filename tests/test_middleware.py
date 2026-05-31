@@ -458,9 +458,20 @@ def test_repr_shows_original_function_name() -> None:
     async def my_stamp(request: Request) -> Request:
         return request
 
-    text = repr(my_stamp)
-    assert "before_request" in text
-    assert "my_stamp" in text
+    @after_response
+    async def my_tag(request: Request, response: Response) -> Response:  # noqa: ARG001
+        return response
+
+    @on_error
+    async def my_recover(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+        return None
+
+    assert "before_request" in repr(my_stamp)
+    assert "my_stamp" in repr(my_stamp)
+    assert "after_response" in repr(my_tag)
+    assert "my_tag" in repr(my_tag)
+    assert "on_error" in repr(my_recover)
+    assert "my_recover" in repr(my_recover)
 
 
 def test_decorators_reexported_at_package_root() -> None:
