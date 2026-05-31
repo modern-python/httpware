@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from httpware import ClientConfig, Limits, Timeout
+from httpware.decoders.pydantic import PydanticDecoder
 
 
 def test_timeout_defaults() -> None:
@@ -22,6 +23,8 @@ def test_client_config_defaults() -> None:
     assert cfg.default_query == {}
     assert cfg.timeout == Timeout()
     assert cfg.limits == Limits()
+    assert isinstance(cfg.decoder, PydanticDecoder)
+    assert cfg.middleware == ()
 
 
 def test_client_config_default_mappings_are_independent() -> None:

@@ -3,6 +3,10 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from httpware.decoders import ResponseDecoder
+from httpware.decoders.pydantic import PydanticDecoder
+from httpware.middleware import Middleware
+
 
 @dataclass(frozen=True, slots=True)
 class Timeout:
@@ -32,3 +36,5 @@ class ClientConfig:
     default_query: Mapping[str, str] = field(default_factory=dict)
     timeout: Timeout = field(default_factory=Timeout)
     limits: Limits = field(default_factory=Limits)
+    decoder: ResponseDecoder = field(default_factory=PydanticDecoder)
+    middleware: tuple[Middleware, ...] = ()

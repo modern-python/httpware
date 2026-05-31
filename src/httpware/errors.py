@@ -35,7 +35,7 @@ def _strip_userinfo(url: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
-def _reconstruct_status_error(  # noqa: PLR0913
+def _reconstruct_status_error(
     cls: "type[StatusError]",
     status: int,
     body: bytes,
@@ -85,7 +85,7 @@ class StatusError(ClientError):
     request_method: str
     request_url: str
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         *,
         status: int,
