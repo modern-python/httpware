@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
+from http import HTTPStatus
 from typing import get_type_hints
 
 import pytest
@@ -64,7 +65,7 @@ async def test_empty_list_composes_to_transport_call() -> None:
     request = _make_request()
     response = await dispatch(request)
 
-    assert response.status == 200  # noqa: PLR2004
+    assert response.status == HTTPStatus.OK
     assert response.content == b"transport"
     assert response.headers["x-from"] == "transport"
 
@@ -192,7 +193,7 @@ async def test_short_circuit_returns_synthesized_response() -> None:
 
     response = await compose([ShortCircuit(), NeverReached()], CountingTransport())(_make_request())
 
-    assert response.status == 418  # noqa: PLR2004
+    assert response.status == HTTPStatus.IM_A_TEAPOT
     assert response.content == b"teapot"
     assert transport_calls == 0
 
@@ -265,7 +266,7 @@ async def test_compose_returned_callable_is_reusable() -> None:
 
     for _ in range(3):
         response = await dispatch(_make_request())
-        assert response.status == 200  # noqa: PLR2004
+        assert response.status == HTTPStatus.OK
 
     assert count == 3  # noqa: PLR2004
 
@@ -332,7 +333,7 @@ async def test_on_error_returns_response_swallows_exception() -> None:
     transport = RecordedTransport(default=RuntimeError("boom"))
     response = await compose([recover], transport)(_make_request())
 
-    assert response.status == 503  # noqa: PLR2004
+    assert response.status == HTTPStatus.SERVICE_UNAVAILABLE
     assert response.headers["x-recovered"] == "true"
     assert response.content == b"recovered"
 

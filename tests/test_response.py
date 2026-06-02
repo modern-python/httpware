@@ -1,6 +1,7 @@
 """Unit tests for httpware.response.Response."""
 
 from dataclasses import FrozenInstanceError
+from http import HTTPStatus
 
 import pytest
 
@@ -108,12 +109,12 @@ def test_response_with_headers_overrides_existing_key() -> None:
 def test_response_with_status_replaces_status() -> None:
     resp = Response(status=200, headers={"a": "1"}, content=b"body", url="/x", elapsed=0.5)
     new = resp.with_status(503)
-    assert new.status == 503  # noqa: PLR2004
+    assert new.status == HTTPStatus.SERVICE_UNAVAILABLE
     assert new.headers == {"a": "1"}
     assert new.content == b"body"
     assert new.url == "/x"
     assert new.elapsed == 0.5  # noqa: PLR2004
-    assert resp.status == 200  # noqa: PLR2004
+    assert resp.status == HTTPStatus.OK
 
 
 def test_response_with_status_accepts_arbitrary_int() -> None:
