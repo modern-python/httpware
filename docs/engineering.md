@@ -1,6 +1,6 @@
 # `httpware` engineering notes
 
-This doc is the single distilled reference for `httpware` design rationale, protocol seams, and remaining roadmap. It complements [`../CLAUDE.md`](../CLAUDE.md): `CLAUDE.md` holds AI-enforced invariants and operational commands; this file holds the reasoning and the structural map. Historical planning artifacts live in [`archive/`](./archive/) and are cited only for original rationale.
+This doc is the single distilled reference for `httpware` design rationale, protocol seams, and remaining roadmap. It complements [`../CLAUDE.md`](../CLAUDE.md): `CLAUDE.md` holds AI-enforced invariants and operational commands; this file holds the reasoning and the structural map.
 
 ## 1. Project intent
 
@@ -131,7 +131,7 @@ Caller-facing pattern: consumers select the implementation by passing it explici
 
 ## 8. Remaining roadmap
 
-Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/superpowers/plans/` use kebab-case descriptions, not the story IDs — these IDs are kept here only as a stable mapping to the archived epic specs (`archive/epics.md`).
+Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/superpowers/plans/` use kebab-case descriptions, not the story IDs — these IDs are retained as a stable identifier convention from the original epic structure.
 
 ### Epic 1 — Make typed HTTP requests with sensible defaults
 
@@ -178,7 +178,7 @@ Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/
 - **6-4** CI enforcement gates (codify the invariants in Section 2 as CI jobs).
 - **6-5** Release flow with Trusted Publishers + Sigstore.
 
-When work starts on a roadmap item, it gets a superpowers spec at `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and a plan at `docs/superpowers/plans/YYYY-MM-DD-<topic>-plan.md`. The bmad-era 40KB story specs in `archive/stories/` cover 1-1 through 1-5 and are retired going forward.
+When work starts on a roadmap item, it gets a spec at `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and a plan at `docs/superpowers/plans/YYYY-MM-DD-<topic>-plan.md`.
 
 ## 9. Deferred work
 
