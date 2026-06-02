@@ -10,6 +10,7 @@ import dataclasses
 import json
 import time
 from contextlib import AbstractAsyncContextManager
+from http import HTTPStatus
 from typing import Any
 
 import httpx2
@@ -141,10 +142,10 @@ class Httpx2Transport:
         # to the last value — see class docstring; widens with the
         # multi-valued header contract in a later story.
         headers = dict(resp.headers)
-        if 400 <= status < 600:  # noqa: PLR2004
+        if HTTPStatus.BAD_REQUEST <= status < 600:  # noqa: PLR2004 — 600 is the synthetic 5xx upper bound
             exc_class = STATUS_TO_EXCEPTION.get(
                 status,
-                ClientStatusError if status < 500 else ServerStatusError,  # noqa: PLR2004
+                ClientStatusError if status < HTTPStatus.INTERNAL_SERVER_ERROR else ServerStatusError,
             )
             raise exc_class(
                 status=status,

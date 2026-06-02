@@ -46,7 +46,7 @@ repository = "https://github.com/modern-python/httpware"
 docs = "https://httpware.readthedocs.io"
 
 [build-system]
-requires = ["uv_build>=0.11,<0.12"]
+requires = ["uv_build>=0.11,<1.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]

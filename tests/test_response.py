@@ -1,6 +1,7 @@
 """Unit tests for httpware.response.Response."""
 
 from dataclasses import FrozenInstanceError
+from http import HTTPStatus
 
 import pytest
 
@@ -83,6 +84,18 @@ def test_response_json_parses_body() -> None:
     assert resp.json() == {"a": 1, "b": [2, 3]}
 
 
+def test_response_json_uses_declared_charset() -> None:
+    body = '{"name": "café"}'.encode("iso-8859-1")
+    resp = Response(
+        status=HTTPStatus.OK,
+        headers={"content-type": "application/json; charset=iso-8859-1"},
+        content=body,
+        url="/",
+        elapsed=0.0,
+    )
+    assert resp.json() == {"name": "café"}
+
+
 def test_response_equality_on_identical_fields() -> None:
     r1 = Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)
     r2 = Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)
@@ -108,12 +121,12 @@ def test_response_with_headers_overrides_existing_key() -> None:
 def test_response_with_status_replaces_status() -> None:
     resp = Response(status=200, headers={"a": "1"}, content=b"body", url="/x", elapsed=0.5)
     new = resp.with_status(503)
-    assert new.status == 503  # noqa: PLR2004
+    assert new.status == HTTPStatus.SERVICE_UNAVAILABLE
     assert new.headers == {"a": "1"}
     assert new.content == b"body"
     assert new.url == "/x"
     assert new.elapsed == 0.5  # noqa: PLR2004
-    assert resp.status == 200  # noqa: PLR2004
+    assert resp.status == HTTPStatus.OK
 
 
 def test_response_with_status_accepts_arbitrary_int() -> None:

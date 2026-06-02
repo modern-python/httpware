@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+from http import HTTPStatus
 
 import httpx2
 import pytest
@@ -69,7 +70,7 @@ async def test_success_path_returns_response() -> None:
         await transport.aclose()
 
     assert isinstance(resp, Response)
-    assert resp.status == 200  # noqa: PLR2004
+    assert resp.status == HTTPStatus.OK
     assert resp.content == b"hello"
     assert resp.url == "http://example.com/x"
     # lowercase ASCII keys per AC11
@@ -100,7 +101,7 @@ async def test_success_status_200_returns_response_not_raises() -> None:
         resp = await transport(Request(method="GET", url="http://example.com/"))
     finally:
         await transport.aclose()
-    assert resp.status == 200  # noqa: PLR2004
+    assert resp.status == HTTPStatus.OK
 
 
 @pytest.mark.parametrize(("code", "exc_cls"), _STATUS_LEAVES)
@@ -132,7 +133,7 @@ async def test_unknown_4xx_falls_back_to_client_status_error() -> None:
     finally:
         await transport.aclose()
     assert type(info.value) is ClientStatusError
-    assert info.value.status == 418  # noqa: PLR2004
+    assert info.value.status == HTTPStatus.IM_A_TEAPOT
 
 
 async def test_unknown_5xx_falls_back_to_server_status_error() -> None:
@@ -143,7 +144,7 @@ async def test_unknown_5xx_falls_back_to_server_status_error() -> None:
     finally:
         await transport.aclose()
     assert type(info.value) is ServerStatusError
-    assert info.value.status == 504  # noqa: PLR2004
+    assert info.value.status == HTTPStatus.GATEWAY_TIMEOUT
 
 
 # ----- (e) _try_decode_json branches ----------------------------------------
