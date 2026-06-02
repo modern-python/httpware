@@ -48,8 +48,13 @@ class Response:
             return self.content.decode("utf-8")
 
     def json(self) -> Any:  # noqa: ANN401
-        """Parse `content` as JSON."""
-        return json.loads(self.content)
+        """Parse `content` as JSON using the declared charset (default UTF-8).
+
+        Raises:
+            json.JSONDecodeError: if the body is not valid JSON.
+
+        """
+        return json.loads(self.text)
 
     def with_headers(self, headers: Mapping[str, str]) -> Self:
         """Return a copy with the given headers merged in (incoming keys override existing)."""

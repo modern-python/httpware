@@ -84,6 +84,18 @@ def test_response_json_parses_body() -> None:
     assert resp.json() == {"a": 1, "b": [2, 3]}
 
 
+def test_response_json_uses_declared_charset() -> None:
+    body = '{"name": "café"}'.encode("iso-8859-1")
+    resp = Response(
+        status=HTTPStatus.OK,
+        headers={"content-type": "application/json; charset=iso-8859-1"},
+        content=body,
+        url="/",
+        elapsed=0.0,
+    )
+    assert resp.json() == {"name": "café"}
+
+
 def test_response_equality_on_identical_fields() -> None:
     r1 = Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)
     r2 = Response(status=200, headers={"a": "1"}, content=b"x", url="/", elapsed=0.5)
