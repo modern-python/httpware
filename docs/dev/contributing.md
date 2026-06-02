@@ -27,8 +27,6 @@ just test           # pytest with coverage
 - Do NOT use `from __future__ import annotations`. Python 3.11+ is the floor.
 - Module docstrings are required; per-method docstrings only when types alone are insufficient.
 
-See `docs/concepts/middleware.md` and `docs/recipes/custom-middleware.md` (once published) for architecture conventions.
-
 ## Architecture invariants
 
 These are enforced by CI grep gates. Do not break them in pull requests:
