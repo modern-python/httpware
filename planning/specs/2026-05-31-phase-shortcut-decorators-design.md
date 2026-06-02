@@ -3,7 +3,7 @@
 - **Date:** 2026-05-31
 - **Status:** approved, ready for plan
 - **Scope:** Story 2-2 (second story of Epic 2). Defines `@before_request`, `@after_response`, and `@on_error` decorators that wrap simple async user functions into `Middleware`-conforming instances. Out of scope: AsyncClient wiring (2-5), `Request.with_*` helpers beyond what exists (2-3), auth coercion (2-4).
-- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
+- **Roadmap pointer:** `docs/dev/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
 
 ## Why
 
@@ -24,7 +24,7 @@ The shape is decided by the archived epic spec (`docs/archive/epics.md` Epic 2 �
 | `@on_error` return contract | If the handler returns a `Response`, that Response is returned to the caller. If it returns `None`, the original exception is re-raised (bare `raise` to preserve traceback). |
 | `BaseExceptionGroup` carve-out | None. PEP 654 `ExceptionGroup` is a subclass of `Exception` and is caught like any other. Users carve out groups themselves if needed. |
 | Public exports | `before_request`, `after_response`, `on_error` exported from `httpware.middleware` and re-exported at `httpware`. Matches the existing `Middleware` / `Next` re-export pattern. |
-| Roadmap doc fix | Bundled in: `docs/engineering.md` §8 says `(@on_request, @on_response, @on_error)`. Rewrite to `(@before_request, @after_response, @on_error)` to match the spec. |
+| Roadmap doc fix | Bundled in: `docs/dev/engineering.md` §8 says `(@on_request, @on_response, @on_error)`. Rewrite to `(@before_request, @after_response, @on_error)` to match the spec. |
 | Scope | Strict — no AsyncClient wiring, no extra `Request` helpers, no auth coercion. Those land in stories 2-3 through 2-5. |
 
 ## File structure
@@ -34,7 +34,7 @@ The shape is decided by the archived epic spec (`docs/archive/epics.md` Epic 2 �
 ```
 src/httpware/middleware/__init__.py    # add 3 decorator factories + 3 private classes (~65 lines added)
 src/httpware/__init__.py               # re-export 3 names; extend __all__
-docs/engineering.md                    # fix §8 line 142 decorator names
+docs/dev/engineering.md                    # fix §8 line 142 decorator names
 CHANGELOG.md                           # add Story 2.2 bullet under [Unreleased] / ### Added
 tests/test_middleware.py               # 10 new tests appended (14 → 24)
 ```
@@ -161,7 +161,7 @@ Update `src/httpware/__init__.py`:
 - Change the import line `from httpware.middleware import Middleware, Next` to `from httpware.middleware import Middleware, Next, after_response, before_request, on_error`.
 - Insert `"after_response"`, `"before_request"`, `"on_error"` into the `__all__` list. The existing `__all__` is sorted by ASCII order (uppercase < lowercase), so lowercase entries sort to the end of the list — append the three new names after the existing final entry `"UnprocessableEntityError"`, in alphabetic order: `"after_response"`, then `"before_request"`, then `"on_error"`.
 
-Update `docs/engineering.md` §8 line ~142:
+Update `docs/dev/engineering.md` §8 line ~142:
 - From: `**2-2** Phase shortcut decorators (\`@on_request\`, \`@on_response\`, \`@on_error\`).`
 - To: `**2-2** Phase shortcut decorators (\`@before_request\`, \`@after_response\`, \`@on_error\`).`
 
@@ -226,7 +226,7 @@ Ten new tests. Total `tests/test_middleware.py` grows from 14 to 24.
 
 - `src/httpware/middleware/__init__.py` exports `before_request`, `after_response`, `on_error` in addition to the existing `Middleware` and `Next`.
 - `src/httpware/__init__.py` re-exports the three new names and adds them to `__all__`.
-- `docs/engineering.md` §8 line 142 reflects the corrected decorator names.
+- `docs/dev/engineering.md` §8 line 142 reflects the corrected decorator names.
 - `CHANGELOG.md` has a Story 2.2 bullet under `[Unreleased]` / `### Added`.
 - `tests/test_middleware.py` contains 10 new tests; all 24 tests pass.
 - `just test` shows the increment from baseline; 100% line coverage on the new code.

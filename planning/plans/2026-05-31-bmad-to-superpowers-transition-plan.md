@@ -4,7 +4,7 @@
 
 **Goal:** Cutover the `httpware` project from bmad to superpowers in a single PR. After merge, all future work runs through the superpowers flow (brainstorming → writing-plans → executing-plans → requesting-code-review).
 
-**Architecture:** Docs-only refactor. Move five large bmad planning files plus the `docs/stories/` directory into `docs/archive/`. Write one new distilled `docs/engineering.md` (~250–350 lines) sourcing content from the archived docs and `CLAUDE.md`. Update `CLAUDE.md` to point at the new structure. Delete `.review-tmp/`. No source code changes.
+**Architecture:** Docs-only refactor. Move five large bmad planning files plus the `docs/stories/` directory into `docs/archive/`. Write one new distilled `docs/dev/engineering.md` (~250–350 lines) sourcing content from the archived docs and `CLAUDE.md`. Update `CLAUDE.md` to point at the new structure. Delete `.review-tmp/`. No source code changes.
 
 **Tech Stack:** Markdown only. Git for renames. `just lint` and `just test` for regression verification (they should remain green; the cutover touches no source).
 
@@ -13,17 +13,17 @@
 **Prereqs already satisfied:**
 - Story 1-5 merged to `main` (PR #5).
 - Branch rebased onto post-1-5 `main`.
-- Spec at `docs/superpowers/specs/2026-05-31-bmad-to-superpowers-transition-design.md` (committed).
-- This plan file exists at `docs/superpowers/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` (untracked until Task 6 stages it).
+- Spec at `planning/specs/2026-05-31-bmad-to-superpowers-transition-design.md` (committed).
+- This plan file exists at `planning/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` (untracked until Task 6 stages it).
 
 ---
 
 ## File Structure
 
 **Files created:**
-- `docs/engineering.md` — the distilled doc (~250–350 lines). Single source for design rationale + roadmap.
+- `docs/dev/engineering.md` — the distilled doc (~250–350 lines). Single source for design rationale + roadmap.
 - `docs/archive/README.md` — ~1 paragraph framing the archive as historical reference.
-- `docs/superpowers/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` — this file.
+- `planning/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` — this file.
 
 **Files moved (git mv, preserves history):**
 - `docs/prd.md` → `docs/archive/prd.md`
@@ -40,7 +40,7 @@
 - `.review-tmp/` (entire directory) — bmad code-review artifact dump.
 
 **Files untouched (deliberate):**
-- `docs/deferred-work.md` — kept at repo root as the active deferral log.
+- `planning/deferred-work.md` — kept at repo root as the active deferral log.
 - All `src/httpware/**`, `tests/**`, `pyproject.toml`, `Justfile`, `.github/**`, `CHANGELOG.md`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE` — no source/CI changes.
 
 ---
@@ -58,7 +58,7 @@
 - [ ] **Step 1: Verify branch and working-tree state**
 
 Run: `git branch --show-current && git status --short`
-Expected: branch is `chore/bmad-to-superpowers-transition`. Working tree has untracked `docs/superpowers/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` (this file) and nothing else.
+Expected: branch is `chore/bmad-to-superpowers-transition`. Working tree has untracked `planning/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` (this file) and nothing else.
 
 If anything else is dirty, stop and resolve before proceeding.
 
@@ -134,12 +134,12 @@ Expected: ~18 lines.
 
 ---
 
-## Task 3: Write `docs/engineering.md`
+## Task 3: Write `docs/dev/engineering.md`
 
 This is the largest task. The doc has nine sections (per the spec). Build it section by section. Final length target: 250–350 lines.
 
 **Files:**
-- Create: `docs/engineering.md`
+- Create: `docs/dev/engineering.md`
 
 **Source material:**
 - `CLAUDE.md` — invariants and conventions (current file at repo root).
@@ -150,7 +150,7 @@ This is the largest task. The doc has nine sections (per the spec). Build it sec
 
 - [ ] **Step 1: Write Section 1 — Project intent (3–4 sentences)**
 
-Append to `docs/engineering.md`:
+Append to `docs/dev/engineering.md`:
 
 ```markdown
 # `httpware` engineering notes
@@ -332,7 +332,7 @@ Append:
 ```markdown
 ## 8. Remaining roadmap
 
-Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/superpowers/plans/` use kebab-case descriptions, not the story IDs — these IDs are kept here only as a stable mapping to the archived epic specs (`archive/epics.md`).
+Twenty-seven stories remain. Topic slugs in `planning/specs/` and `planning/plans/` use kebab-case descriptions, not the story IDs — these IDs are kept here only as a stable mapping to the archived epic specs (`archive/epics.md`).
 
 ### Epic 1 — Make typed HTTP requests with sensible defaults
 
@@ -379,7 +379,7 @@ Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/
 - **6-4** CI enforcement gates (codify the invariants in Section 2 as CI jobs).
 - **6-5** Release flow with Trusted Publishers + Sigstore.
 
-When work starts on a roadmap item, it gets a superpowers spec at `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and a plan at `docs/superpowers/plans/YYYY-MM-DD-<topic>-plan.md`. The bmad-era 40KB story specs in `archive/stories/` cover 1-1 through 1-5 and are retired going forward.
+When work starts on a roadmap item, it gets a superpowers spec at `planning/specs/YYYY-MM-DD-<topic>-design.md` and a plan at `planning/plans/YYYY-MM-DD-<topic>-plan.md`. The bmad-era 40KB story specs in `archive/stories/` cover 1-1 through 1-5 and are retired going forward.
 ```
 
 - [ ] **Step 9: Write Section 9 — Deferred work pointer**
@@ -394,23 +394,23 @@ Review-surfaced items that are real but not actionable now live in [`./deferred-
 
 - [ ] **Step 10: Verify the engineering doc**
 
-Run: `wc -l docs/engineering.md`
+Run: `wc -l docs/dev/engineering.md`
 Expected: between 250 and 350 lines. If significantly shorter, sections were skipped; if longer, tighten the prose.
 
-Run: `grep -c "^## " docs/engineering.md`
+Run: `grep -c "^## " docs/dev/engineering.md`
 Expected: `9` (nine top-level sections, one per spec requirement).
 
-Run: `grep -n "TBD\|TODO\|XXX" docs/engineering.md`
+Run: `grep -n "TBD\|TODO\|XXX" docs/dev/engineering.md`
 Expected: no matches.
 
 Run (sanity-check internal links):
 ```bash
-grep -oE '\]\([^)]+\)' docs/engineering.md | sort -u
+grep -oE '\]\([^)]+\)' docs/dev/engineering.md | sort -u
 ```
 Expected: every relative link points to a file that exists. Specifically `../CLAUDE.md`, `./archive/`, `./deferred-work.md`, `archive/architecture.md` should all be reachable from `docs/`. Verify each:
 
 ```bash
-ls ../CLAUDE.md docs/archive docs/deferred-work.md docs/archive/architecture.md
+ls ../CLAUDE.md docs/archive planning/deferred-work.md docs/archive/architecture.md
 ```
 
 Each should exist.
@@ -450,19 +450,19 @@ Replace the entire `## Project Overview` section (between the heading and the st
 
 **Where to find what:**
 
-- [`docs/engineering.md`](docs/engineering.md) — the distilled design reference: invariants and *why*, the five protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
-- [`docs/deferred-work.md`](docs/deferred-work.md) — review-surfaced items that are real but not actionable now.
-- [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`docs/superpowers/plans/`](docs/superpowers/plans/) — per-feature design specs and implementation plans (active work).
+- [`docs/dev/engineering.md`](docs/dev/engineering.md) — the distilled design reference: invariants and *why*, the five protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
+- [`planning/deferred-work.md`](planning/deferred-work.md) — review-surfaced items that are real but not actionable now.
+- [`planning/specs/`](planning/specs/) and [`planning/plans/`](planning/plans/) — per-feature design specs and implementation plans (active work).
 - [`docs/archive/`](docs/archive/) — historical bmad-era planning bundle (PRD, architecture, epics, product briefs, per-story specs for 1-1 through 1-5). Consult only for original rationale or specific FR/NFR citations.
 
-**Per-feature workflow:** brainstorming → spec in `docs/superpowers/specs/` → writing-plans → plan in `docs/superpowers/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
+**Per-feature workflow:** brainstorming → spec in `planning/specs/` → writing-plans → plan in `planning/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
 ```
 
 The "Architecture invariants (CI-enforced)", "Code conventions", "Module layout", "Protocol seams", "Testing", "Commands", and "When in doubt" sections stay **verbatim**. These are operational rules and quick references that the AI applies directly; they are not duplicated in `engineering.md` (which holds the rationale, not the rules).
 
 - [ ] **Step 3: Update the "When in doubt" section**
 
-The existing "When in doubt" section may reference `base-client/docs/architecture.md`. Update any such reference to `docs/engineering.md` (primary) and `docs/archive/architecture.md` (historical detail).
+The existing "When in doubt" section may reference `base-client/docs/architecture.md`. Update any such reference to `docs/dev/engineering.md` (primary) and `docs/archive/architecture.md` (historical detail).
 
 Run: `grep -n "base-client/docs\|docs/prd.md\|docs/architecture.md\|docs/epics.md\|docs/stories\|product-brief" CLAUDE.md`
 
@@ -476,7 +476,7 @@ Expected: roughly 105–120 lines (the original was 104; the new Project Overvie
 Run: `grep -c "^## " CLAUDE.md`
 Expected: matches the original section count (no sections lost). The original had Project Overview, Commands, Architecture invariants (CI-enforced), Code conventions, Module layout, Protocol seams, Testing, When in doubt — count `8`.
 
-Run: `grep -n "docs/engineering.md\|docs/archive" CLAUDE.md`
+Run: `grep -n "docs/dev/engineering.md\|docs/archive" CLAUDE.md`
 Expected: multiple matches in the new Project Overview section.
 
 ---
@@ -538,8 +538,8 @@ R  docs/stories/1-4-transport-protocol-and-httpx2transport-adapter.md -> docs/ar
 R  docs/stories/1-5-responsedecoder-protocol-and-pydantic-adapter.md -> docs/archive/stories/1-5-responsedecoder-protocol-and-pydantic-adapter.md
 R  docs/stories/sprint-status.yaml -> docs/archive/stories/sprint-status.yaml
 ?? docs/archive/README.md                                              # untracked
-?? docs/engineering.md
-?? docs/superpowers/plans/2026-05-31-bmad-to-superpowers-transition-plan.md
+?? docs/dev/engineering.md
+?? planning/plans/2026-05-31-bmad-to-superpowers-transition-plan.md
 ```
 
 No `.review-tmp/` anywhere. No source/`pyproject.toml`/CI changes.
@@ -550,7 +550,7 @@ If any line begins with `??` for a file not in the list above, or any source fil
 
 Run: `git add CLAUDE.md docs/`
 
-(`git add docs/` picks up the new `docs/archive/README.md`, `docs/engineering.md`, and `docs/superpowers/plans/2026-05-31-...-plan.md` in one step.)
+(`git add docs/` picks up the new `docs/archive/README.md`, `docs/dev/engineering.md`, and `planning/plans/2026-05-31-...-plan.md` in one step.)
 
 Re-run: `git status --short`
 Expected: every line begins with a capital letter (`A`, `M`, or `R`) in column 1 and a space in column 2 (everything staged, nothing left in the working tree).
@@ -563,7 +563,7 @@ git commit -m "$(cat <<'EOF'
 chore: cutover from bmad to superpowers workflow
 
 Distills the bmad-era PRD / architecture / epics into a single
-docs/engineering.md (~300 lines) covering project intent, the six
+docs/dev/engineering.md (~300 lines) covering project intent, the six
 CI-enforced invariants with rationale, the five protocol seams,
 the exception contract, current + planned module layout, testing
 patterns, the optional-extras pattern, the remaining 27-story
@@ -606,21 +606,21 @@ Run:
 gh pr create --title "chore: cutover from bmad to superpowers workflow" --body "$(cat <<'EOF'
 ## Summary
 
-- Distills the bmad-era PRD / architecture / epics into a single `docs/engineering.md` (~300 lines): project intent, six CI-enforced invariants with rationale, the five protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining 27-story roadmap, deferred-work pointer.
+- Distills the bmad-era PRD / architecture / epics into a single `docs/dev/engineering.md` (~300 lines): project intent, six CI-enforced invariants with rationale, the five protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining 27-story roadmap, deferred-work pointer.
 - Moves `prd.md`, `architecture.md`, `epics.md`, both product briefs, and `docs/stories/` (1-1 through 1-5 + `sprint-status.yaml`) into `docs/archive/` with a framing README.
 - Rewrites `CLAUDE.md` "Project Overview" to point at `engineering.md` and the new `docs/superpowers/{specs,plans}/` flow. Operational sections (invariants, conventions, module layout, seams, testing, commands, when-in-doubt) are kept verbatim.
 - Deletes the `.review-tmp/` bmad code-review artifact dump.
 
-After this lands, future per-feature work uses the superpowers flow: brainstorming → spec in `docs/superpowers/specs/` → writing-plans → plan in `docs/superpowers/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Story IDs are retired as topic slugs; the bmad backlog mapping lives in `engineering.md`'s roadmap section.
+After this lands, future per-feature work uses the superpowers flow: brainstorming → spec in `planning/specs/` → writing-plans → plan in `planning/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Story IDs are retired as topic slugs; the bmad backlog mapping lives in `engineering.md`'s roadmap section.
 
-The driving design + plan for this PR are at `docs/superpowers/specs/2026-05-31-bmad-to-superpowers-transition-design.md` and `docs/superpowers/plans/2026-05-31-bmad-to-superpowers-transition-plan.md`.
+The driving design + plan for this PR are at `planning/specs/2026-05-31-bmad-to-superpowers-transition-design.md` and `planning/plans/2026-05-31-bmad-to-superpowers-transition-plan.md`.
 
 ## Test plan
 
 - [x] No source or CI changes; the 157-test suite continues to pass at 100% coverage on the branch.
 - [x] `just lint-ci` clean.
 - [x] `git status --short` shows only renames, three new docs files, one modified `CLAUDE.md`, and the `.review-tmp/` deletion.
-- [x] All internal links in `docs/engineering.md` and `CLAUDE.md` resolve to files that exist post-move.
+- [x] All internal links in `docs/dev/engineering.md` and `CLAUDE.md` resolve to files that exist post-move.
 - [ ] CI green on the PR.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
@@ -652,9 +652,9 @@ The cutover is complete. Task 1 (retrospective code review) is the next normal-f
 
 ## Definition of done
 
-- `docs/engineering.md` exists (250–350 lines) and is referenced from `CLAUDE.md`.
+- `docs/dev/engineering.md` exists (250–350 lines) and is referenced from `CLAUDE.md`.
 - `docs/archive/` contains the six top-level moves plus the `stories/` directory and a framing `README.md`.
-- `docs/superpowers/specs/2026-05-31-bmad-to-superpowers-transition-design.md` and `docs/superpowers/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` are committed.
+- `planning/specs/2026-05-31-bmad-to-superpowers-transition-design.md` and `planning/plans/2026-05-31-bmad-to-superpowers-transition-plan.md` are committed.
 - `.review-tmp/` is gone.
 - `CLAUDE.md` no longer references `docs/prd.md`, `docs/architecture.md`, `docs/epics.md`, `docs/stories/`, or the product briefs at their original paths.
 - The cutover commit is a single commit on `chore/bmad-to-superpowers-transition`, merged to `main` via one PR.

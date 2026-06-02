@@ -10,7 +10,7 @@
 
 **Branch:** `story/2-4-auth-coercion` (already created; spec commit `5906d22` is on it).
 
-**Spec:** `docs/superpowers/specs/2026-06-01-auth-coercion-design.md`.
+**Spec:** `planning/specs/2026-06-01-auth-coercion-design.md`.
 
 ---
 
@@ -924,7 +924,7 @@ Expected: `eof-fixer`, `ruff format --check`, `ruff check --no-fix`, `ty check` 
 - [ ] **Step 3: Confirm the working tree**
 
 Run: `git status --short`
-Expected: only the untracked plan file `docs/superpowers/plans/2026-06-01-auth-coercion-plan.md`.
+Expected: only the untracked plan file `planning/plans/2026-06-01-auth-coercion-plan.md`.
 
 Run: `git log --oneline main..HEAD`
 Expected: six commits — spec, Task 1, Task 2, Task 3, Task 4, Task 5.
@@ -932,7 +932,7 @@ Expected: six commits — spec, Task 1, Task 2, Task 3, Task 4, Task 5.
 - [ ] **Step 4: Stage and commit the plan**
 
 ```bash
-git add docs/superpowers/plans/2026-06-01-auth-coercion-plan.md
+git add planning/plans/2026-06-01-auth-coercion-plan.md
 git commit -m "docs(story-2.4): implementation plan for auth coercion
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -960,7 +960,7 @@ gh pr create --title "feat(story-2.4): auth coercion as middleware" --body "$(ca
 
 Out of scope: OAuth2 / refresh tokens, mTLS, signature schemes (HMAC, AWS Sigv4), per-call \`auth=\` override on HTTP methods.
 
-Spec + plan: \`docs/superpowers/specs/2026-06-01-auth-coercion-design.md\`, \`docs/superpowers/plans/2026-06-01-auth-coercion-plan.md\`.
+Spec + plan: \`planning/specs/2026-06-01-auth-coercion-design.md\`, \`planning/plans/2026-06-01-auth-coercion-plan.md\`.
 
 ## Test plan
 

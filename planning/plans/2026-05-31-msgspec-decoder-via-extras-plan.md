@@ -10,7 +10,7 @@
 
 **Branch:** `story/1-6-msgspec-decoder-via-extras` (already created; spec commit `b12a989` is on it).
 
-**Spec:** `docs/superpowers/specs/2026-05-31-msgspec-decoder-via-extras-design.md`.
+**Spec:** `planning/specs/2026-05-31-msgspec-decoder-via-extras-design.md`.
 
 ---
 
@@ -386,7 +386,7 @@ Expected: `eof-fixer`, `ruff format --check`, `ruff check --no-fix`, `ty check` 
 - [ ] **Step 3: Confirm the working tree is clean**
 
 Run: `git status --short`
-Expected: only the untracked plan file `docs/superpowers/plans/2026-05-31-msgspec-decoder-via-extras-plan.md`.
+Expected: only the untracked plan file `planning/plans/2026-05-31-msgspec-decoder-via-extras-plan.md`.
 
 - [ ] **Step 4: Review the branch diff**
 
@@ -394,12 +394,12 @@ Run: `git log --oneline main..HEAD`
 Expected: five or six commits — spec (`docs(story-1.6): design...`), Task 1, Task 2, Task 3, Task 4.
 
 Run: `git diff --stat main..HEAD`
-Expected: changes to `CHANGELOG.md`, plus the four new files: `docs/superpowers/specs/2026-05-31-msgspec-decoder-via-extras-design.md`, `src/httpware/_internal/import_checker.py`, `src/httpware/decoders/msgspec.py`, `tests/test_decoders_msgspec.py`, `tests/test_optional_extras_isolation.py`. No other source files touched.
+Expected: changes to `CHANGELOG.md`, plus the four new files: `planning/specs/2026-05-31-msgspec-decoder-via-extras-design.md`, `src/httpware/_internal/import_checker.py`, `src/httpware/decoders/msgspec.py`, `tests/test_decoders_msgspec.py`, `tests/test_optional_extras_isolation.py`. No other source files touched.
 
 - [ ] **Step 5: Stage and commit the plan file**
 
 ```bash
-git add docs/superpowers/plans/2026-05-31-msgspec-decoder-via-extras-plan.md
+git add planning/plans/2026-05-31-msgspec-decoder-via-extras-plan.md
 git commit -m "docs(story-1.6): implementation plan for MsgspecDecoder via extras
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -425,7 +425,7 @@ gh pr create --title "feat(story-1.6): MsgspecDecoder via the [msgspec] extra" -
 
 Out of scope (subsequent stories): `AsyncClient` wiring (Story 1-7), `RecordedTransport` (Story 1-8), follow-up cleanup of legacy `__all__` exports in existing submodules.
 
-Spec + plan: `docs/superpowers/specs/2026-05-31-msgspec-decoder-via-extras-design.md`, `docs/superpowers/plans/2026-05-31-msgspec-decoder-via-extras-plan.md`.
+Spec + plan: `planning/specs/2026-05-31-msgspec-decoder-via-extras-design.md`, `planning/plans/2026-05-31-msgspec-decoder-via-extras-plan.md`.
 
 ## Test plan
 

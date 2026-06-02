@@ -3,7 +3,7 @@
 - **Date:** 2026-06-01
 - **Status:** approved, ready for plan
 - **Scope:** Story 2-4 (final unshipped story of Epic 2). Adds an `auth=` parameter to `AsyncClient.__init__` and `with_options` that accepts `str | Callable[[], str | Awaitable[str]] | Middleware | None`. Implements `_normalize_auth` at `src/httpware/_internal/auth.py` and the helper bearer-middleware factories. Out of scope: OAuth flows, refresh tokens, mTLS, signature schemes (HMAC, AWS Sigv4), per-call `auth=` on HTTP methods.
-- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
+- **Roadmap pointer:** `docs/dev/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
 
 ## Why
 

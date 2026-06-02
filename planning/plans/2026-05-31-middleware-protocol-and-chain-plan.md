@@ -10,7 +10,7 @@
 
 **Branch:** `story/2-1-middleware-protocol-and-chain` (already created; the spec commit is on it).
 
-**Spec:** `docs/superpowers/specs/2026-05-31-middleware-protocol-and-chain-design.md`.
+**Spec:** `planning/specs/2026-05-31-middleware-protocol-and-chain-design.md`.
 
 ---
 
@@ -748,15 +748,15 @@ Run: `git log --oneline main..HEAD`
 Expected: five or six commits — the spec commit (`docs(story-2.1): design...`), Task 1, Task 2, Task 3, Task 4, Task 5.
 
 Run: `git diff --stat main..HEAD`
-Expected: changes to `CHANGELOG.md`, `docs/superpowers/specs/2026-05-31-middleware-protocol-and-chain-design.md`, `docs/superpowers/plans/2026-05-31-middleware-protocol-and-chain-plan.md`, `src/httpware/__init__.py`, two new files under `src/httpware/_internal/`, one new file under `src/httpware/middleware/`, and `tests/test_middleware.py`. No source files outside this scope should be touched.
+Expected: changes to `CHANGELOG.md`, `planning/specs/2026-05-31-middleware-protocol-and-chain-design.md`, `planning/plans/2026-05-31-middleware-protocol-and-chain-plan.md`, `src/httpware/__init__.py`, two new files under `src/httpware/_internal/`, one new file under `src/httpware/middleware/`, and `tests/test_middleware.py`. No source files outside this scope should be touched.
 
 - [ ] **Step 5: Stage and commit the plan file**
 
-The plan file at `docs/superpowers/plans/2026-05-31-middleware-protocol-and-chain-plan.md` is still untracked (it was created during the writing-plans step but not yet committed). Stage and commit it on this branch so the merge captures the plan alongside the spec.
+The plan file at `planning/plans/2026-05-31-middleware-protocol-and-chain-plan.md` is still untracked (it was created during the writing-plans step but not yet committed). Stage and commit it on this branch so the merge captures the plan alongside the spec.
 
 Run:
 ```bash
-git add docs/superpowers/plans/2026-05-31-middleware-protocol-and-chain-plan.md
+git add planning/plans/2026-05-31-middleware-protocol-and-chain-plan.md
 git commit -m "docs(story-2.1): implementation plan for Middleware protocol and chain
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -780,7 +780,7 @@ gh pr create --title "feat(story-2.1): Middleware protocol, Next type, and chain
 
 Out of scope (subsequent stories): phase decorators (2-2), Request immutability helpers beyond what already exists (2-3), auth coercion (2-4), AsyncClient wiring (2-5), streaming chain (4-3).
 
-Spec + plan: `docs/superpowers/specs/2026-05-31-middleware-protocol-and-chain-design.md`, `docs/superpowers/plans/2026-05-31-middleware-protocol-and-chain-plan.md`.
+Spec + plan: `planning/specs/2026-05-31-middleware-protocol-and-chain-design.md`, `planning/plans/2026-05-31-middleware-protocol-and-chain-plan.md`.
 
 ## Test plan
 

@@ -16,14 +16,14 @@ Five stories have shipped (1-1 through 1-5). Twenty-seven remain in the bmad bac
 | --- | --- |
 | Workflow | Pure superpowers: brainstorming → spec → writing-plans → plan → executing-plans/subagent-driven → requesting-code-review → finishing-a-development-branch |
 | Topic naming | Kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs |
-| Legacy planning docs | Distill load-bearing decisions into `docs/engineering.md`; archive the rest under `docs/archive/` |
-| AI entrypoint | `CLAUDE.md` stays the AI entrypoint and points at `docs/engineering.md` |
+| Legacy planning docs | Distill load-bearing decisions into `docs/dev/engineering.md`; archive the rest under `docs/archive/` |
+| AI entrypoint | `CLAUDE.md` stays the AI entrypoint and points at `docs/dev/engineering.md` |
 | First task | Retrospective code review of shipped work (1-1 through 1-5) via `superpowers:requesting-code-review` |
 | Second task | Refactor based on review findings, one cohesive PR per finding-group |
 | Ordering | Transition (single PR) lands first; tasks 1–2 run on the new structure |
 | `deferred-work.md` | Kept at repo root as-is; remains the "real but not actionable now" log |
 
-## Distilled doc: `docs/engineering.md`
+## Distilled doc: `docs/dev/engineering.md`
 
 One focused ~250–350 line document, written for both human contributors and AI agents. Sections:
 
@@ -46,7 +46,7 @@ One focused ~250–350 line document, written for both human contributors and AI
 6. **Testing patterns** — `pytest-asyncio` auto mode (no `@pytest.mark.asyncio`); `RecordedTransport` for transport mocking, not `respx`; Hypothesis property-based tests for concurrency-sensitive code in files named `test_*_props.py`.
 7. **Optional-extras pattern** — pydantic, msgspec, opentelemetry isolated to their own modules; import inside the module, never at package top-level.
 8. **Remaining roadmap** — short bullets, one line per remaining story (1-6 through 6-5), grouped by epic. No 40KB specs. When work starts on a roadmap item, it gets a superpowers spec.
-9. **Deferred work** — pointer to `docs/deferred-work.md`; not duplicated here.
+9. **Deferred work** — pointer to `planning/deferred-work.md`; not duplicated here.
 
 Explicit omissions vs. the bmad planning bundle: the 47 numbered FRs, 25 NFRs, persona work, and long architecture-decision essays move to `docs/archive/` and are cited only when a future spec needs the original rationale (e.g., "we decided X because of NFR-12").
 
@@ -83,7 +83,7 @@ docs/
 
 `CLAUDE.md` updates:
 - Replace the "Project Overview" bmad bullets with pointers to `engineering.md` (primary) and `docs/archive/` (history).
-- Add a one-liner describing the per-feature flow: brainstorming → spec in `docs/superpowers/specs/` → writing-plans → plan in `docs/superpowers/plans/` → executing-plans → requesting-code-review.
+- Add a one-liner describing the per-feature flow: brainstorming → spec in `planning/specs/` → writing-plans → plan in `planning/plans/` → executing-plans → requesting-code-review.
 - The "Architecture invariants (CI-enforced)" and "Code conventions" sections stay verbatim — these are AI-enforcement rules, not design rationale.
 
 ## New per-feature workflow
@@ -91,8 +91,8 @@ docs/
 For every future piece of work — story 1-6 onwards, the upcoming refactor, anything else:
 
 ```
-1. brainstorming             →  docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md
-2. writing-plans             →  docs/superpowers/plans/YYYY-MM-DD-<topic>-plan.md
+1. brainstorming             →  planning/specs/YYYY-MM-DD-<topic>-design.md
+2. writing-plans             →  planning/plans/YYYY-MM-DD-<topic>-plan.md
 3. using-git-worktrees       (isolate workspace)
 4. executing-plans  OR  subagent-driven-development  (depending on task shape)
 5. test-driven-development   (rigid skill, applied throughout step 4)
@@ -120,10 +120,10 @@ Choice between executing-plans vs. subagent-driven-development: `executing-plans
 
 ### Cutover PR (transition, executed first)
 
-1. Write `docs/engineering.md` distilled from PRD, architecture, the five merged stories.
+1. Write `docs/dev/engineering.md` distilled from PRD, architecture, the five merged stories.
 2. Create `docs/archive/`; move `prd.md`, `architecture.md`, `epics.md`, both product briefs, and `stories/` into it.
 3. Write `docs/archive/README.md`.
-4. `docs/superpowers/specs/` already contains this spec; the cutover commit adds the corresponding plan to `docs/superpowers/plans/`.
+4. `planning/specs/` already contains this spec; the cutover commit adds the corresponding plan to `planning/plans/`.
 5. Update `CLAUDE.md` per the rules above.
 6. Delete `.review-tmp/`.
 7. Single commit, single PR, merge to `main`. This is the cutover point.
@@ -134,9 +134,9 @@ Choice between executing-plans vs. subagent-driven-development: `executing-plans
 - Scope: stories 1-1 through 1-5 (scaffold, core data types, exception hierarchy, transport + httpx2 adapter, decoder protocol + pydantic adapter).
 - Triage findings into three buckets:
   - **Refactor now** — feeds Task 2.
-  - **Defer** — added to `docs/deferred-work.md`.
+  - **Defer** — added to `planning/deferred-work.md`.
   - **Discard** — noise / disagree, with one-line rationale.
-- Output: triaged review report committed at `docs/superpowers/specs/YYYY-MM-DD-shipped-work-review.md`.
+- Output: triaged review report committed at `planning/specs/YYYY-MM-DD-shipped-work-review.md`.
 
 ### Task 2 — refactor based on review
 
@@ -160,9 +160,9 @@ Choice between executing-plans vs. subagent-driven-development: `executing-plans
 
 ## Definition of done
 
-- `docs/engineering.md` exists and replaces the per-document references in CLAUDE.md.
+- `docs/dev/engineering.md` exists and replaces the per-document references in CLAUDE.md.
 - `docs/archive/` contains the listed files with a framing README.
-- `docs/superpowers/specs/` and `docs/superpowers/plans/` exist; this spec is committed there.
+- `planning/specs/` and `planning/plans/` exist; this spec is committed there.
 - `.review-tmp/` is removed.
 - `CLAUDE.md` no longer references bmad artifacts as authoritative.
 - The cutover lands as a single PR, merged before Task 1 begins.

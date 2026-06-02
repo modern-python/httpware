@@ -3,7 +3,7 @@
 - **Date:** 2026-05-31
 - **Status:** approved, ready for plan
 - **Scope:** Story 2-1 (first story of Epic 2). Defines the `Middleware` Protocol, `Next` type alias, and the `compose()` chain composer. Out of scope: decorators (2-2), `Request` helpers (2-3), auth coercion (2-4), AsyncClient wiring (2-5), streaming middleware chain (Epic 4).
-- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
+- **Roadmap pointer:** `docs/dev/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
 
 ## Why
 

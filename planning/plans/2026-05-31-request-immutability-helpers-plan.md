@@ -10,7 +10,7 @@
 
 **Branch:** `story/2-3-request-immutability-helpers` (already created; spec commit `5bcf9a4` is on it).
 
-**Spec:** `docs/superpowers/specs/2026-05-31-request-immutability-helpers-design.md`.
+**Spec:** `planning/specs/2026-05-31-request-immutability-helpers-design.md`.
 
 ---
 
@@ -460,7 +460,7 @@ Expected: `eof-fixer`, `ruff format --check`, `ruff check --no-fix`, `ty check` 
 - [ ] **Step 3: Confirm the working tree is clean**
 
 Run: `git status --short`
-Expected: only the untracked plan file `docs/superpowers/plans/2026-05-31-request-immutability-helpers-plan.md`.
+Expected: only the untracked plan file `planning/plans/2026-05-31-request-immutability-helpers-plan.md`.
 
 - [ ] **Step 4: Review the branch diff**
 
@@ -468,12 +468,12 @@ Run: `git log --oneline main..HEAD`
 Expected: six or seven commits — the spec commit (`docs(story-2.3): design...`), Task 1, Task 2, Task 3, Task 4, Task 5.
 
 Run: `git diff --stat main..HEAD`
-Expected: changes to `CHANGELOG.md`, `docs/superpowers/specs/2026-05-31-request-immutability-helpers-design.md`, `src/httpware/request.py`, `src/httpware/response.py`, `tests/test_request.py`, `tests/test_response.py`. No other files touched.
+Expected: changes to `CHANGELOG.md`, `planning/specs/2026-05-31-request-immutability-helpers-design.md`, `src/httpware/request.py`, `src/httpware/response.py`, `tests/test_request.py`, `tests/test_response.py`. No other files touched.
 
 - [ ] **Step 5: Stage and commit the plan file**
 
 ```bash
-git add docs/superpowers/plans/2026-05-31-request-immutability-helpers-plan.md
+git add planning/plans/2026-05-31-request-immutability-helpers-plan.md
 git commit -m "docs(story-2.3): implementation plan for immutability helpers
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -498,7 +498,7 @@ gh pr create --title "feat(story-2.3): Request/Response immutability helper expa
 
 Out of scope (subsequent stories): auth coercion (2-4), AsyncClient wiring (2-5), \`StreamResponse.with_*\` (Story 4-1), case-insensitive header keys (existing deferred-work entry).
 
-Spec + plan: \`docs/superpowers/specs/2026-05-31-request-immutability-helpers-design.md\`, \`docs/superpowers/plans/2026-05-31-request-immutability-helpers-plan.md\`.
+Spec + plan: \`planning/specs/2026-05-31-request-immutability-helpers-design.md\`, \`planning/plans/2026-05-31-request-immutability-helpers-plan.md\`.
 
 ## Test plan
 

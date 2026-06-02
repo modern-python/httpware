@@ -3,7 +3,7 @@
 - **Date:** 2026-05-31
 - **Status:** approved, ready for plan
 - **Scope:** Story 1-6 (sixth story of Epic 1). Adds the second `ResponseDecoder` adapter — `MsgspecDecoder` — gated behind the `msgspec` extra. Introduces a small private `import_checker` module that future opt-in extras (otel, etc.) will reuse. Out of scope: AsyncClient wiring (Story 1-7), RecordedTransport (Story 1-8).
-- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 1 — Make typed HTTP requests with sensible defaults".
+- **Roadmap pointer:** `docs/dev/engineering.md` §8 "Epic 1 — Make typed HTTP requests with sensible defaults".
 
 ## Why
 

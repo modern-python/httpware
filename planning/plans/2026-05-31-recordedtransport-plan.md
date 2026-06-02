@@ -10,7 +10,7 @@
 
 **Branch:** `story/1-8-recordedtransport` (already created; spec commit `60d2e0c` is on it).
 
-**Spec:** `docs/superpowers/specs/2026-05-31-recordedtransport-design.md`.
+**Spec:** `planning/specs/2026-05-31-recordedtransport-design.md`.
 
 ---
 
@@ -956,7 +956,7 @@ Expected: `eof-fixer`, `ruff format --check`, `ruff check --no-fix`, `ty check` 
 - [ ] **Step 3: Confirm the working tree is clean**
 
 Run: `git status --short`
-Expected: only the untracked plan file `docs/superpowers/plans/2026-05-31-recordedtransport-plan.md`.
+Expected: only the untracked plan file `planning/plans/2026-05-31-recordedtransport-plan.md`.
 
 - [ ] **Step 4: Review the branch diff**
 
@@ -969,7 +969,7 @@ Expected: new files `src/httpware/transports/recorded.py`, `tests/test_transport
 - [ ] **Step 5: Stage and commit the plan file**
 
 ```bash
-git add docs/superpowers/plans/2026-05-31-recordedtransport-plan.md
+git add planning/plans/2026-05-31-recordedtransport-plan.md
 git commit -m "docs(story-1.8): implementation plan for RecordedTransport
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -996,7 +996,7 @@ This closes Epic 1.
 
 Out of scope (subsequent stories): URL pattern matching / globs, cassette files loaded from JSON, streaming responses (Epic 4).
 
-Spec + plan: `docs/superpowers/specs/2026-05-31-recordedtransport-design.md`, `docs/superpowers/plans/2026-05-31-recordedtransport-plan.md`.
+Spec + plan: `planning/specs/2026-05-31-recordedtransport-design.md`, `planning/plans/2026-05-31-recordedtransport-plan.md`.
 
 ## Test plan
 

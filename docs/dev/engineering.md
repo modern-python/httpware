@@ -131,7 +131,7 @@ Caller-facing pattern: consumers select the implementation by passing it explici
 
 ## 8. Remaining roadmap
 
-Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/superpowers/plans/` use kebab-case descriptions, not the story IDs — these IDs are retained as a stable identifier convention from the original epic structure.
+Twenty-seven stories remain. Topic slugs in `planning/specs/` and `planning/plans/` use kebab-case descriptions, not the story IDs — these IDs are retained as a stable identifier convention from the original epic structure.
 
 ### Epic 1 — Make typed HTTP requests with sensible defaults
 
@@ -178,7 +178,7 @@ Twenty-seven stories remain. Topic slugs in `docs/superpowers/specs/` and `docs/
 - **6-4** CI enforcement gates (codify the invariants in Section 2 as CI jobs).
 - **6-5** Release flow with Trusted Publishers + Sigstore.
 
-When work starts on a roadmap item, it gets a spec at `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and a plan at `docs/superpowers/plans/YYYY-MM-DD-<topic>-plan.md`.
+When work starts on a roadmap item, it gets a spec at `planning/specs/YYYY-MM-DD-<topic>-design.md` and a plan at `planning/plans/YYYY-MM-DD-<topic>-plan.md`.
 
 ## 9. Deferred work
 

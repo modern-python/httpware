@@ -10,7 +10,7 @@
 
 **Branch:** `story/2-2-phase-shortcut-decorators` (already created; spec commit `6cfc9fa` is on it).
 
-**Spec:** `docs/superpowers/specs/2026-05-31-phase-shortcut-decorators-design.md`.
+**Spec:** `planning/specs/2026-05-31-phase-shortcut-decorators-design.md`.
 
 ---
 
@@ -19,7 +19,7 @@
 **Modified files:**
 - `src/httpware/middleware/__init__.py` — append three factory functions (~65 lines added; file grows from 30 to ~95 lines). Update `__all__`.
 - `src/httpware/__init__.py` — import and re-export `before_request`, `after_response`, `on_error`. Update `__all__`.
-- `docs/engineering.md` — fix line 145 stale decorator names.
+- `docs/dev/engineering.md` — fix line 145 stale decorator names.
 - `CHANGELOG.md` — append Story 2.2 bullet under `[Unreleased]` / `### Added`.
 - `tests/test_middleware.py` — append 10 new tests (file grows from 14 → 24 tests).
 
@@ -519,7 +519,7 @@ Wire the three decorators into the package root, fix the stale naming in `engine
 
 **Files:**
 - Modify: `src/httpware/__init__.py`
-- Modify: `docs/engineering.md`
+- Modify: `docs/dev/engineering.md`
 - Modify: `CHANGELOG.md`
 - Modify: `tests/test_middleware.py` (append 1 re-export test)
 
@@ -573,7 +573,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Fix the engineering.md roadmap line**
 
-Edit `docs/engineering.md` line 145. The current text reads:
+Edit `docs/dev/engineering.md` line 145. The current text reads:
 
 ```
 - **2-2** Phase shortcut decorators (`@on_request`, `@on_response`, `@on_error`).
@@ -604,7 +604,7 @@ Expected: All checks passed.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/httpware/__init__.py docs/engineering.md CHANGELOG.md tests/test_middleware.py
+git add src/httpware/__init__.py docs/dev/engineering.md CHANGELOG.md tests/test_middleware.py
 git commit -m "$(cat <<'EOF'
 feat(story-2.2): re-export decorators; fix engineering.md naming; CHANGELOG
 
@@ -612,7 +612,7 @@ Adds before_request, after_response, on_error to httpware/__init__.py
 imports and __all__ so consumers can `from httpware import …` in
 addition to the subpackage path.
 
-Fixes docs/engineering.md §8 line 145 to reflect the canonical
+Fixes docs/dev/engineering.md §8 line 145 to reflect the canonical
 @before_request / @after_response / @on_error names (it had stale
 @on_request / @on_response from the distillation).
 
@@ -652,14 +652,14 @@ Run: `git log --oneline main..HEAD`
 Expected: six or seven commits — spec (`docs(story-2.2): design...`), Task 1, Task 2, Task 3, Task 4, Task 5.
 
 Run: `git diff --stat main..HEAD`
-Expected: changes to `CHANGELOG.md`, `docs/engineering.md`, `docs/superpowers/specs/2026-05-31-phase-shortcut-decorators-design.md`, `docs/superpowers/plans/2026-05-31-phase-shortcut-decorators-plan.md`, `src/httpware/__init__.py`, `src/httpware/middleware/__init__.py`, `tests/test_middleware.py`. No other source files touched.
+Expected: changes to `CHANGELOG.md`, `docs/dev/engineering.md`, `planning/specs/2026-05-31-phase-shortcut-decorators-design.md`, `planning/plans/2026-05-31-phase-shortcut-decorators-plan.md`, `src/httpware/__init__.py`, `src/httpware/middleware/__init__.py`, `tests/test_middleware.py`. No other source files touched.
 
 - [ ] **Step 5: Stage and commit the plan file**
 
-The plan file at `docs/superpowers/plans/2026-05-31-phase-shortcut-decorators-plan.md` is still untracked. Stage and commit it on this branch so the merge captures the plan alongside the spec.
+The plan file at `planning/plans/2026-05-31-phase-shortcut-decorators-plan.md` is still untracked. Stage and commit it on this branch so the merge captures the plan alongside the spec.
 
 ```bash
-git add docs/superpowers/plans/2026-05-31-phase-shortcut-decorators-plan.md
+git add planning/plans/2026-05-31-phase-shortcut-decorators-plan.md
 git commit -m "docs(story-2.2): implementation plan for phase-shortcut decorators
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
@@ -684,11 +684,11 @@ gh pr create --title "feat(story-2.2): phase-shortcut decorators @before_request
 - All three exported at both `httpware.middleware.*` and `httpware.*`.
 - 10 new tests in `tests/test_middleware.py` (24 total): request and response transformations, on_error swallow/re-raise paths, `CancelledError` non-capture, exception identity, Protocol satisfaction, mixed-chain composition, `repr()` content, package-root re-export.
 
-Bundled-in doc fix: `docs/engineering.md` §8 line 145 had stale `@on_request`/`@on_response` names from the distillation — corrected to the canonical `@before_request`/`@after_response`.
+Bundled-in doc fix: `docs/dev/engineering.md` §8 line 145 had stale `@on_request`/`@on_response` names from the distillation — corrected to the canonical `@before_request`/`@after_response`.
 
 Out of scope (subsequent stories): `Request.with_*` helper expansion (2-3), auth coercion (2-4), AsyncClient wiring (2-5).
 
-Spec + plan: `docs/superpowers/specs/2026-05-31-phase-shortcut-decorators-design.md`, `docs/superpowers/plans/2026-05-31-phase-shortcut-decorators-plan.md`.
+Spec + plan: `planning/specs/2026-05-31-phase-shortcut-decorators-design.md`, `planning/plans/2026-05-31-phase-shortcut-decorators-plan.md`.
 
 ## Test plan
 
@@ -730,7 +730,7 @@ Story 2-2 is complete. Story 2-3 (`Request` immutability helper expansion) is th
 
 - `src/httpware/middleware/__init__.py` exports `before_request`, `after_response`, `on_error` in addition to `Middleware` and `Next`.
 - `src/httpware/__init__.py` re-exports the three new names and adds them to `__all__` in alphabetic position (after `"UnprocessableEntityError"`).
-- `docs/engineering.md` §8 line 145 reads `@before_request`, `@after_response`, `@on_error` — the stale `@on_request`/`@on_response` is gone.
+- `docs/dev/engineering.md` §8 line 145 reads `@before_request`, `@after_response`, `@on_error` — the stale `@on_request`/`@on_response` is gone.
 - `CHANGELOG.md` has a Story 2.2 bullet under `[Unreleased]` / `### Added`.
 - `tests/test_middleware.py` contains 24 tests (14 carried forward from Story 2-1 + 10 new); all pass.
 - `just test` shows 184 passed, 1 deselected, 100% line coverage.

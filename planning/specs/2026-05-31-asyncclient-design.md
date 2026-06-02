@@ -3,7 +3,7 @@
 - **Date:** 2026-05-31
 - **Status:** approved, ready for plan
 - **Scope:** Story 1-7 (seventh story of Epic 1). Ships the main public surface: `AsyncClient` with HTTP method shortcuts, typed `response_model` overloads, per-call overrides, lifecycle management, and `with_options`. Wires middleware via `compose()` (Story 2-1) since that story already landed. Out of scope: `auth=` parameter (Story 2-4), `data=`/`files=` body params (follow-up), transport reference-counting (deferred), streaming (Epic 4), observability (Epic 5), `RecordedTransport` (Story 1-8).
-- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 1 — Make typed HTTP requests with sensible defaults".
+- **Roadmap pointer:** `docs/dev/engineering.md` §8 "Epic 1 — Make typed HTTP requests with sensible defaults".
 
 ## Why
 

@@ -3,7 +3,7 @@
 - **Date:** 2026-05-31
 - **Status:** approved, ready for plan
 - **Scope:** Story 1-8 (eighth and final story of Epic 1). Ships a built-in `Transport` test double at `src/httpware/transports/recorded.py` plus follow-up commits that replace the five existing in-tree test stubs (`_OkTransport`, `_FailingTransport`, `_FakeTransport`, two distinct `_RecordingTransport` variants, `_TrackingTransport`) with this new class. Out of scope: URL pattern matching / globs, cassette files loaded from JSON, streaming (Epic 4).
-- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 1 — Make typed HTTP requests with sensible defaults".
+- **Roadmap pointer:** `docs/dev/engineering.md` §8 "Epic 1 — Make typed HTTP requests with sensible defaults".
 
 ## Why
 

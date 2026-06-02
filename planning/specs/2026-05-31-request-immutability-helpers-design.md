@@ -3,13 +3,13 @@
 - **Date:** 2026-05-31
 - **Status:** approved, ready for plan
 - **Scope:** Story 2-3 (third story of Epic 2). Extends the existing `with_*` helper grid on `Request` and adds the missing helpers on `Response`. Out of scope: auth coercion (2-4), AsyncClient wiring (2-5), streaming (Epic 4).
-- **Roadmap pointer:** `docs/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
+- **Roadmap pointer:** `docs/dev/engineering.md` §8 "Epic 2 — Compose request-handling logic via middleware".
 
 ## Why
 
 Middleware (Story 2-1) and the phase decorators (Story 2-2) now exist. The remaining gap before middleware-driven request rewriting is ergonomic: `Request` currently exposes `with_header`, `with_url`, `with_body`, `with_query` (Story 1-2), but no plural `with_headers`, no `with_cookie`/`with_cookies`, no `with_extension`/`with_extensions`. `Response` has no `with_*` helpers at all. Middleware authors can technically work around the gaps via `dataclasses.replace`, but the framework should ship the ergonomic API directly.
 
-The archived epic spec (`docs/archive/epics.md` Story 2.3) calls for `with_headers` on `Request`, plus `with_headers` and `with_status` on `Response`. `docs/engineering.md` §8 broadens the scope to include `with_cookie` and `with_extension`. This spec adopts the broader scope.
+The archived epic spec (`docs/archive/epics.md` Story 2.3) calls for `with_headers` on `Request`, plus `with_headers` and `with_status` on `Response`. `docs/dev/engineering.md` §8 broadens the scope to include `with_cookie` and `with_extension`. This spec adopts the broader scope.
 
 ## Decisions
 
@@ -142,7 +142,7 @@ No new fixtures, no async tests, no transport interaction.
 | Risk | Mitigation |
 | --- | --- |
 | `ty` flags `dict[str, str]` (the literal merged dict) as not assignable to `Mapping[str, str]` field. | `dict` is a `Mapping`; ty should accept the assignment. If it doesn't, cast at the assignment site with `Mapping[str, str]` annotation — but no cast expected. Story 1-2's existing `with_header` uses the same pattern (`{**self.headers, name: value}`) and passes ty cleanly. |
-| Caller mixes `"X-Trace"` and `"x-trace"` keys via `with_headers`. | Documented v0 limitation; the merged dict will have both. Same behavior as the existing `with_header` and tracked in `docs/deferred-work.md` under the broader case-insensitive Mapping work. Don't try to fix here. |
+| Caller mixes `"X-Trace"` and `"x-trace"` keys via `with_headers`. | Documented v0 limitation; the merged dict will have both. Same behavior as the existing `with_header` and tracked in `planning/deferred-work.md` under the broader case-insensitive Mapping work. Don't try to fix here. |
 | Future call sites expect `with_headers` to REPLACE rather than MERGE. | Docstring is explicit ("merged in"). The phase decorators in Story 2-2 already follow this convention implicitly (e.g., `@after_response` rebuilds `Response(...)` rather than calling a non-existent helper). Anyone reading the docstring will see the semantics. |
 | `Self` import on `Response` triggers ruff `I001` (import-sorting). | The import line `from typing import Any, Self` is alphabetic. ruff format will resolve any ordering. |
 

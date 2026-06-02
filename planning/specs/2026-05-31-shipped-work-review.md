@@ -40,7 +40,7 @@
 
 ### Discard
 
-- **`response.headers` collapses multi-valued headers (`Set-Cookie`, `Via`, `Link`) to last value** — already in `docs/deferred-work.md` under story-1-4 (2026-05-13). Documented v0 contract on `Httpx2Transport` docstring lines 62-67.
+- **`response.headers` collapses multi-valued headers (`Set-Cookie`, `Via`, `Link`) to last value** — already in `planning/deferred-work.md` under story-1-4 (2026-05-13). Documented v0 contract on `Httpx2Transport` docstring lines 62-67.
 - **`StatusError.body: bytes` retains full response body unboundedly** — already in deferred-work under story-1-4 (2026-05-14).
 - **`httpx2.StreamError` family escapes the seam (`RuntimeError` subclasses)** — already in deferred-work under story-1-4 (2026-05-14); verified `StreamError.__mro__ == [StreamError, RuntimeError, Exception, BaseException, object]`.
 - **Concurrent `aclose()` ↔ `__call__` race** — already in deferred-work under story-1-4 (2026-05-14). The `asyncio.Lock` only guards init, not lifecycle.
@@ -73,7 +73,7 @@
 
 ## Already-deferred items observed
 
-All ten "Discard" entries marked "already in deferred-work" were verified present in `docs/deferred-work.md` and are still real on the current HEAD. No re-raising; they remain accurate.
+All ten "Discard" entries marked "already in deferred-work" were verified present in `planning/deferred-work.md` and are still real on the current HEAD. No re-raising; they remain accurate.
 
 ## Assessment
 
@@ -81,4 +81,4 @@ All ten "Discard" entries marked "already in deferred-work" were verified presen
 **Defer count:** 4
 **Discard count:** 25 (24 duplicates of existing deferred items + 5 rejected on consideration; one — D-4 — overlaps with an existing entry but is restated because the call-path concern is fresh)
 
-**Recommendation:** No refactor needed — go straight to Epic 2. The four D-items can be appended to `docs/deferred-work.md` under a new "Deferred from: retrospective review (2026-05-31)" section in a follow-up commit, but none of them block middleware work. The architectural invariants are intact, the seams are clean, the exception contract is locked, and tests exercise the documented behavior (not implementation detail). The only structurally noteworthy observation is that the `_get_adapter` `TypeError` fallback in `decoders/pydantic.py` is test-driven rather than path-driven — worth keeping in mind when Story 1.6 reviews the `ResponseDecoder` protocol surface.
+**Recommendation:** No refactor needed — go straight to Epic 2. The four D-items can be appended to `planning/deferred-work.md` under a new "Deferred from: retrospective review (2026-05-31)" section in a follow-up commit, but none of them block middleware work. The architectural invariants are intact, the seams are clean, the exception contract is locked, and tests exercise the documented behavior (not implementation detail). The only structurally noteworthy observation is that the `_get_adapter` `TypeError` fallback in `decoders/pydantic.py` is test-driven rather than path-driven — worth keeping in mind when Story 1.6 reviews the `ResponseDecoder` protocol surface.
