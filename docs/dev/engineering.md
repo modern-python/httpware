@@ -1,6 +1,6 @@
 # `httpware` engineering notes
 
-This doc is the single distilled reference for `httpware` design rationale, protocol seams, and remaining roadmap. It complements [`../CLAUDE.md`](../CLAUDE.md): `CLAUDE.md` holds AI-enforced invariants and operational commands; this file holds the reasoning and the structural map.
+This doc is the single distilled reference for `httpware` design rationale, protocol seams, and remaining roadmap. It complements `CLAUDE.md` (at the repo root): `CLAUDE.md` holds AI-enforced invariants and operational commands; this file holds the reasoning and the structural map.
 
 ## 1. Project intent
 
@@ -182,4 +182,4 @@ When work starts on a roadmap item, it gets a spec at `planning/specs/YYYY-MM-DD
 
 ## 9. Deferred work
 
-Review-surfaced items that are real but not actionable now live in [`./deferred-work.md`](./deferred-work.md). Each entry cites the originating story and the file/line, and explains why the fix is deferred (cross-story dependency, scope, performance/security tradeoff, etc.). When a deferred item becomes actionable, it migrates into the spec for the story that resolves it.
+Review-surfaced items that are real but not actionable now live in `docs/deferred-work.md` (in the repository). Each entry cites the originating story and the file/line, and explains why the fix is deferred (cross-story dependency, scope, performance/security tradeoff, etc.). When a deferred item becomes actionable, it migrates into the spec for the story that resolves it.
