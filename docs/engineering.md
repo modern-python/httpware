@@ -37,7 +37,7 @@ A protocol seam is a documented internal boundary. AI agents and contributors mu
 
 - **Where:** `src/httpware/client.py` ↔ `src/httpware/decoders/`.
 - **Contract:** the decoder is invoked when the caller passes `response_model=`. The protocol is `decode(content: bytes, model: type[T]) -> T`.
-- **Rule:** the decoder must operate on raw bytes in a single parse pass. Two-pass decoding (`json.loads` then `validate_python`) is rejected — see `archive/architecture.md` Validation & Decoding for rationale.
+- **Rule:** the decoder must operate on raw bytes in a single parse pass. Two-pass decoding (`json.loads` then `validate_python`) is rejected: a single bytes-in / typed-object-out pass avoids the redundant intermediate `dict` allocation and parses faster. The Pydantic adapter implements this as `TypeAdapter(model).validate_json(content)` with `@functools.lru_cache(maxsize=None)` on `TypeAdapter` construction (the adapter object is the expensive part to build, keyed by `model`). The msgspec adapter implements it as `msgspec.json.decode(content, type=model)`.
 
 ### Seam 4: `Httpx2Transport ↔ httpx2`
 
