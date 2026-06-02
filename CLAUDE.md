@@ -8,12 +8,11 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 **Where to find what:**
 
-- [`docs/engineering.md`](docs/engineering.md) — the distilled design reference: invariants and *why*, the five protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
-- [`docs/deferred-work.md`](docs/deferred-work.md) — review-surfaced items that are real but not actionable now.
-- [`docs/superpowers/specs/`](docs/superpowers/specs/) and [`docs/superpowers/plans/`](docs/superpowers/plans/) — per-feature design specs and implementation plans (active work).
-- [`docs/archive/`](docs/archive/) — historical bmad-era planning bundle (PRD, architecture, epics, product briefs, per-story specs for 1-1 through 1-5). Consult only for original rationale or specific FR/NFR citations.
+- [`docs/dev/engineering.md`](docs/dev/engineering.md) — the distilled design reference: invariants and *why*, the five protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
+- [`planning/deferred-work.md`](planning/deferred-work.md) — review-surfaced items that are real but not actionable now.
+- [`planning/specs/`](planning/specs/) and [`planning/plans/`](planning/plans/) — per-feature design specs and implementation plans (active work).
 
-**Per-feature workflow:** brainstorming → spec in `docs/superpowers/specs/` → writing-plans → plan in `docs/superpowers/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
+**Per-feature workflow:** brainstorming → spec in `planning/specs/` → writing-plans → plan in `planning/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
 
 ## Commands
 
@@ -99,5 +98,5 @@ Five documented internal boundaries. AI agents must respect them — never cross
 
 ## When in doubt
 
-- Check [`docs/engineering.md`](docs/engineering.md) before adding a new module or extension point; `docs/archive/architecture.md` has the deeper historical rationale if needed.
+- Check [`docs/dev/engineering.md`](docs/dev/engineering.md) before adding a new module or extension point.
 - Surface ambiguity as a documentation gap rather than improvising.
