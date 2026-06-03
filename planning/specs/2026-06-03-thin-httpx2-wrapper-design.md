@@ -112,7 +112,7 @@ class AsyncClient:
 
 Passing `httpx2_client=` together with any of the forwarded kwargs raises `TypeError`. When `httpx2_client=` is provided, `AsyncClient` does NOT close it on `__aexit__`; the caller owns the lifecycle.
 
-When `decoder` is `None`, the client falls back to `PydanticDecoder()` if the `pydantic` extra is installed, otherwise no decoder is configured and any call with `response_model=` raises a clear error.
+When `decoder` is `None`, the client falls back to `PydanticDecoder()` — same behavior as 0.1.0. (Pydantic is declared as an optional extra in `pyproject.toml`; in practice 0.1.0 imports `pydantic` at the top of `decoders/pydantic.py` and re-exports `PydanticDecoder` from the package root, so the "opt-in" framing is aspirational. Tightening that — guarding the `pydantic` import the same way `decoders/msgspec.py` guards `msgspec` — is a follow-up cleanup, not part of this pivot.)
 
 ### Per-method surface
 
