@@ -110,3 +110,25 @@ class AsyncClient:
             )
             raise exc_class(response)
         return response
+
+    @typing.overload
+    async def send(self, request: httpx2.Request, *, response_model: None = None) -> httpx2.Response: ...
+
+    @typing.overload
+    async def send(self, request: httpx2.Request, *, response_model: type[T]) -> T: ...
+
+    async def send(
+        self,
+        request: httpx2.Request,
+        *,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send `request` through the middleware chain. Decode if `response_model` is set."""
+        response = await self._dispatch(request)
+        if response_model is None:
+            return response
+        return self._decoder.decode(response.content, response_model)
+
+    def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:  # noqa: ANN401 — mirrors httpx2.AsyncClient.build_request kwargs
+        """Delegate request construction to the wrapped httpx2.AsyncClient."""
+        return self._httpx2_client.build_request(method, url, **kwargs)
