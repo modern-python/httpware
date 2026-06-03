@@ -19,7 +19,12 @@ def _make_request(url: str = "https://example.test/x") -> httpx2.Request:
     return httpx2.Request("GET", url)
 
 
-def _make_response(status: int = 200, *, request: httpx2.Request | None = None) -> httpx2.Response:
+_STATUS_OK = 200
+_STATUS_UPGRADED = 299
+_STATUS_SERVICE_UNAVAILABLE = 503
+
+
+def _make_response(status: int = _STATUS_OK, *, request: httpx2.Request | None = None) -> httpx2.Response:
     if request is None:
         request = _make_request()
     return httpx2.Response(status, request=request)
@@ -43,7 +48,7 @@ async def test_empty_chain_calls_terminal_directly() -> None:
     dispatch = compose((), terminal)
     request = _make_request()
     response = await dispatch(request)
-    assert response.status_code == 200  # noqa: PLR2004
+    assert response.status_code == _STATUS_OK
     assert seen == [request]
 
 
@@ -95,7 +100,7 @@ async def test_after_response_decorator_transforms_response() -> None:
 
     dispatch = compose((upgrade_status,), terminal)
     response = await dispatch(_make_request())
-    assert response.status_code == 299  # noqa: PLR2004
+    assert response.status_code == _STATUS_UPGRADED
 
 
 async def test_on_error_decorator_can_translate_exception() -> None:
@@ -111,7 +116,7 @@ async def test_on_error_decorator_can_translate_exception() -> None:
 
     dispatch = compose((swallow,), terminal)
     response = await dispatch(_make_request())
-    assert response.status_code == 503  # noqa: PLR2004
+    assert response.status_code == _STATUS_SERVICE_UNAVAILABLE
 
 
 async def test_on_error_returns_none_reraises() -> None:
