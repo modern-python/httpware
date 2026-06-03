@@ -1,0 +1,75 @@
+"""Tests for AsyncClient construction and ownership semantics."""
+
+import httpx2
+import pytest
+
+from httpware import AsyncClient
+from httpware.decoders.pydantic import PydanticDecoder
+
+
+def test_construction_with_no_args_works() -> None:
+    client = AsyncClient()
+    assert isinstance(client, AsyncClient)
+
+
+def test_construction_with_forwarded_kwargs() -> None:
+    client = AsyncClient(
+        base_url="https://example.test",
+        headers={"x-shared": "1"},
+        params={"trace": "yes"},
+        timeout=10.0,
+    )
+    assert isinstance(client, AsyncClient)
+
+
+def test_construction_with_caller_owned_httpx2_client() -> None:
+    transport = httpx2.MockTransport(lambda req: httpx2.Response(200, request=req))
+    caller = httpx2.AsyncClient(transport=transport)
+    client = AsyncClient(httpx2_client=caller)
+    assert isinstance(client, AsyncClient)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"base_url": "https://example.test"},
+        {"headers": {"x": "1"}},
+        {"params": {"x": "1"}},
+        {"cookies": {"x": "1"}},
+        {"timeout": 5.0},
+        {"limits": httpx2.Limits(max_connections=10)},
+        {"auth": httpx2.BasicAuth("u", "p")},
+    ],
+)
+def test_caller_owned_client_with_forwarded_kwargs_is_typeerror(kwargs: dict) -> None:
+    transport = httpx2.MockTransport(lambda req: httpx2.Response(200, request=req))
+    caller = httpx2.AsyncClient(transport=transport)
+    with pytest.raises(TypeError, match="httpx2_client"):
+        AsyncClient(httpx2_client=caller, **kwargs)
+
+
+def test_default_decoder_is_pydantic_decoder() -> None:
+    client = AsyncClient()
+    assert isinstance(client._decoder, PydanticDecoder)  # noqa: SLF001
+
+
+def test_explicit_decoder_is_honored() -> None:
+    class _Stub:
+        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002
+            return None
+
+    client = AsyncClient(decoder=_Stub())
+    assert isinstance(client._decoder, _Stub)  # noqa: SLF001
+
+
+def test_explicit_middleware_is_honored() -> None:
+    captured: list[str] = []
+
+    class _Tag:
+        async def __call__(self, request, next) -> httpx2.Response:  # noqa: A002, ANN001
+            captured.append("tag")
+            return await next(request)
+
+    client = AsyncClient(middleware=(_Tag(),))
+    assert client._user_middleware == (client._user_middleware[0],)  # noqa: SLF001
+    assert len(client._user_middleware) == 1  # noqa: SLF001
