@@ -3,7 +3,7 @@
 **Status:** spec — awaiting review
 **Author:** Artur Shiriev (with Claude)
 **Date:** 2026-06-03
-**Supersedes:** the 0.1.0 architecture documented in `docs/dev/engineering.md` (sections 2, 3, 5, 8)
+**Supersedes:** the 0.1.0 architecture documented in `planning/engineering.md` (sections 2, 3, 5, 8) — formerly at `docs/dev/engineering.md`, moved to `planning/` as part of this pivot
 
 ## 1. Intent
 

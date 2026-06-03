@@ -8,7 +8,7 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 **Where to find what:**
 
-- [`docs/dev/engineering.md`](docs/dev/engineering.md) — the distilled design reference: invariants and *why*, the three protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
+- [`planning/engineering.md`](planning/engineering.md) — the distilled design reference: invariants and *why*, the three protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
 - [`planning/deferred-work.md`](planning/deferred-work.md) — review-surfaced items that are real but not actionable now.
 - [`planning/specs/`](planning/specs/) and [`planning/plans/`](planning/plans/) — per-feature design specs and implementation plans (active work).
 
@@ -89,5 +89,5 @@ Three documented internal boundaries. AI agents must respect them — never cros
 
 ## When in doubt
 
-- Check [`docs/dev/engineering.md`](docs/dev/engineering.md) before adding a new module or extension point.
+- Check [`planning/engineering.md`](planning/engineering.md) before adding a new module or extension point.
 - Surface ambiguity as a documentation gap rather than improvising.
