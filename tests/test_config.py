@@ -50,3 +50,29 @@ def test_client_config_is_frozen() -> None:
     cfg = ClientConfig()
     with pytest.raises(FrozenInstanceError):
         cfg.base_url = "https://example.com"  # ty: ignore[invalid-assignment]
+
+
+@pytest.mark.parametrize("field", ["connect", "read", "write", "pool"])
+def test_timeout_rejects_negative(field: str) -> None:
+    with pytest.raises(ValueError, match=rf"Timeout\.{field} must be non-negative"):
+        Timeout(**{field: -1.0})
+
+
+def test_timeout_accepts_zero() -> None:
+    # Zero is a valid sentinel (fail immediately on this phase).
+    Timeout(connect=0.0, read=0.0, write=0.0, pool=0.0)
+
+
+@pytest.mark.parametrize("field", ["max_connections", "max_keepalive_connections"])
+def test_limits_rejects_negative_int(field: str) -> None:
+    with pytest.raises(ValueError, match=f"{field} must be non-negative"):
+        Limits(**{field: -1})
+
+
+def test_limits_rejects_negative_keepalive_expiry() -> None:
+    with pytest.raises(ValueError, match="keepalive_expiry must be non-negative"):
+        Limits(keepalive_expiry=-0.5)
+
+
+def test_limits_accepts_zero() -> None:
+    Limits(max_connections=0, max_keepalive_connections=0, keepalive_expiry=0.0)
