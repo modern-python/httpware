@@ -6,6 +6,7 @@ from http import HTTPStatus
 import pytest
 
 from httpware import Response
+from httpware.response import _parse_charset
 
 
 def test_response_is_frozen() -> None:
@@ -61,6 +62,24 @@ def test_response_text_strips_quotes_around_charset(content_type: str) -> None:
     resp = Response(
         status=200,
         headers={"content-type": content_type},
+        content=body,
+        url="/",
+        elapsed=0.0,
+    )
+    assert resp.text == "café"
+
+
+def test_response_text_strips_inner_whitespace_in_quoted_charset() -> None:
+    # Direct parser check: inner whitespace inside the quoted value must not survive.
+    # (Python's codec registry happens to normalize whitespace, masking the bug
+    # end-to-end on most charsets; verify the parser itself returns a clean value.)
+    assert _parse_charset('text/plain; charset=" iso-8859-1 "') == "iso-8859-1"
+
+    # End-to-end smoke: decoding the Latin-1 body must yield the original text.
+    body = "café".encode("iso-8859-1")
+    resp = Response(
+        status=HTTPStatus.OK,
+        headers={"content-type": 'text/plain; charset=" iso-8859-1 "'},
         content=body,
         url="/",
         elapsed=0.0,

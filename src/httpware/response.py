@@ -21,7 +21,7 @@ def _parse_charset(content_type: str) -> str | None:
     for raw in content_type.split(";"):
         part = raw.strip()
         if part.lower().startswith(_CHARSET_PREFIX):
-            return part[len(_CHARSET_PREFIX) :].strip().strip('"').strip("'")
+            return part[len(_CHARSET_PREFIX) :].strip().strip('"').strip("'").strip()
     return None
 
 
