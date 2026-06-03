@@ -91,6 +91,16 @@ async def test_httpx2_connect_error_maps_to_transport_error() -> None:
         await client.send(httpx2.Request("GET", "https://example.test/x"))
 
 
+async def test_httpx2_invalid_url_maps_to_transport_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "synthetic invalid URL from transport"
+        raise httpx2.InvalidURL(msg)
+
+    client = _client_with_handler(handler)
+    with pytest.raises(TransportError, match="synthetic invalid URL"):
+        await client.send(httpx2.Request("GET", "https://example.test/x"))
+
+
 async def test_send_on_closed_client_raises_transport_error() -> None:
     transport = httpx2.MockTransport(lambda req: httpx2.Response(HTTPStatus.OK, request=req))
     underlying = httpx2.AsyncClient(transport=transport)

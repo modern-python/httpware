@@ -100,3 +100,63 @@ async def test_base_url_is_applied() -> None:
     client = AsyncClient(httpx2_client=underlying)
     await client.get("/relative")
     assert str(captured[0].url) == "https://example.test/relative"
+
+
+async def test_get_with_cookies_forwarded() -> None:
+    """Exercises the cookies branch in _request_with_body."""
+    captured: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    client = _client_with_handler(handler)
+    await client.get("https://example.test/x", cookies={"token": "abc"})
+    assert "token=abc" in captured[0].headers.get("cookie", "")
+
+
+async def test_get_with_explicit_timeout() -> None:
+    """Exercises the timeout branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.get("https://example.test/x", timeout=5.0)
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_get_with_extensions() -> None:
+    """Exercises the extensions branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.get("https://example.test/x", extensions={"trace": True})
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_post_with_content_body() -> None:
+    """Exercises the content branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.post("https://example.test/x", content=b"raw-bytes")
+    assert response.json()["content"] == "raw-bytes"
+
+
+async def test_post_with_data_body() -> None:
+    """Exercises the data branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.post("https://example.test/x", data={"field": "value"})
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_post_with_files_body() -> None:
+    """Exercises the files branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.post("https://example.test/x", files={"upload": b"file-content"})
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_runtime_error_without_closed_reraises() -> None:
+    """Exercises the RuntimeError re-raise branch in _terminal (error not containing 'closed')."""
+
+    def boom(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "unexpected internal failure"
+        raise RuntimeError(msg)
+
+    client = _client_with_handler(boom)
+    with pytest.raises(RuntimeError, match="unexpected internal failure"):
+        await client.get("https://example.test/x")

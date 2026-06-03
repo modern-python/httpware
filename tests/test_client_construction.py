@@ -55,18 +55,32 @@ def test_default_decoder_is_pydantic_decoder() -> None:
 
 def test_explicit_decoder_is_honored() -> None:
     class _Stub:
-        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002
+        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover
             return None
 
     client = AsyncClient(decoder=_Stub())
     assert isinstance(client._decoder, _Stub)  # noqa: SLF001
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"cookies": {"session": "abc"}},
+        {"limits": httpx2.Limits(max_connections=5)},
+        {"auth": httpx2.BasicAuth("user", "pass")},
+    ],
+)
+def test_construction_with_optional_forwarded_kwargs(kwargs: dict) -> None:
+    """Exercises cookies/limits/auth branches in __init__ when no httpx2_client is supplied."""
+    client = AsyncClient(**kwargs)
+    assert isinstance(client, AsyncClient)
+
+
 def test_explicit_middleware_is_honored() -> None:
     captured: list[str] = []
 
     class _Tag:
-        async def __call__(self, request, next) -> httpx2.Response:  # noqa: A002, ANN001
+        async def __call__(self, request, next) -> httpx2.Response:  # noqa: A002, ANN001  # pragma: no cover
             captured.append("tag")
             return await next(request)
 
