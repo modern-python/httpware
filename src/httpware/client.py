@@ -645,3 +645,17 @@ class AsyncClient:
             files=files,
             response_model=response_model,
         )
+
+    async def __aenter__(self) -> typing.Self:
+        """Enter the async context manager; return self."""
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
+        """Exit the async context manager; close the underlying client only if owned."""
+        if self._owns_client and not self._httpx2_client.is_closed:
+            await self._httpx2_client.aclose()
