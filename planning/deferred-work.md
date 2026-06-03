@@ -27,11 +27,6 @@ Items raised in reviews that are real but not actionable now.
 
 ## Deferred from: code review of story-1-2 (2026-05-13)
 
-- **Charset parser robustness** — quoted whitespace, mismatched quotes, multi-`charset=` directives, substring false-positives (e.g. `boundary` containing `charset=`). (`src/httpware/response.py:20-25`)
-- **Header name/value validation** — `with_header` / `with_headers` accept CR/LF (injection), `None`, empty string. CRLF lands with the `Redactor` middleware (Story 5.3); the rest is a generic input-validation pass. (`src/httpware/request.py:21-23,37-39`)
-- **URL validation** — `with_url("")` accepts empty; `base_url` has no trailing-slash normalization in config (`AsyncClient._resolve_url` does `base.rstrip('/')` so the practical impact is reduced). (`src/httpware/request.py:25-27`, `src/httpware/config.py:34`)
-- **`with_query(None)` handling** — type signature is `Mapping[str, str]`; a runtime `None` slips past typing and breaks downstream iteration with no guard. (`src/httpware/request.py:33-35`)
-- **`Timeout` / `Limits` negative-value validation** — no `__post_init__` guard; nonsensical values silently accepted. (`src/httpware/config.py:11-27`)
 - **Multi-valued query params** — `Mapping[str, str]` cannot express `?tag=a&tag=b`. Type widening needed. (`src/httpware/request.py:16`)
 - **Streaming / async-iterable request bodies** — `body: bytes | None` only. Revisit in streaming work (Story 4.1). (`src/httpware/request.py:18`)
 - **`@final` to prevent subclassing** — frozen+slots subclassing is fragile. No current subclasser; defer until needed. (`src/httpware/request.py`, `response.py`, `config.py`)
