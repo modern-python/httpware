@@ -143,3 +143,84 @@ def test_with_extension_accepts_any_value_type() -> None:
     new = r.with_extension("marker", marker)
     assert new.extensions == {"marker": marker}
     assert new.extensions["marker"] is marker
+
+
+def test_request_rejects_empty_url() -> None:
+    with pytest.raises(ValueError, match="url must be non-empty"):
+        Request(method="GET", url="")
+
+
+def test_request_rejects_non_str_url() -> None:
+    with pytest.raises(TypeError, match="url must be str"):
+        Request(method="GET", url=None)  # ty: ignore[invalid-argument-type]
+
+
+def test_with_url_rejects_empty() -> None:
+    r = Request(method="GET", url="/")
+    with pytest.raises(ValueError, match="url must be non-empty"):
+        r.with_url("")
+
+
+def test_request_rejects_header_with_crlf_in_value() -> None:
+    with pytest.raises(ValueError, match="header name and value must not contain CR or LF"):
+        Request(method="GET", url="/", headers={"X-Trace": "value\r\nInjected: yes"})
+
+
+def test_request_rejects_header_with_crlf_in_name() -> None:
+    with pytest.raises(ValueError, match="header name and value must not contain CR or LF"):
+        Request(method="GET", url="/", headers={"X-Bad\r\nInjected": "value"})
+
+
+def test_request_rejects_empty_header_name() -> None:
+    with pytest.raises(ValueError, match="header name and value must be non-empty"):
+        Request(method="GET", url="/", headers={"": "value"})
+
+
+def test_request_rejects_empty_header_value() -> None:
+    with pytest.raises(ValueError, match="header name and value must be non-empty"):
+        Request(method="GET", url="/", headers={"X-Trace": ""})
+
+
+def test_request_rejects_non_str_header_value() -> None:
+    with pytest.raises(TypeError, match="header name and value must be str"):
+        Request(method="GET", url="/", headers={"X-Trace": None})  # ty: ignore[invalid-argument-type]
+
+
+def test_request_rejects_cookie_with_crlf() -> None:
+    with pytest.raises(ValueError, match="cookie name and value must not contain CR or LF"):
+        Request(method="GET", url="/", cookies={"session": "abc\r\nSet-Cookie: evil"})
+
+
+def test_request_rejects_empty_cookie_value() -> None:
+    with pytest.raises(ValueError, match="cookie name and value must be non-empty"):
+        Request(method="GET", url="/", cookies={"session": ""})
+
+
+def test_with_header_rejects_crlf() -> None:
+    r = Request(method="GET", url="/")
+    with pytest.raises(ValueError, match="header name and value must not contain CR or LF"):
+        r.with_header("X-Trace", "value\r\n")
+
+
+def test_with_cookie_rejects_crlf() -> None:
+    r = Request(method="GET", url="/")
+    with pytest.raises(ValueError, match="cookie name and value must not contain CR or LF"):
+        r.with_cookie("session", "abc\r\n")
+
+
+@pytest.mark.parametrize("field_name", ["headers", "params", "cookies", "extensions"])
+def test_request_rejects_none_mapping_field(field_name: str) -> None:
+    with pytest.raises(TypeError, match=f"{field_name} must be a Mapping"):
+        Request(method="GET", url="/", **{field_name: None})  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize("field_name", ["headers", "params", "cookies", "extensions"])
+def test_request_rejects_list_mapping_field(field_name: str) -> None:
+    with pytest.raises(TypeError, match=f"{field_name} must be a Mapping"):
+        Request(method="GET", url="/", **{field_name: []})  # ty: ignore[invalid-argument-type]
+
+
+def test_with_query_none_raises() -> None:
+    r = Request(method="GET", url="/")
+    with pytest.raises(TypeError, match="params must be a Mapping"):
+        r.with_query(None)  # ty: ignore[invalid-argument-type]

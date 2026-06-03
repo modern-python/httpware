@@ -6,6 +6,18 @@ from dataclasses import dataclass, field
 from typing import Any, Self
 
 
+def _validate_header_or_cookie(name: str, value: str, *, kind: str) -> None:
+    if not isinstance(name, str) or not isinstance(value, str):
+        msg = f"{kind} name and value must be str"
+        raise TypeError(msg)
+    if not name or not value:
+        msg = f"{kind} name and value must be non-empty"
+        raise ValueError(msg)
+    if any(c in name or c in value for c in ("\r", "\n")):
+        msg = f"{kind} name and value must not contain CR or LF"
+        raise ValueError(msg)
+
+
 @dataclass(frozen=True, slots=True)
 class Request:
     """Immutable HTTP request value type."""
@@ -17,6 +29,23 @@ class Request:
     cookies: Mapping[str, str] = field(default_factory=dict)
     body: bytes | None = None
     extensions: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.url, str):
+            msg = "url must be str"
+            raise TypeError(msg)
+        if not self.url:
+            msg = "url must be non-empty"
+            raise ValueError(msg)
+        for field_name in ("headers", "params", "cookies", "extensions"):
+            field_value = getattr(self, field_name)
+            if not isinstance(field_value, Mapping):
+                msg = f"{field_name} must be a Mapping (got {type(field_value).__name__})"
+                raise TypeError(msg)
+        for name, value in self.headers.items():
+            _validate_header_or_cookie(name, value, kind="header")
+        for name, value in self.cookies.items():
+            _validate_header_or_cookie(name, value, kind="cookie")
 
     def with_header(self, name: str, value: str) -> Self:
         """Return a copy with the given header added or replaced."""
