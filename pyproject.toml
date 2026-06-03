@@ -89,6 +89,9 @@ ignore = [
 isort.lines-after-imports = 2
 isort.no-lines-before = ["standard-library", "local-folder"]
 
+[tool.ruff.lint.per-file-ignores]
+"src/httpware/client.py" = ["ASYNC109", "ANN401"]
+
 [tool.pytest.ini_options]
 addopts = "--cov=. --cov-report term-missing --cov-fail-under=100"
 asyncio_mode = "auto"
