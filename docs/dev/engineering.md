@@ -4,107 +4,84 @@ This doc is the single distilled reference for `httpware` design rationale, prot
 
 ## 1. Project intent
 
-`httpware` is a Python async HTTP client framework for building resilient service clients. It supersedes `community-of-python/base-client` and ships under the `modern-python` org. The framework owns the abstraction layer above the underlying HTTP client (`httpx2` by default); consumers never import the transport directly.
+`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request` and `httpx2.Response` as the public request/response surface and adds three things on top: typed response decoding (via a `ResponseDecoder` protocol; Pydantic ships as the default, msgspec as an opt-in extra), a middleware chain composed at client construction, and a status-keyed exception tree raised automatically on 4xx and 5xx.
+
+The 0.1.0 release attempted to own a full abstraction over the underlying HTTP client. v0.2 walks that back: `httpx2` is part of the public surface.
 
 ## 2. Architectural invariants (CI-enforced)
 
 These are non-negotiable. CI rejects PRs that violate them. The "why" exists so future contributors can judge edge cases instead of blindly following the rule.
 
-- **No `httpx2` leakage outside `src/httpware/transports/httpx2.py`.** *Why:* the whole point of the framework is to own the abstraction above the underlying client. Any consumer that imports `httpx2` directly defeats the abstraction and pins us to the current transport choice.
-- **No `httpx2` private API.** *Why:* private symbols can change between patch releases. We accept the public-API surface as the contract.
+- **No `httpx2._` private API.** *Why:* private symbols can change between patch releases. We accept the public-API surface as the contract.
 - **No `from __future__ import annotations`.** *Why:* Python 3.11+ floor. PEP 604/585 syntax is native; the future-import would only add noise and inconsistency.
 - **No `print()`.** *Why:* ruff-enforced. Libraries log; they do not print to stdout. Stray prints leak into consumer applications.
 - **No global logging config.** *Why:* `logging.basicConfig()` from a library mutates the consumer's logging tree. We only acquire `logging.getLogger("httpware")` or namespaced child loggers and let consumers configure handlers.
 - **Type suppressions use `# ty: ignore[<rule>]`.** *Why:* this project uses `ty`, not `mypy`. `# type: ignore` is silently accepted by `ty` but ambiguous; `# ty: ignore[<rule>]` is checked and rule-specific.
 
-## 3. The five protocol seams
+The 0.1.0 "no `httpx2` leakage outside `transports/httpx2.py`" invariant is **retired in v0.2**. Exposing `httpx2.Request`/`httpx2.Response` is the design.
+
+## 3. The three protocol seams
 
 A protocol seam is a documented internal boundary. AI agents and contributors must respect it — never cross a seam except through its protocol.
 
-### Seam 1: `Middleware ↔ Transport`
+The 0.1.0 seams numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) have collapsed into the `AsyncClient` terminal — there is no transport abstraction in v0.2.
 
-- **Where:** `src/httpware/middleware/` (chain) ↔ `src/httpware/transports/` (any `Transport` implementation).
-- **Contract:** the chain bottom calls `transport.__call__(request) -> Response`.
-- **Rule:** middleware never instantiates a transport; the `AsyncClient` injects it at construction.
-
-### Seam 2: `AsyncClient ↔ Middleware`
+### Seam A: `AsyncClient ↔ Middleware`
 
 - **Where:** `src/httpware/client.py` ↔ `src/httpware/middleware/`.
-- **Contract:** the middleware chain is composed at `AsyncClient.__init__` and frozen for the client's lifetime.
-- **Rule:** mutating the chain after construction is not supported. Per-request middleware is expressed via the `Request` extensions field, not by rebuilding the chain.
+- **Contract:** the middleware chain is composed once at `AsyncClient.__init__` and frozen for the client's lifetime. The chain bottom (the "terminal") is internal: it calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx.
+- **Rule:** mutating the chain after construction is not supported. Per-request behavior goes through `httpx2.Request.extensions` or through `extensions=` kwargs at call sites.
 
-### Seam 3: `AsyncClient ↔ ResponseDecoder`
+### Seam B: `AsyncClient ↔ ResponseDecoder`
 
 - **Where:** `src/httpware/client.py` ↔ `src/httpware/decoders/`.
-- **Contract:** the decoder is invoked when the caller passes `response_model=`. The protocol is `decode(content: bytes, model: type[T]) -> T`.
+- **Contract:** the decoder is invoked when the caller passes `response_model=`. The protocol is `decode(content: bytes, model: type[T]) -> T`. Decoder errors (`pydantic.ValidationError`, `msgspec.ValidationError`) propagate unwrapped.
 - **Rule:** the decoder must operate on raw bytes in a single parse pass. Two-pass decoding (`json.loads` then `validate_python`) is rejected: a single bytes-in / typed-object-out pass avoids the redundant intermediate `dict` allocation and parses faster. The Pydantic adapter implements this as `TypeAdapter(model).validate_json(content)`, with the `TypeAdapter` itself memoized via `@functools.lru_cache(maxsize=1024)` on a module-level `_get_adapter(model)` factory (the adapter is the expensive part to build). The msgspec adapter implements it as `msgspec.json.decode(content, type=model)`.
 
-### Seam 4: `Httpx2Transport ↔ httpx2`
-
-- **Where:** `src/httpware/transports/httpx2.py` is the only file that may import `httpx2`.
-- **Contract:** `httpx2` exceptions are mapped to `httpware` exceptions at this seam.
-- **Rule:** CI grep checks enforce zero `httpx2` imports outside this file and zero `httpx2._` private references anywhere.
-
-### Seam 5: `httpware ↔ optional extras`
+### Seam C: `httpware ↔ optional extras`
 
 - **Where:** `pyproject.toml` extras (`[project.optional-dependencies]`) ↔ the adapter modules that import them.
-- **Contract:** each optional dependency is imported only inside its own dedicated module (e.g., `pydantic` in `decoders/pydantic.py`; `msgspec` in `decoders/msgspec.py` when 1-6 lands; `opentelemetry` in `middleware/observability/otel.py` when 5-4 lands).
+- **Contract:** each optional dependency is imported only inside its own dedicated module (e.g., `pydantic` in `decoders/pydantic.py`; `msgspec` in `decoders/msgspec.py`; `opentelemetry` in `middleware/observability/otel.py` when Epic 5 lands).
 - **Rule:** never import an extra at package top-level. The package must import cleanly when the extra is not installed.
 
 ## 4. Exception contract
 
-All `httpware` HTTP exceptions are constructed with **keyword arguments only**. The mandatory fields on every `StatusError` (and its 4xx/5xx subclasses) are:
+`StatusError` and all its 4xx/5xx subclasses are constructed with a **single positional `response: httpx2.Response`**. Subclasses do not override `__init__`. All fields are available via `exc.response.*` (status code, headers, content, request, etc.).
 
-| Field | Type | Source |
-| --- | --- | --- |
-| `status` | `int` | response status code |
-| `body` | `bytes` | full response body |
-| `headers` | `Mapping[str, str]` | lowercased response headers (v0 contract) |
-| `json` | `Any \| None` | parsed JSON if `application/json` content-type; else `None` |
-| `request_method` | `str` | uppercased request method |
-| `request_url` | `str` | request URL, may include userinfo (Redactor sanitizes — Story 5.3) |
+```python
+raise NotFoundError(response)          # correct
+exc.response.status_code               # 404
+exc.response.request.url               # URL of the failed request
+```
 
-The mapping table from `httpx2` errors to `httpware` errors lives at Seam 4 (`src/httpware/transports/httpx2.py`). Status-keyed exceptions are looked up via the `STATUS_TO_EXCEPTION` table in `src/httpware/errors.py`.
+`__repr__` and the `str()` summary strip `user:pass@` userinfo from `response.request.url` to avoid leaking credentials in tracebacks. Query-string secrets are not stripped here.
 
-Constructing any of these exceptions positionally is a programming error caught by `ty`. The keyword-only signature is enforced via `__init__` definitions, not docstrings.
+The error-mapping table (what `httpx2` exception maps to which `httpware` exception) lives at the `AsyncClient` terminal in `src/httpware/client.py`. Status-keyed exceptions are looked up via the `STATUS_TO_EXCEPTION` table in `src/httpware/errors.py`. Unknown 4xx falls back to `ClientStatusError`; unknown 5xx falls back to `ServerStatusError`.
+
+`TimeoutError` inherits from both `httpware.ClientError` and `builtins.TimeoutError` so `except builtins.TimeoutError` (the form `asyncio.wait_for` uses) also catches httpware-raised timeouts.
 
 ## 5. Module layout
 
-Current tree (post-story-1.5):
+Current tree (v0.2):
 
 ```text
 src/httpware/
-├── __init__.py                       # public exports + __all__
+├── __init__.py            # public exports
 ├── py.typed
-├── config.py                         # Limits, Timeout, ClientConfig
-├── request.py                        # Request + with_* helpers
-├── response.py                       # Response (StreamResponse pending in Epic 4)
-├── errors.py                         # status-keyed exception hierarchy
+├── client.py              # AsyncClient
+├── errors.py              # status-keyed exception tree (response: httpx2.Response)
+├── middleware/
+│   ├── __init__.py        # Middleware protocol, Next type, @before_request/@after_response/@on_error
+│   └── chain.py           # compose(middleware, terminal) -> Next
 ├── decoders/
-│   ├── __init__.py                   # ResponseDecoder protocol (Seam 3)
-│   └── pydantic.py                   # PydanticDecoder adapter
-└── transports/
-    ├── __init__.py                   # Transport protocol
-    └── httpx2.py                     # Httpx2Transport adapter (Seam 4)
+│   ├── __init__.py        # ResponseDecoder protocol
+│   ├── pydantic.py        # PydanticDecoder (extra: pydantic)
+│   └── msgspec.py         # MsgspecDecoder (extra: msgspec)
+└── _internal/
+    └── import_checker.py  # is_msgspec_installed, is_pydantic_installed
 ```
 
-Planned modules (filled in as the roadmap lands):
-
-```text
-src/httpware/
-├── client.py                         # AsyncClient (Story 1.7)
-├── decoders/msgspec.py               # MsgspecDecoder via extra (Story 1.6)
-├── transports/recorded.py            # RecordedTransport for testing (Story 1.8)
-├── middleware/                       # protocols + built-in middleware (Epic 2)
-│   ├── __init__.py                   # Middleware protocol, Next type
-│   ├── chain.py                      # chain composition
-│   ├── auth.py                       # auth coercion (Story 2.4)
-│   ├── timeout.py                    # per-attempt timeout (Story 3.1)
-│   ├── retry.py                      # retry + RetryBudget (Stories 3.2–3.4)
-│   ├── bulkhead.py                   # concurrency limit (Story 3.5)
-│   └── observability/                # Layer 1 emission + OTEL (Epic 5)
-└── _internal/                        # private cross-module helpers
-```
+**Deleted relative to 0.1.0:** `request.py`, `response.py`, `config.py`, `transports/` (Transport protocol + Httpx2Transport), `_internal/auth.py`, `_internal/chain.py`. The `RecordedTransport` testing helper is gone; tests inject `httpx2.MockTransport` via `httpx2_client=` instead.
 
 ## 6. Testing patterns
 
@@ -131,52 +108,24 @@ Caller-facing pattern: consumers select the implementation by passing it explici
 
 ## 8. Remaining roadmap
 
-Twenty-seven stories remain. Topic slugs in `planning/specs/` and `planning/plans/` use kebab-case descriptions, not the story IDs — these IDs are retained as a stable identifier convention from the original epic structure.
+Post-pivot, the roadmap has three categories. Topic slugs in `planning/specs/` and `planning/plans/` use kebab-case descriptions.
 
-### Epic 1 — Make typed HTTP requests with sensible defaults
+### Deleted by the v0.2 pivot
 
-- **1-6** `msgspec` decoder via extras — second `ResponseDecoder` adapter, opt-in.
-- **1-7** `AsyncClient` with HTTP methods, `response_model`, `with_options`, lifecycle — the main public surface.
-- **1-8** `RecordedTransport` for testing — ships with the library; replaces `respx` for transport-level tests.
+`1-8` `RecordedTransport`, `2-3` Request immutability helpers, `2-4` auth coercion middleware, `4-1` `StreamResponse` type, `4-2` transport stream implementation, `5-3` `Redactor` middleware.
 
-### Epic 2 — Compose request-handling logic via middleware
+### Rewritten by the v0.2 pivot
 
-- **2-1** `Middleware` protocol, `Next` type, chain composition.
-- **2-2** Phase shortcut decorators (`@before_request`, `@after_response`, `@on_error`).
-- **2-3** `Request` immutability helpers (`with_headers`, `with_cookie`, `with_extension`, etc.).
-- **2-4** Auth coercion as middleware.
-- **2-5** Wire middleware into `AsyncClient`.
+`1-7` `AsyncClient` (the heart of v0.2 — shipped in the pivot PR), `2-5` wire middleware into `AsyncClient` (trivially part of `1-7`), `6-1` migration guide (extended with httpware 0.1→0.2 notes), `6-4` CI invariant gates (drop the "no `httpx2` leakage" rule).
 
-### Epic 3 — Survive upstream failures with composable resilience
+### Surviving (land in subsequent PRs)
 
-- **3-1** Per-attempt timeout middleware.
-- **3-2** Retry middleware.
-- **3-3** `RetryBudget` data structure.
-- **3-4** `RetryBudget` middleware integration.
-- **3-5** `Bulkhead` middleware.
-- **3-6** Document the extension slot for custom resilience policies.
-
-### Epic 4 — Stream responses without buffering
-
-- **4-1** `StreamResponse` type.
-- **4-2** Transport stream implementation in `Httpx2Transport`.
-- **4-3** `AsyncClient.stream` context manager.
-
-### Epic 5 — Observe and instrument the client
-
-- **5-1** Layer 1 observability — middleware lifecycle hooks.
-- **5-2** Wire emission into resilience middlewares.
-- **5-3** `Redactor` class and integration (closes deferred work on URL/header/userinfo sanitization).
-- **5-4** OpenTelemetry middleware via the `otel` extra.
-- **5-5** Logging policy enforcement (CI grep on `logging.basicConfig`, `logging.getLogger()` without a name).
-
-### Epic 6 — Ship v1.0
-
-- **6-1** Migration guide from `base-client`.
-- **6-2** Documentation site (`mkdocs`).
-- **6-3** Public benchmark suite.
-- **6-4** CI enforcement gates (codify the invariants in Section 2 as CI jobs).
-- **6-5** Release flow with Trusted Publishers + Sigstore.
+- **Epic 3 — Resilience:** `3-1` per-attempt timeout, `3-2` retry, `3-3` `RetryBudget`, `3-4` `RetryBudget` middleware integration, `3-5` `Bulkhead`, `3-6` extension-slot docs.
+- **Epic 4 — Streaming:** `4-3` `AsyncClient.stream` context manager (forwards to `httpx2.AsyncClient.stream`; no `StreamResponse` type).
+- **Epic 5 — Observability:** `5-1` Layer 1 middleware hooks, `5-2` wire into resilience middlewares, `5-4` OpenTelemetry middleware (`otel` extra), `5-5` logging policy CI grep.
+- **Epic 6 — Ship v1.0:** `6-2` docs site (`mkdocs`), `6-3` benchmarks, `6-5` release flow (Trusted Publishers + Sigstore).
+- **Carry-forward decoder:** `1-6` msgspec decoder via extras — second `ResponseDecoder` adapter, already implemented; verified surviving in the pivot.
+- **Middleware protocol:** `2-1` and `2-2` already implemented in the pivot (protocol, chain, phase decorators).
 
 When work starts on a roadmap item, it gets a spec at `planning/specs/YYYY-MM-DD-<topic>-design.md` and a plan at `planning/plans/YYYY-MM-DD-<topic>-plan.md`.
 
