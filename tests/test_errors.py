@@ -122,6 +122,32 @@ def test_per_status_subclasses_construct(status: int, expected: type[StatusError
     assert exc.response.status_code == status
 
 
+def test_status_error_strips_userinfo_with_username_only() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user@example.test/x"))
+    assert "user" not in str(exc)
+    assert str(exc) == "404 GET https://example.test/x"
+
+
+def test_status_error_summary_preserves_port() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user:pass@example.test:8080/x"))
+    assert "user" not in str(exc)
+    assert "pass" not in str(exc)
+    assert str(exc) == "404 GET https://example.test:8080/x"
+
+
+def test_status_error_summary_passthrough_when_at_in_query_only() -> None:
+    # `@` in query-string with no userinfo — should fall through after urlsplit returns no user/pass.
+    exc = NotFoundError(_make_response(404, url="https://example.test/x?email=foo@bar.com"))
+    assert str(exc) == "404 GET https://example.test/x?email=foo@bar.com"
+
+
+def test_status_error_strips_userinfo_with_ipv6_host() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user:pass@[::1]:8080/x"))
+    assert "user" not in str(exc)
+    assert "pass" not in str(exc)
+    assert str(exc) == "404 GET https://[::1]:8080/x"
+
+
 def test_timeout_error_is_builtin_timeout_error() -> None:
     exc = TimeoutError("timed out")
     assert isinstance(exc, builtins.TimeoutError)

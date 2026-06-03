@@ -23,7 +23,10 @@ def _strip_userinfo(url: str) -> str:
     parts = urlsplit(url)
     if parts.username is None and parts.password is None:
         return url
-    netloc = parts.hostname or ""
+    hostname = parts.hostname or ""
+    if ":" in hostname:  # IPv6 literal — re-wrap in brackets
+        hostname = f"[{hostname}]"
+    netloc = hostname
     if parts.port is not None:
         netloc = f"{netloc}:{parts.port}"
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
