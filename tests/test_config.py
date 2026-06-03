@@ -76,3 +76,43 @@ def test_limits_rejects_negative_keepalive_expiry() -> None:
 
 def test_limits_accepts_zero() -> None:
     Limits(max_connections=0, max_keepalive_connections=0, keepalive_expiry=0.0)
+
+
+def test_client_config_strips_trailing_slash_from_base_url() -> None:
+    cfg = ClientConfig(base_url="https://api.example.com/")
+    assert cfg.base_url == "https://api.example.com"
+
+
+def test_client_config_leaves_base_url_without_trailing_slash() -> None:
+    cfg = ClientConfig(base_url="https://api.example.com")
+    assert cfg.base_url == "https://api.example.com"
+
+
+def test_client_config_strips_multiple_trailing_slashes() -> None:
+    cfg = ClientConfig(base_url="https://api.example.com///")
+    assert cfg.base_url == "https://api.example.com"
+
+
+def test_client_config_allows_none_base_url() -> None:
+    cfg = ClientConfig(base_url=None)
+    assert cfg.base_url is None
+
+
+def test_client_config_rejects_empty_base_url() -> None:
+    with pytest.raises(ValueError, match="base_url must be a non-empty string or None"):
+        ClientConfig(base_url="")
+
+
+def test_client_config_rejects_slash_only_base_url() -> None:
+    with pytest.raises(ValueError, match="base_url must be a non-empty string or None"):
+        ClientConfig(base_url="/")
+
+
+def test_client_config_rejects_multiple_slashes_only_base_url() -> None:
+    with pytest.raises(ValueError, match="base_url must be a non-empty string or None"):
+        ClientConfig(base_url="///")
+
+
+def test_client_config_rejects_non_str_base_url() -> None:
+    with pytest.raises(ValueError, match="base_url must be a non-empty string or None"):
+        ClientConfig(base_url=123)  # ty: ignore[invalid-argument-type]

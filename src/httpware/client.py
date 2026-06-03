@@ -119,7 +119,7 @@ class AsyncClient:
         base = self._config.base_url
         if base is None:
             return path
-        return f"{base.rstrip('/')}/{path.lstrip('/')}"
+        return f"{base}/{path.lstrip('/')}"
 
     def _build_request(
         self,

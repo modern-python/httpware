@@ -56,3 +56,14 @@ class ClientConfig:
     limits: Limits = field(default_factory=Limits)
     decoder: ResponseDecoder = field(default_factory=PydanticDecoder)
     middleware: tuple[Middleware, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.base_url is not None:
+            if not isinstance(self.base_url, str):
+                msg = "base_url must be a non-empty string or None"
+                raise ValueError(msg)
+            normalized = self.base_url.rstrip("/")
+            if not normalized:
+                msg = "base_url must be a non-empty string or None"
+                raise ValueError(msg)
+            object.__setattr__(self, "base_url", normalized)
