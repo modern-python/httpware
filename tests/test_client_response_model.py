@@ -1,60 +1,63 @@
-"""Unit tests for AsyncClient response_model integration with ResponseDecoder."""
+"""Tests for response_model decoding integration."""
 
-from typing import TypeVar
+from http import HTTPStatus
 
-from pydantic import BaseModel
+import httpx2
+import pydantic
+import pytest
 
-from httpware import AsyncClient, RecordedTransport
-from httpware.response import Response
-
-
-T = TypeVar("T")
+from httpware import AsyncClient, NotFoundError
 
 
-def _transport(content: bytes) -> RecordedTransport:
-    return RecordedTransport(
-        default=Response(
-            status=200,
-            headers={},
-            content=content,
-            url="/",
-            elapsed=0.0,
-        )
-    )
-
-
-class _Item(BaseModel):
+class _User(pydantic.BaseModel):
+    id: int
     name: str
-    qty: int
 
 
-async def test_response_model_none_returns_raw_response() -> None:
-    transport = _transport(content=b'{"name":"x","qty":1}')
-    client = AsyncClient(transport=transport)
-    result = await client.get("/foo")
-    assert isinstance(result, Response)
-    assert result.content == b'{"name":"x","qty":1}'
+def _client_with_payload(payload: bytes, content_type: str = "application/json") -> AsyncClient:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            HTTPStatus.OK,
+            content=payload,
+            headers={"content-type": content_type},
+            request=request,
+        )
+
+    transport = httpx2.MockTransport(handler)
+    return AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
 
 
-async def test_response_model_invokes_decoder() -> None:
-    transport = _transport(content=b'{"name":"x","qty":1}')
-    client = AsyncClient(transport=transport)
-    result = await client.get("/foo", response_model=_Item)
-    assert isinstance(result, _Item)
-    assert result == _Item(name="x", qty=1)
+async def test_get_with_response_model_returns_typed_object() -> None:
+    client = _client_with_payload(b'{"id": 1, "name": "ada"}')
+    user = await client.get("https://example.test/u", response_model=_User)
+    assert isinstance(user, _User)
+    assert user == _User(id=1, name="ada")
 
 
-async def test_response_model_uses_supplied_decoder() -> None:
-    transport = _transport(content=b'{"name":"x","qty":1}')
-    seen: list[tuple[bytes, type]] = []
+async def test_post_with_response_model_returns_typed_object() -> None:
+    client = _client_with_payload(b'{"id": 2, "name": "bob"}')
+    user = await client.post("https://example.test/u", json={"name": "bob"}, response_model=_User)
+    assert isinstance(user, _User)
 
-    class _SpyDecoder:
-        def decode(self, content: bytes, model: type[T]) -> T:
-            seen.append((content, model))
-            return model(name="spy", qty=999)
 
-    client = AsyncClient(transport=transport, decoder=_SpyDecoder())
-    result = await client.get("/foo", response_model=_Item)
-    assert seen == [(b'{"name":"x","qty":1}', _Item)]
-    assert isinstance(result, _Item)
-    assert result.name == "spy"
+async def test_send_with_response_model_returns_typed_object() -> None:
+    client = _client_with_payload(b'{"id": 3, "name": "cat"}')
+    request = client.build_request("GET", "https://example.test/u")
+    user = await client.send(request, response_model=_User)
+    assert isinstance(user, _User)
+
+
+async def test_decoder_validation_error_propagates_unwrapped() -> None:
+    client = _client_with_payload(b'{"id": "not-an-int", "name": "x"}')
+    with pytest.raises(pydantic.ValidationError):
+        await client.get("https://example.test/u", response_model=_User)
+
+
+async def test_status_error_raised_before_decoder_runs() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(HTTPStatus.NOT_FOUND, content=b'{"id": 1, "name": "x"}', request=request)
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    with pytest.raises(NotFoundError):
+        await client.get("https://example.test/u", response_model=_User)

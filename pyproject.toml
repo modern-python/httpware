@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP",
     "Framework :: AsyncIO",
 ]
-version = "0"
+version = "0.2.0"
 dependencies = [
     "httpx2>=2.0.0,<3.0",
     "pydantic>=2.0,<3.0",
@@ -38,8 +38,7 @@ otel = [
     "opentelemetry-api>=1.20",
     "opentelemetry-sdk>=1.20",
 ]
-niquests = ["niquests>=3.18"]
-all = ["httpware[msgspec,otel,niquests]"]
+all = ["httpware[msgspec,otel]"]
 
 [project.urls]
 repository = "https://github.com/modern-python/httpware"
@@ -74,7 +73,6 @@ fix = true
 unsafe-fixes = true
 line-length = 120
 target-version = "py311"
-extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -90,24 +88,16 @@ ignore = [
 ]
 isort.lines-after-imports = 2
 isort.no-lines-before = ["standard-library", "local-folder"]
-pylint.max-args = 10  # HTTP-method APIs are kwarg-rich (headers, params, cookies, timeout, json, content, response_model, …); default 5 is too strict.
 
 [tool.ruff.lint.per-file-ignores]
-# AsyncClient's HTTP-method `timeout=` is a config-value parameter forwarded to the transport,
-# not asyncio.timeout territory. The rule fires on 24+ method signatures in this one file with
-# the same false-positive justification; per-file disable is cleaner than 24 per-line noqa.
-"src/httpware/client.py" = ["ASYNC109"]
+"src/httpware/client.py" = ["ASYNC109", "ANN401"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/httpware --cov-report term-missing -m 'not perf'"
+addopts = "--cov=. --cov-report term-missing --cov-fail-under=100"
 asyncio_mode = "auto"
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
-markers = [
-    "perf: assertive performance tests (skipped by default; run with `pytest -m perf`)",
-]
 
 [tool.coverage]
 run.concurrency = ["thread"]
-run.omit = ["benchmarks/*"]
 report.exclude_also = ["if typing.TYPE_CHECKING:"]

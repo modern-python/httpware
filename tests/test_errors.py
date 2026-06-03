@@ -1,13 +1,12 @@
-"""Unit tests for httpware.errors."""
+"""Tests for the status-keyed exception tree in httpware.errors."""
 
 import builtins
-import copy
 import pickle
 
+import httpx2
 import pytest
 
-import httpware.errors
-from httpware import (
+from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
     ClientError,
@@ -27,328 +26,134 @@ from httpware import (
 )
 
 
-_LEAF_HIERARCHY = [
-    (BadRequestError, ClientStatusError),
-    (UnauthorizedError, ClientStatusError),
-    (ForbiddenError, ClientStatusError),
-    (NotFoundError, ClientStatusError),
-    (ConflictError, ClientStatusError),
-    (UnprocessableEntityError, ClientStatusError),
-    (RateLimitedError, ClientStatusError),
-    (InternalServerError, ServerStatusError),
-    (ServiceUnavailableError, ServerStatusError),
-]
+def _make_response(status: int, *, url: str = "https://example.test/x", method: str = "GET") -> httpx2.Response:
+    request = httpx2.Request(method, url)
+    return httpx2.Response(status, request=request)
 
 
-@pytest.mark.parametrize(("leaf", "category"), _LEAF_HIERARCHY)
-def test_leaf_inherits_full_chain(leaf: type[StatusError], category: type[StatusError]) -> None:
-    assert issubclass(leaf, category)
-    assert issubclass(leaf, StatusError)
-    assert issubclass(leaf, ClientError)
-
-
-def test_transport_error_inherits_client_error() -> None:
+def test_inheritance_tree() -> None:
+    assert issubclass(StatusError, ClientError)
     assert issubclass(TransportError, ClientError)
-
-
-def test_timeout_error_inherits_client_error() -> None:
     assert issubclass(TimeoutError, ClientError)
-
-
-def test_timeout_error_is_builtins_timeout_error() -> None:
-    """``httpware.TimeoutError`` is also a ``builtins.TimeoutError``.
-
-    So ``except builtins.TimeoutError`` (the form ``asyncio.wait_for``
-    raises) catches httpware-raised timeouts too.
-    """
     assert issubclass(TimeoutError, builtins.TimeoutError)
-    assert isinstance(TimeoutError(), builtins.TimeoutError)
-    assert isinstance(TimeoutError(), ClientError)
+    assert issubclass(ClientStatusError, StatusError)
+    assert issubclass(ServerStatusError, StatusError)
+    for exc in (
+        BadRequestError,
+        UnauthorizedError,
+        ForbiddenError,
+        NotFoundError,
+        ConflictError,
+        UnprocessableEntityError,
+        RateLimitedError,
+    ):
+        assert issubclass(exc, ClientStatusError), exc
+    for exc in (InternalServerError, ServiceUnavailableError):
+        assert issubclass(exc, ServerStatusError), exc
 
 
-def test_builtins_timeout_error_is_not_httpware_timeout() -> None:
-    """The shadow is one-way: a bare ``builtins.TimeoutError`` is NOT a ``httpware.TimeoutError``."""
-    assert not isinstance(builtins.TimeoutError(), TimeoutError)
+def test_status_to_exception_table() -> None:
+    assert {
+        400: BadRequestError,
+        401: UnauthorizedError,
+        403: ForbiddenError,
+        404: NotFoundError,
+        409: ConflictError,
+        422: UnprocessableEntityError,
+        429: RateLimitedError,
+        500: InternalServerError,
+        503: ServiceUnavailableError,
+    } == STATUS_TO_EXCEPTION
 
 
-def test_status_error_rejects_positional_args() -> None:
-    with pytest.raises(TypeError):
-        NotFoundError(404, b"", {}, None, "GET", "/x")  # ty: ignore[missing-argument, too-many-positional-arguments]
+def test_status_error_stores_response() -> None:
+    response = _make_response(404)
+    exc = NotFoundError(response)
+    assert exc.response is response
 
 
-def test_status_error_rejects_missing_kwarg() -> None:
-    with pytest.raises(TypeError):
-        NotFoundError(status=404)  # ty: ignore[missing-argument]
+def test_status_error_summary_message_includes_status_method_url() -> None:
+    exc = NotFoundError(_make_response(404, url="https://example.test/missing", method="GET"))
+    assert str(exc) == "404 GET https://example.test/missing"
 
 
-def test_status_error_stores_all_fields() -> None:
-    status = 404
-    body = b"not found"
-    headers = {"X-Trace": "abc"}
-    payload = {"error": "not found"}
-    method = "GET"
-    url = "/users/1"
-    exc = NotFoundError(
-        status=status,
-        body=body,
-        headers=headers,
-        json=payload,
-        request_method=method,
-        request_url=url,
-    )
-    assert exc.status == status
-    assert exc.body == body
-    assert exc.headers == headers
-    assert exc.json == payload
-    assert exc.request_method == method
-    assert exc.request_url == url
+def test_status_error_strips_userinfo_in_summary_message() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user:pass@example.test/x"))
+    assert "user" not in str(exc)
+    assert "pass" not in str(exc)
+    assert str(exc) == "404 GET https://example.test/x"
 
 
-def test_headers_are_defensively_copied() -> None:
-    """Caller mutation of the source dict after ``raise`` must not bleed into the exception."""
-    headers: dict[str, str] = {"X-Trace": "abc"}
-    exc = NotFoundError(
-        status=404,
-        body=b"",
-        headers=headers,
-        json=None,
-        request_method="GET",
-        request_url="/x",
-    )
-    headers["X-Trace"] = "MUTATED"
-    headers["X-Added"] = "leaked"
-    assert exc.headers["X-Trace"] == "abc"
-    assert "X-Added" not in exc.headers
-
-
-def test_headers_are_read_only() -> None:
-    """The defensive copy is a ``MappingProxyType``; consumers cannot mutate it."""
-    exc = NotFoundError(
-        status=404,
-        body=b"",
-        headers={"X-Trace": "abc"},
-        json=None,
-        request_method="GET",
-        request_url="/x",
-    )
-    with pytest.raises(TypeError):
-        exc.headers["X-Trace"] = "MUTATED"  # ty: ignore[invalid-assignment]
-
-
-def test_repr_format_4xx_leaf() -> None:
-    exc = NotFoundError(
-        status=404,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="GET",
-        request_url="/users/1",
-    )
-    assert repr(exc) == "<NotFoundError status=404 method=GET url=/users/1>"
-
-
-def test_repr_format_5xx_leaf() -> None:
-    exc = InternalServerError(
-        status=500,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="POST",
-        request_url="/x",
-    )
-    assert repr(exc) == "<InternalServerError status=500 method=POST url=/x>"
-
-
-def test_repr_does_not_leak_body_or_headers() -> None:
-    exc = NotFoundError(
-        status=404,
-        body=b"secret-token-abc",
-        headers={"Authorization": "Bearer s3cret"},
-        json=None,
-        request_method="GET",
-        request_url="/x",
-    )
+def test_status_error_repr_strips_userinfo() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user:pass@example.test/x"))
     r = repr(exc)
-    assert "secret-token-abc" not in r
-    assert "Authorization" not in r
-    assert "s3cret" not in r
+    assert "user" not in r
+    assert "pass" not in r
+    assert "NotFoundError" in r
+    assert "status=404" in r
 
 
-def test_repr_strips_userinfo_from_url() -> None:
-    """``__repr__`` must drop ``user:pass@`` userinfo from the request URL."""
-    exc = NotFoundError(
-        status=404,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="GET",
-        request_url="https://alice:s3cret@example.com/path",
-    )
-    r = repr(exc)
-    assert "alice" not in r
-    assert "s3cret" not in r
-    assert "example.com/path" in r
+_NOT_FOUND = 404
 
 
-def test_str_strips_userinfo_from_url() -> None:
-    """The summary message passed to ``Exception.__init__`` must also drop userinfo."""
-    exc = NotFoundError(
-        status=404,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="GET",
-        request_url="https://alice:s3cret@example.com/path",
-    )
-    s = str(exc)
-    assert "alice" not in s
-    assert "s3cret" not in s
-    assert "example.com/path" in s
+def test_status_error_pickleable() -> None:
+    exc = NotFoundError(_make_response(_NOT_FOUND, url="https://example.test/x"))
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(restored, NotFoundError)
+    assert restored.response.status_code == _NOT_FOUND
+    assert str(restored.response.request.url) == "https://example.test/x"
 
 
-def test_repr_preserves_explicit_port_when_stripping_userinfo() -> None:
-    """Stripping userinfo must keep the explicit port (``:8443``) in the rebuilt URL."""
-    exc = NotFoundError(
-        status=404,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="GET",
-        request_url="https://alice:s3cret@example.com:8443/path",
-    )
-    r = repr(exc)
-    assert "alice" not in r
-    assert "s3cret" not in r
-    assert "example.com:8443/path" in r
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (400, BadRequestError),
+        (401, UnauthorizedError),
+        (404, NotFoundError),
+        (429, RateLimitedError),
+        (500, InternalServerError),
+        (503, ServiceUnavailableError),
+    ],
+)
+def test_per_status_subclasses_construct(status: int, expected: type[StatusError]) -> None:
+    response = _make_response(status)
+    exc = expected(response)
+    assert isinstance(exc, expected)
+    assert exc.response.status_code == status
 
 
-def test_repr_handles_at_sign_in_path_without_userinfo() -> None:
-    """A bare ``@`` in the path (no userinfo) must leave the URL untouched."""
-    exc = NotFoundError(
-        status=404,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="GET",
-        request_url="https://example.com/users/@alice/profile",
-    )
-    assert repr(exc) == "<NotFoundError status=404 method=GET url=https://example.com/users/@alice/profile>"
+def test_status_error_strips_userinfo_with_username_only() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user@example.test/x"))
+    assert "user" not in str(exc)
+    assert str(exc) == "404 GET https://example.test/x"
 
 
-def test_status_error_direct_construction() -> None:
-    """The ``StatusError`` base is directly constructible — used by AC4 fallback callers."""
-    status = 999
-    exc = StatusError(
-        status=status,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="GET",
-        request_url="/x",
-    )
-    assert exc.status == status
-    assert repr(exc) == "<StatusError status=999 method=GET url=/x>"
+def test_status_error_summary_preserves_port() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user:pass@example.test:8080/x"))
+    assert "user" not in str(exc)
+    assert "pass" not in str(exc)
+    assert str(exc) == "404 GET https://example.test:8080/x"
 
 
-def test_client_status_error_fallback_construction() -> None:
-    """``ClientStatusError`` is the fallback target for unknown 4xx codes (e.g. 418)."""
-    status = 418
-    exc = ClientStatusError(
-        status=status,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="GET",
-        request_url="/teapot",
-    )
-    assert exc.status == status
-    assert repr(exc) == "<ClientStatusError status=418 method=GET url=/teapot>"
+def test_status_error_summary_passthrough_when_at_in_query_only() -> None:
+    # `@` in query-string with no userinfo — should fall through after urlsplit returns no user/pass.
+    exc = NotFoundError(_make_response(404, url="https://example.test/x?email=foo@bar.com"))
+    assert str(exc) == "404 GET https://example.test/x?email=foo@bar.com"
 
 
-def test_server_status_error_fallback_construction() -> None:
-    """``ServerStatusError`` is the fallback target for unknown 5xx codes (e.g. 504)."""
-    status = 504
-    exc = ServerStatusError(
-        status=status,
-        body=b"",
-        headers={},
-        json=None,
-        request_method="POST",
-        request_url="/x",
-    )
-    assert exc.status == status
-    assert repr(exc) == "<ServerStatusError status=504 method=POST url=/x>"
+def test_status_error_strips_userinfo_with_ipv6_host() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user:pass@[::1]:8080/x"))
+    assert "user" not in str(exc)
+    assert "pass" not in str(exc)
+    assert str(exc) == "404 GET https://[::1]:8080/x"
 
 
-def test_status_error_pickle_round_trip() -> None:
-    """Exceptions survive ``pickle.dumps`` / ``pickle.loads`` across process boundaries."""
-    original = NotFoundError(
-        status=404,
-        body=b"not found",
-        headers={"X-Trace": "abc"},
-        json={"error": "not found"},
-        request_method="GET",
-        request_url="/users/1",
-    )
-    revived = pickle.loads(pickle.dumps(original))  # noqa: S301
-    assert type(revived) is NotFoundError
-    assert revived.status == original.status
-    assert revived.body == original.body
-    assert dict(revived.headers) == dict(original.headers)
-    assert revived.json == original.json
-    assert revived.request_method == original.request_method
-    assert revived.request_url == original.request_url
-    assert repr(revived) == repr(original)
-    assert str(revived) == str(original)
+def test_timeout_error_is_builtin_timeout_error() -> None:
+    exc = TimeoutError("timed out")
+    assert isinstance(exc, builtins.TimeoutError)
+    assert isinstance(exc, ClientError)
 
 
-def test_status_error_deepcopy_round_trip() -> None:
-    original = InternalServerError(
-        status=500,
-        body=b"",
-        headers={"X-Trace": "abc"},
-        json=None,
-        request_method="POST",
-        request_url="/x",
-    )
-    revived = copy.deepcopy(original)
-    assert type(revived) is InternalServerError
-    assert revived.status == original.status
-    assert dict(revived.headers) == dict(original.headers)
-    assert repr(revived) == repr(original)
-
-
-_STATUS_MAPPING = [
-    (400, BadRequestError),
-    (401, UnauthorizedError),
-    (403, ForbiddenError),
-    (404, NotFoundError),
-    (409, ConflictError),
-    (422, UnprocessableEntityError),
-    (429, RateLimitedError),
-    (500, InternalServerError),
-    (503, ServiceUnavailableError),
-]
-
-
-@pytest.mark.parametrize(("code", "cls"), _STATUS_MAPPING)
-def test_status_to_exception_mapping(code: int, cls: type[StatusError]) -> None:
-    assert STATUS_TO_EXCEPTION[code] is cls
-
-
-def test_status_to_exception_has_only_nine_entries() -> None:
-    assert len(STATUS_TO_EXCEPTION) == len(_STATUS_MAPPING)
-
-
-def test_unknown_4xx_falls_back_to_client_status_error() -> None:
-    assert STATUS_TO_EXCEPTION.get(418, ClientStatusError) is ClientStatusError
-
-
-def test_unknown_5xx_falls_back_to_server_status_error() -> None:
-    assert STATUS_TO_EXCEPTION.get(504, ServerStatusError) is ServerStatusError
-
-
-def test_top_level_reexports_match_errors_module() -> None:
-    assert NotFoundError is httpware.errors.NotFoundError
-    assert ClientError is httpware.errors.ClientError
-    assert STATUS_TO_EXCEPTION is httpware.errors.STATUS_TO_EXCEPTION
+def test_transport_error_is_client_error() -> None:
+    exc = TransportError("connection refused")
+    assert isinstance(exc, ClientError)

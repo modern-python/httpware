@@ -1,191 +1,162 @@
-"""Unit tests for AsyncClient HTTP method shortcuts."""
+"""Tests for the per-method API surface of AsyncClient."""
 
+from http import HTTPStatus
+
+import httpx2
 import pytest
 
-from httpware import AsyncClient, RecordedTransport
-from httpware.response import Response
+from httpware import AsyncClient, NotFoundError
 
 
-def _make_transport() -> RecordedTransport:
-    return RecordedTransport(
-        default=Response(
-            status=200,
-            headers={"x-from": "transport"},
-            content=b"body",
-            url="https://example.test/",
-            elapsed=0.0,
-        )
+def _echo_handler(request: httpx2.Request) -> httpx2.Response:
+    return httpx2.Response(
+        HTTPStatus.OK,
+        request=request,
+        json={
+            "method": request.method,
+            "url": str(request.url),
+            "headers": dict(request.headers),
+            "content": request.content.decode() if request.content else "",
+        },
     )
 
 
-async def test_get_builds_request_with_method_and_url() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-
-    await client.get("https://api.example.com/users")
-
-    assert transport.last_request is not None
-    assert transport.last_request.method == "GET"
-    assert transport.last_request.url == "https://api.example.com/users"
-    assert transport.last_request.body is None
+def _client_with_handler(handler, **kwargs) -> AsyncClient:  # noqa: ANN001, ANN003
+    transport = httpx2.MockTransport(handler)
+    return AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport, **kwargs))
 
 
-async def test_relative_path_joins_with_base_url() -> None:
-    transport = _make_transport()
-    client = AsyncClient(base_url="https://api.example.com/v1", transport=transport)
-    await client.get("/users")
-    assert transport.last_request is not None
-    assert transport.last_request.url == "https://api.example.com/v1/users"
-
-
-async def test_relative_path_without_leading_slash_joins_same_way() -> None:
-    transport = _make_transport()
-    client = AsyncClient(base_url="https://api.example.com/v1", transport=transport)
-    await client.get("users")
-    assert transport.last_request is not None
-    assert transport.last_request.url == "https://api.example.com/v1/users"
-
-
-async def test_absolute_url_bypasses_base_url() -> None:
-    transport = _make_transport()
-    client = AsyncClient(base_url="https://api.example.com/v1", transport=transport)
-    await client.get("https://other.com/foo")
-    assert transport.last_request is not None
-    assert transport.last_request.url == "https://other.com/foo"
-
-
-async def test_default_headers_merged_with_per_call_headers() -> None:
-    transport = _make_transport()
-    client = AsyncClient(
-        default_headers={"x-keep": "1", "x-override": "default"},
-        transport=transport,
-    )
-    await client.get("/", headers={"x-override": "per-call", "x-add": "2"})
-    assert transport.last_request is not None
-    assert transport.last_request.headers == {
-        "x-keep": "1",
-        "x-override": "per-call",
-        "x-add": "2",
-    }
-
-
-async def test_default_query_merged_with_per_call_params() -> None:
-    transport = _make_transport()
-    client = AsyncClient(default_query={"k": "default"}, transport=transport)
-    await client.get("/", params={"k": "per-call", "extra": "1"})
-    assert transport.last_request is not None
-    assert transport.last_request.params == {"k": "per-call", "extra": "1"}
-
-
-async def test_post_with_json_serializes_and_sets_content_type() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    await client.post("/users", json={"name": "alice"})
-    assert transport.last_request is not None
-    assert transport.last_request.method == "POST"
-    assert transport.last_request.body == b'{"name": "alice"}'
-    assert transport.last_request.headers["content-type"] == "application/json"
-
-
-async def test_post_with_content_preserves_bytes_unchanged() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    await client.post("/users", content=b"raw bytes")
-    assert transport.last_request is not None
-    assert transport.last_request.body == b"raw bytes"
-    assert "content-type" not in transport.last_request.headers
-
-
-async def test_post_json_and_content_raises_typeerror() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    with pytest.raises(TypeError, match="`json` or `content`"):
-        await client.post("/users", json={"a": 1}, content=b"raw")
-
-
-async def test_post_per_call_content_type_skips_auto_injection() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    await client.post(
-        "/users",
-        json={"a": 1},
-        headers={"Content-Type": "application/vnd.custom+json"},
-    )
-    assert transport.last_request is not None
-    # The user-supplied Content-Type wins; the auto-injection is skipped because the case-insensitive
-    # check finds an existing entry.
-    assert transport.last_request.headers["Content-Type"] == "application/vnd.custom+json"
+async def test_get_returns_httpx2_response() -> None:
+    client = _client_with_handler(_echo_handler)
+    response = await client.get("https://example.test/x")
+    assert isinstance(response, httpx2.Response)
+    assert response.json()["method"] == "GET"
 
 
 @pytest.mark.parametrize(
-    ("client_method_name", "expected_wire_method"),
-    [
-        ("get", "GET"),
-        ("post", "POST"),
-        ("put", "PUT"),
-        ("patch", "PATCH"),
-        ("delete", "DELETE"),
-        ("head", "HEAD"),
-        ("options", "OPTIONS"),
-    ],
+    "method_name",
+    ["get", "post", "put", "patch", "delete", "head", "options"],
 )
-async def test_each_method_emits_correct_wire_method(client_method_name: str, expected_wire_method: str) -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    method = getattr(client, client_method_name)
-    await method("/foo")
-    assert transport.last_request is not None
-    assert transport.last_request.method == expected_wire_method
+async def test_each_per_method_helper_exists_and_uses_correct_verb(method_name: str) -> None:
+    client = _client_with_handler(_echo_handler)
+    method = getattr(client, method_name)
+    response = await method("https://example.test/x")
+    assert response.json()["method"] == method_name.upper()
 
 
-async def test_request_method_uses_first_positional_method_arg() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    await client.request("CUSTOM", "/foo")
-    assert transport.last_request is not None
-    assert transport.last_request.method == "CUSTOM"
+async def test_post_json_body_serialized() -> None:
+    client = _client_with_handler(_echo_handler)
+    response = await client.post("https://example.test/x", json={"k": "v"})
+    payload = response.json()
+    assert "application/json" in payload["headers"]["content-type"]
+    assert payload["content"] == '{"k":"v"}'
 
 
-async def test_per_call_timeout_propagates_to_request_extensions() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    await client.get("/foo", timeout=2.5)
-    assert transport.last_request is not None
-    assert "timeout" in transport.last_request.extensions
+async def test_get_with_params_forwards_query() -> None:
+    captured: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    client = _client_with_handler(handler)
+    await client.get("https://example.test/x", params={"a": "1"})
+    assert "a=1" in str(captured[0].url)
 
 
-async def test_string_auth_sends_authorization_header() -> None:
-    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
-    client = AsyncClient(transport=transport, auth="tok")
+async def test_get_with_headers_merges() -> None:
+    captured: list[httpx2.Request] = []
 
-    await client.get("/foo")
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(HTTPStatus.OK, request=request)
 
-    assert transport.last_request is not None
-    assert transport.last_request.headers["Authorization"] == "Bearer tok"
-
-
-async def test_per_call_authorization_header_wins_over_auth_param() -> None:
-    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
-    client = AsyncClient(transport=transport, auth="default-tok")
-
-    await client.get("/foo", headers={"Authorization": "Bearer override"})
-
-    assert transport.last_request is not None
-    assert transport.last_request.headers["Authorization"] == "Bearer override"
+    client = _client_with_handler(handler)
+    await client.get("https://example.test/x", headers={"x-trace": "abc"})
+    assert captured[0].headers["x-trace"] == "abc"
 
 
-async def test_callable_auth_calls_provider_per_request() -> None:
-    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
-    calls = 0
+async def test_get_raises_typed_status_error_on_404() -> None:
+    client = _client_with_handler(lambda req: httpx2.Response(HTTPStatus.NOT_FOUND, request=req))
+    with pytest.raises(NotFoundError):
+        await client.get("https://example.test/missing")
 
-    def _provider() -> str:
-        nonlocal calls
-        calls += 1
-        return f"tok-{calls}"
 
-    client = AsyncClient(transport=transport, auth=_provider)
+async def test_request_method_takes_arbitrary_verb() -> None:
+    client = _client_with_handler(_echo_handler)
+    response = await client.request("PROPFIND", "https://example.test/x")
+    assert response.json()["method"] == "PROPFIND"
 
-    await client.get("/a")
-    await client.get("/b")
 
-    assert calls == 2  # noqa: PLR2004
+async def test_base_url_is_applied() -> None:
+    captured: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    transport = httpx2.MockTransport(handler)
+    underlying = httpx2.AsyncClient(transport=transport, base_url="https://example.test")
+    client = AsyncClient(httpx2_client=underlying)
+    await client.get("/relative")
+    assert str(captured[0].url) == "https://example.test/relative"
+
+
+async def test_get_with_cookies_forwarded() -> None:
+    """Exercises the cookies branch in _request_with_body."""
+    captured: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    client = _client_with_handler(handler)
+    await client.get("https://example.test/x", cookies={"token": "abc"})
+    assert "token=abc" in captured[0].headers.get("cookie", "")
+
+
+async def test_get_with_explicit_timeout() -> None:
+    """Exercises the timeout branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.get("https://example.test/x", timeout=5.0)
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_get_with_extensions() -> None:
+    """Exercises the extensions branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.get("https://example.test/x", extensions={"trace": True})
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_post_with_content_body() -> None:
+    """Exercises the content branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.post("https://example.test/x", content=b"raw-bytes")
+    assert response.json()["content"] == "raw-bytes"
+
+
+async def test_post_with_data_body() -> None:
+    """Exercises the data branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.post("https://example.test/x", data={"field": "value"})
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_post_with_files_body() -> None:
+    """Exercises the files branch in _request_with_body."""
+    client = _client_with_handler(_echo_handler)
+    response = await client.post("https://example.test/x", files={"upload": b"file-content"})
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_runtime_error_without_closed_reraises() -> None:
+    """Exercises the RuntimeError re-raise branch in _terminal (error not containing 'closed')."""
+
+    def boom(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "unexpected internal failure"
+        raise RuntimeError(msg)
+
+    client = _client_with_handler(boom)
+    with pytest.raises(RuntimeError, match="unexpected internal failure"):
+        await client.get("https://example.test/x")

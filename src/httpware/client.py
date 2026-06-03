@@ -1,107 +1,653 @@
-"""AsyncClient — the v0.1.0 public surface of httpware."""
+"""AsyncClient — the thin httpx2 wrapper."""
 
-import dataclasses
-import json as _json
 import typing
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
+from http import HTTPStatus
 
-from httpware._internal.auth import AuthValue, _normalize_auth
-from httpware._internal.chain import compose
-from httpware.config import ClientConfig, Limits, Timeout
+import httpx2
+
 from httpware.decoders import ResponseDecoder
 from httpware.decoders.pydantic import PydanticDecoder
+from httpware.errors import (
+    STATUS_TO_EXCEPTION,
+    ClientStatusError,
+    ServerStatusError,
+    TimeoutError,  # noqa: A004
+    TransportError,
+)
 from httpware.middleware import Middleware, Next
-from httpware.request import Request
-from httpware.response import Response
-from httpware.transports import Transport
-from httpware.transports.httpx2 import Httpx2Transport
+from httpware.middleware.chain import compose
 
-
-_UNSET: typing.Any = object()
 
 T = typing.TypeVar("T")
 
-# Recursive type alias for any JSON-serializable Python value. Used for the `json=` body parameter
-# on HTTP methods so we avoid `Any` while still accepting arbitrary nested structures.
-JsonValue: typing.TypeAlias = Mapping[str, "JsonValue"] | Sequence["JsonValue"] | str | int | float | bool | None
 
-
-def _normalize_timeout(value: Timeout | float | None) -> Timeout:
-    if value is None:
-        return Timeout()
-    if isinstance(value, Timeout):
-        return value
-    return Timeout(connect=value, read=value, write=value, pool=value)
-
-
-def _build_body(
-    json_value: JsonValue,
-    content: bytes | None,
-) -> tuple[bytes | None, str | None]:
-    if json_value is not None and content is not None:
-        msg = "pass either `json` or `content`, not both"
-        raise TypeError(msg)
-    if json_value is not None:
-        return _json.dumps(json_value).encode("utf-8"), "application/json"
-    return content, None
+_FORWARDED_KWARG_NAMES = ("base_url", "headers", "params", "cookies", "timeout", "limits", "auth")
+_HTTPX2_CLIENT_CONFLICT_MESSAGE = (
+    "AsyncClient(httpx2_client=...) cannot be combined with any of "
+    f"{_FORWARDED_KWARG_NAMES}; configure the httpx2.AsyncClient you pass instead."
+)
 
 
 class AsyncClient:
-    """Async HTTP client with typed response decoding and middleware composition."""
+    """Async HTTP client: thin wrapper around httpx2 with typed decoding and middleware."""
 
-    _config: ClientConfig
-    _transport: Transport
-    _dispatch: Next
-    _owns_transport: bool
+    _httpx2_client: httpx2.AsyncClient
+    _owns_client: bool
+    _decoder: ResponseDecoder
     _user_middleware: tuple[Middleware, ...]
-    _auth: AuthValue
+    _dispatch: Next
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
         *,
-        base_url: str | None = None,
-        default_headers: Mapping[str, str] | None = None,
-        default_query: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        limits: Limits | None = None,
-        transport: Transport | None = None,
+        base_url: str = "",
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
+        timeout: httpx2.Timeout | float | None = None,
+        limits: httpx2.Limits | None = None,
+        auth: httpx2.Auth | None = None,
+        httpx2_client: httpx2.AsyncClient | None = None,
         decoder: ResponseDecoder | None = None,
-        middleware: Sequence[Middleware] | None = None,
-        auth: AuthValue = None,
+        middleware: Sequence[Middleware] = (),
     ) -> None:
-        normalized_timeout = _normalize_timeout(timeout)
-        resolved_limits = limits or Limits()
-        resolved_transport: Transport = transport or Httpx2Transport(limits=resolved_limits, timeout=normalized_timeout)
-        resolved_decoder = decoder or PydanticDecoder()
-        resolved_user_middleware: tuple[Middleware, ...] = tuple(middleware) if middleware is not None else ()
-        resolved_auth_middleware = _normalize_auth(auth)
-        composed_middleware: tuple[Middleware, ...] = (
-            resolved_user_middleware
-            if resolved_auth_middleware is None
-            else (*resolved_user_middleware, resolved_auth_middleware)
+        if httpx2_client is not None:
+            forwarded = {
+                "base_url": base_url,
+                "headers": headers,
+                "params": params,
+                "cookies": cookies,
+                "timeout": timeout,
+                "limits": limits,
+                "auth": auth,
+            }
+            if any(value not in (None, "") for value in forwarded.values()):
+                raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE)
+            self._httpx2_client = httpx2_client
+            self._owns_client = False
+        else:
+            kwargs: dict[str, typing.Any] = {}
+            if base_url:
+                kwargs["base_url"] = base_url
+            if headers is not None:
+                kwargs["headers"] = headers
+            if params is not None:
+                kwargs["params"] = params
+            if cookies is not None:
+                kwargs["cookies"] = cookies
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            if limits is not None:
+                kwargs["limits"] = limits
+            if auth is not None:
+                kwargs["auth"] = auth
+            self._httpx2_client = httpx2.AsyncClient(**kwargs)
+            self._owns_client = True
+
+        self._decoder = decoder if decoder is not None else PydanticDecoder()
+        self._user_middleware = tuple(middleware)
+        self._dispatch = compose(self._user_middleware, self._terminal)
+
+    async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
+        try:
+            response = await self._httpx2_client.send(request)
+        except httpx2.TimeoutException as exc:
+            raise TimeoutError(str(exc)) from exc
+        except (httpx2.InvalidURL, httpx2.CookieConflict) as exc:
+            raise TransportError(str(exc)) from exc
+        except httpx2.HTTPError as exc:
+            raise TransportError(str(exc)) from exc
+        except RuntimeError as exc:
+            if "closed" in str(exc):
+                raise TransportError(str(exc)) from exc
+            raise
+        status = response.status_code
+        if HTTPStatus.BAD_REQUEST <= status < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
+            exc_class = STATUS_TO_EXCEPTION.get(
+                status,
+                ClientStatusError if status < HTTPStatus.INTERNAL_SERVER_ERROR else ServerStatusError,
+            )
+            raise exc_class(response)
+        return response
+
+    @typing.overload
+    async def send(self, request: httpx2.Request, *, response_model: None = None) -> httpx2.Response: ...
+
+    @typing.overload
+    async def send(self, request: httpx2.Request, *, response_model: type[T]) -> T: ...
+
+    async def send(
+        self,
+        request: httpx2.Request,
+        *,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send `request` through the middleware chain. Decode if `response_model` is set."""
+        response = await self._dispatch(request)
+        if response_model is None:
+            return response
+        return self._decoder.decode(response.content, response_model)
+
+    def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
+        """Delegate request construction to the wrapped httpx2.AsyncClient."""
+        return self._httpx2_client.build_request(method, url, **kwargs)
+
+    async def _request_with_body(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        kwargs: dict[str, typing.Any] = {}
+        if params is not None:
+            kwargs["params"] = params
+        if headers is not None:
+            kwargs["headers"] = headers
+        if cookies is not None:
+            kwargs["cookies"] = cookies
+        if timeout is not httpx2.USE_CLIENT_DEFAULT:
+            kwargs["timeout"] = timeout
+        if extensions is not None:
+            kwargs["extensions"] = extensions
+        if json is not None:
+            kwargs["json"] = json
+        if content is not None:
+            kwargs["content"] = content
+        if data is not None:
+            kwargs["data"] = data
+        if files is not None:
+            kwargs["files"] = files
+        request = self._httpx2_client.build_request(method, url, **kwargs)
+        return await self.send(request, response_model=response_model)
+
+    @typing.overload
+    async def get(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def get(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def get(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send a GET request."""
+        return await self._request_with_body(
+            "GET",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            response_model=response_model,
         )
 
-        self._config = ClientConfig(
-            base_url=base_url,
-            default_headers=dict(default_headers or {}),
-            default_query=dict(default_query or {}),
-            timeout=normalized_timeout,
-            limits=resolved_limits,
-            decoder=resolved_decoder,
-            middleware=composed_middleware,
-        )
-        self._transport = resolved_transport
-        self._dispatch = compose(composed_middleware, resolved_transport)
-        self._owns_transport = True
-        self._user_middleware = resolved_user_middleware
-        self._auth = auth
+    @typing.overload
+    async def post(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
 
-    @classmethod
-    def from_url(cls, base_url: str, **kwargs: object) -> "AsyncClient":
-        """Construct an AsyncClient with a base URL prefix."""
-        return cls(base_url=base_url, **kwargs)  # ty: ignore[invalid-argument-type]
+    @typing.overload
+    async def post(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def post(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send a POST request."""
+        return await self._request_with_body(
+            "POST",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
+    @typing.overload
+    async def put(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def put(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def put(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send a PUT request."""
+        return await self._request_with_body(
+            "PUT",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
+    @typing.overload
+    async def patch(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def patch(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def patch(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send a PATCH request."""
+        return await self._request_with_body(
+            "PATCH",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
+    @typing.overload
+    async def delete(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def delete(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def delete(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send a DELETE request."""
+        return await self._request_with_body(
+            "DELETE",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
+    @typing.overload
+    async def head(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def head(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def head(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send a HEAD request."""
+        return await self._request_with_body(
+            "HEAD",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            response_model=response_model,
+        )
+
+    @typing.overload
+    async def options(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def options(
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def options(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send an OPTIONS request."""
+        return await self._request_with_body(
+            "OPTIONS",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            response_model=response_model,
+        )
+
+    @typing.overload
+    async def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: None = None,
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> T: ...
+
+    async def request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        """Send a request with an arbitrary HTTP method."""
+        return await self._request_with_body(
+            method,
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
 
     async def __aenter__(self) -> typing.Self:
+        """Enter the async context manager; return self."""
         return self
 
     async def __aexit__(
@@ -110,550 +656,6 @@ class AsyncClient:
         exc: BaseException | None,
         tb: object,
     ) -> None:
-        if self._owns_transport:
-            await self._transport.aclose()
-
-    def _resolve_url(self, path: str) -> str:
-        if path.startswith(("http://", "https://")):
-            return path
-        base = self._config.base_url
-        if base is None:
-            return path
-        return f"{base}/{path.lstrip('/')}"
-
-    def _build_request(
-        self,
-        method: str,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None,
-        params: Mapping[str, str] | None,
-        cookies: Mapping[str, str] | None,
-        timeout: Timeout | float | None,
-        body: bytes | None,
-        content_type: str | None,
-    ) -> Request:
-        merged_headers: dict[str, str] = {**self._config.default_headers, **(headers or {})}
-        if content_type is not None and "content-type" not in {k.lower() for k in merged_headers}:
-            merged_headers["content-type"] = content_type
-        merged_params: dict[str, str] = {**self._config.default_query, **(params or {})}
-        extensions: dict[str, typing.Any] = {}
-        if timeout is not None:
-            extensions["timeout"] = _normalize_timeout(timeout)
-        return Request(
-            method=method,
-            url=self._resolve_url(path),
-            headers=merged_headers,
-            params=merged_params,
-            cookies=dict(cookies or {}),
-            body=body,
-            extensions=extensions,
-        )
-
-    async def _send(
-        self,
-        method: str,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None,
-        params: Mapping[str, str] | None,
-        cookies: Mapping[str, str] | None,
-        timeout: Timeout | float | None,
-        body: bytes | None,
-        content_type: str | None,
-        response_model: type[T] | None,
-    ) -> Response | T:
-        request = self._build_request(
-            method,
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=body,
-            content_type=content_type,
-        )
-        response = await self._dispatch(request)
-        if response_model is None:
-            return response
-        return self._config.decoder.decode(response.content, response_model)
-
-    @typing.overload
-    async def get(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def get(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def get(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send a GET request."""
-        return await self._send(
-            "GET",
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=None,
-            content_type=None,
-            response_model=response_model,
-        )
-
-    @typing.overload
-    async def post(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def post(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def post(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send a POST request."""
-        body, content_type = _build_body(json, content)
-        return await self._send(
-            "POST",
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=body,
-            content_type=content_type,
-            response_model=response_model,
-        )
-
-    @typing.overload
-    async def put(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def put(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def put(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send a PUT request."""
-        body, content_type = _build_body(json, content)
-        return await self._send(
-            "PUT",
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=body,
-            content_type=content_type,
-            response_model=response_model,
-        )
-
-    @typing.overload
-    async def patch(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def patch(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def patch(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send a PATCH request."""
-        body, content_type = _build_body(json, content)
-        return await self._send(
-            "PATCH",
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=body,
-            content_type=content_type,
-            response_model=response_model,
-        )
-
-    @typing.overload
-    async def delete(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def delete(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def delete(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send a DELETE request."""
-        return await self._send(
-            "DELETE",
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=None,
-            content_type=None,
-            response_model=response_model,
-        )
-
-    @typing.overload
-    async def head(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def head(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def head(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send a HEAD request."""
-        return await self._send(
-            "HEAD",
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=None,
-            content_type=None,
-            response_model=response_model,
-        )
-
-    @typing.overload
-    async def options(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def options(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def options(
-        self,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send an OPTIONS request."""
-        return await self._send(
-            "OPTIONS",
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=None,
-            content_type=None,
-            response_model=response_model,
-        )
-
-    @typing.overload
-    async def request(
-        self,
-        method: str,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: None = None,
-    ) -> Response: ...
-
-    @typing.overload
-    async def request(
-        self,
-        method: str,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def request(
-        self,
-        method: str,
-        path: str,
-        *,
-        headers: Mapping[str, str] | None = None,
-        params: Mapping[str, str] | None = None,
-        cookies: Mapping[str, str] | None = None,
-        timeout: Timeout | float | None = None,
-        json: JsonValue = None,
-        content: bytes | None = None,
-        response_model: type[T] | None = None,
-    ) -> Response | T:
-        """Send a request with an arbitrary HTTP method."""
-        body, content_type = _build_body(json, content)
-        return await self._send(
-            method,
-            path,
-            headers=headers,
-            params=params,
-            cookies=cookies,
-            timeout=timeout,
-            body=body,
-            content_type=content_type,
-            response_model=response_model,
-        )
-
-    def with_options(
-        self,
-        *,
-        base_url: str | None = _UNSET,
-        default_headers: Mapping[str, str] | None = _UNSET,
-        default_query: Mapping[str, str] | None = _UNSET,
-        timeout: Timeout | float | None = _UNSET,
-        decoder: ResponseDecoder | None = _UNSET,
-        middleware: Sequence[Middleware] | None = _UNSET,
-        auth: AuthValue | object = _UNSET,
-    ) -> "AsyncClient":
-        """Return a new AsyncClient sharing the same transport with overridden config.
-
-        The returned client is a "view": it does NOT own the transport lifecycle.
-        Closing it via `async with` is a no-op. The original client should be the
-        one inside the outermost `async with` block.
-
-        `limits` and `transport` are NOT overridable here — both bind to the
-        transport, which is shared. Construct a fresh AsyncClient for those.
-        """
-        changes: dict[str, typing.Any] = {}
-        if base_url is not _UNSET:
-            changes["base_url"] = base_url
-        if default_headers is not _UNSET:
-            changes["default_headers"] = dict(default_headers or {})
-        if default_query is not _UNSET:
-            changes["default_query"] = dict(default_query or {})
-        if timeout is not _UNSET:
-            changes["timeout"] = _normalize_timeout(timeout)
-        if decoder is not _UNSET:
-            changes["decoder"] = decoder or PydanticDecoder()
-
-        new_user_middleware = self._user_middleware
-        if middleware is not _UNSET:
-            new_user_middleware = tuple(middleware) if middleware is not None else ()
-
-        new_auth: AuthValue = self._auth
-        if auth is not _UNSET:
-            new_auth = auth  # ty: ignore[invalid-assignment]
-
-        new_auth_middleware = _normalize_auth(new_auth)
-        new_composed: tuple[Middleware, ...] = (
-            new_user_middleware if new_auth_middleware is None else (*new_user_middleware, new_auth_middleware)
-        )
-        changes["middleware"] = new_composed
-
-        new_config = dataclasses.replace(self._config, **changes)
-        return AsyncClient._from_view(
-            new_config,
-            self._transport,
-            user_middleware=new_user_middleware,
-            auth=new_auth,
-        )
-
-    @classmethod
-    def _from_view(
-        cls,
-        config: ClientConfig,
-        transport: Transport,
-        *,
-        user_middleware: tuple[Middleware, ...],
-        auth: AuthValue,
-    ) -> "AsyncClient":
-        """Construct a view sharing an existing transport. Bypasses __init__."""
-        client = cls.__new__(cls)
-        client._config = config  # noqa: SLF001
-        client._transport = transport  # noqa: SLF001
-        client._dispatch = compose(config.middleware, transport)  # noqa: SLF001
-        client._owns_transport = False  # noqa: SLF001
-        client._user_middleware = user_middleware  # noqa: SLF001
-        client._auth = auth  # noqa: SLF001
-        return client
+        """Exit the async context manager; close the underlying client only if owned."""
+        if self._owns_client and not self._httpx2_client.is_closed:
+            await self._httpx2_client.aclose()

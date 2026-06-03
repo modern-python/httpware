@@ -1,167 +1,99 @@
-"""Unit tests for AsyncClient middleware wiring through compose() and with_options."""
+"""Tests for AsyncClient ↔ middleware chain integration."""
 
-from collections.abc import Mapping
+from http import HTTPStatus
 
-from httpware import AsyncClient, RecordedTransport
-from httpware.middleware import Middleware, Next
-from httpware.request import Request
-from httpware.response import Response
+import httpx2
+import pytest
+
+from httpware import AsyncClient, InternalServerError, Next, NotFoundError, after_response, before_request, on_error
 
 
-def _make_transport() -> RecordedTransport:
-    return RecordedTransport(
-        default=Response(
-            status=200,
-            headers={},
-            content=b"",
-            url="/",
-            elapsed=0.0,
+async def test_before_request_runs() -> None:
+    @before_request
+    async def add_header(request: httpx2.Request) -> httpx2.Request:
+        return httpx2.Request(
+            request.method,
+            request.url,
+            headers={**request.headers, "x-injected": "1"},
         )
-    )
 
+    captured: list[httpx2.Request] = []
 
-def _make_recording_middleware(label: str, log: list[str]) -> Middleware:
-    class _M:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            log.append(label)
-            return await next(request)
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return httpx2.Response(HTTPStatus.OK, request=request)
 
-    return _M()
-
-
-async def test_middleware_runs_per_request() -> None:
-    transport = _make_transport()
-    log: list[str] = []
+    transport = httpx2.MockTransport(handler)
     client = AsyncClient(
-        transport=transport,
-        middleware=[_make_recording_middleware("A", log)],
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=(add_header,),
     )
-    await client.get("/foo")
-    assert log == ["A"]
-    assert len(transport.requests) == 1
+    await client.get("https://example.test/x")
+    assert captured[0].headers["x-injected"] == "1"
 
 
-async def test_with_options_recomposes_middleware() -> None:
-    transport = _make_transport()
-    parent_log: list[str] = []
-    view_log: list[str] = []
+async def test_after_response_runs() -> None:
+    @after_response
+    async def tag_status(request: httpx2.Request, response: httpx2.Response) -> httpx2.Response:
+        return httpx2.Response(
+            HTTPStatus.IM_USED,
+            request=request,
+            headers=response.headers,
+            content=response.content,
+        )
+
+    transport = httpx2.MockTransport(lambda req: httpx2.Response(HTTPStatus.OK, request=req))
     client = AsyncClient(
-        transport=transport,
-        middleware=[_make_recording_middleware("parent", parent_log)],
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=(tag_status,),
     )
-    view = client.with_options(
-        middleware=[_make_recording_middleware("view", view_log)],
-    )
-    await view.get("/foo")
-    assert view_log == ["view"]
-    assert parent_log == []  # parent's middleware does NOT run for view calls
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.IM_USED
 
 
-async def test_with_options_inherits_middleware_when_unset() -> None:
-    transport = _make_transport()
-    log: list[str] = []
+async def test_on_error_catches_status_error() -> None:
+    @on_error
+    async def convert_404(request: httpx2.Request, exc: Exception) -> httpx2.Response | None:
+        if isinstance(exc, NotFoundError):
+            return httpx2.Response(HTTPStatus.OK, request=request, content=b"recovered")
+        return None  # let other exceptions propagate
+
+    transport_404 = httpx2.MockTransport(lambda req: httpx2.Response(HTTPStatus.NOT_FOUND, request=req))
     client = AsyncClient(
-        transport=transport,
-        middleware=[_make_recording_middleware("inherited", log)],
+        httpx2_client=httpx2.AsyncClient(transport=transport_404),
+        middleware=(convert_404,),
     )
-    view = client.with_options(timeout=10)
-    await view.get("/foo")
-    assert log == ["inherited"]
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert response.content == b"recovered"
+
+    # Also exercise the return-None branch (non-404 → passes through to re-raise).
+    transport_500 = httpx2.MockTransport(lambda req: httpx2.Response(HTTPStatus.INTERNAL_SERVER_ERROR, request=req))
+    client2 = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport_500),
+        middleware=(convert_404,),
+    )
+    with pytest.raises(InternalServerError):
+        await client2.get("https://example.test/x")
 
 
-async def test_view_shares_transport_with_parent() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport)
-    view = client.with_options(timeout=10)
-    assert view._transport is client._transport  # noqa: SLF001
+async def test_middleware_runs_outer_to_inner_then_inner_to_outer() -> None:
+    order: list[str] = []
 
+    class _Tag:
+        def __init__(self, name: str) -> None:
+            self.name = name
 
-async def test_view_does_not_own_transport() -> None:
-    client = AsyncClient()
-    view = client.with_options(timeout=10)
-    assert view._owns_transport is False  # noqa: SLF001
+        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+            order.append(f"{self.name}.in")
+            response = await next(request)
+            order.append(f"{self.name}.out")
+            return response
 
-
-async def test_with_options_overrides_base_url() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport, base_url="https://api.test/v1")
-    view = client.with_options(base_url="https://other.test/v2")
-    assert view._config.base_url == "https://other.test/v2"  # noqa: SLF001
-
-
-async def test_with_options_overrides_default_headers() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport, default_headers={"x-old": "1"})
-    view = client.with_options(default_headers={"x-new": "2"})
-    assert view._config.default_headers == {"x-new": "2"}  # noqa: SLF001
-
-
-async def test_with_options_overrides_default_query() -> None:
-    transport = _make_transport()
-    client = AsyncClient(transport=transport, default_query={"old": "1"})
-    view = client.with_options(default_query={"new": "2"})
-    assert view._config.default_query == {"new": "2"}  # noqa: SLF001
-
-
-async def test_with_options_overrides_decoder() -> None:
-    transport = _make_transport()
-
-    class _NoopDecoder:
-        def decode(self, content: bytes, model: type) -> object:  # pragma: no cover  # noqa: ARG002
-            return content
-
-    new_decoder = _NoopDecoder()
-    client = AsyncClient(transport=transport)
-    view = client.with_options(decoder=new_decoder)
-    assert view._config.decoder is new_decoder  # noqa: SLF001
-
-
-async def test_auth_runs_inside_user_middleware() -> None:
-    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
-
-    user_seen_headers: list[Mapping[str, str]] = []
-
-    class _UserOuter:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            user_seen_headers.append(dict(request.headers))
-            return await next(request)
-
-    client = AsyncClient(transport=transport, middleware=[_UserOuter()], auth="tok")
-    await client.get("/foo")
-
-    # User middleware saw the request BEFORE auth header was applied.
-    assert "Authorization" not in user_seen_headers[0]
-    # Transport saw the request WITH the auth header.
-    assert transport.last_request is not None
-    assert transport.last_request.headers["Authorization"] == "Bearer tok"
-
-
-async def test_with_options_auth_replaces_auth_middleware() -> None:
-    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
-    client = AsyncClient(transport=transport, auth="parent")
-    view = client.with_options(auth="view")
-
-    await view.get("/foo")
-    assert transport.last_request is not None
-    assert transport.last_request.headers["Authorization"] == "Bearer view"
-
-    await client.get("/foo")
-    assert transport.last_request is not None
-    assert transport.last_request.headers["Authorization"] == "Bearer parent"
-
-
-async def test_with_options_middleware_keeps_existing_auth() -> None:
-    transport = RecordedTransport(default=Response(status=200, headers={}, content=b"", url="/", elapsed=0.0))
-
-    class _M:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            return await next(request)
-
-    m1 = _M()
-    m2 = _M()
-    client = AsyncClient(transport=transport, auth="tok", middleware=[m1])
-    view = client.with_options(middleware=[m2])
-
-    await view.get("/foo")
-    assert transport.last_request is not None
-    assert transport.last_request.headers["Authorization"] == "Bearer tok"
+    transport = httpx2.MockTransport(lambda req: httpx2.Response(HTTPStatus.OK, request=req))
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=(_Tag("a"), _Tag("b")),
+    )
+    await client.get("https://example.test/x")
+    assert order == ["a.in", "b.in", "b.out", "a.out"]

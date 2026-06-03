@@ -1,470 +1,176 @@
-"""Tests for the Middleware protocol and chain composition."""
+"""Tests for the Middleware protocol, Next type, chain composition, and decorators."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from contextlib import AbstractAsyncContextManager
 from http import HTTPStatus
-from typing import get_type_hints
 
+import httpx2
 import pytest
 
-import httpware
-from httpware import RecordedTransport
-from httpware._internal.chain import compose
-from httpware.middleware import Middleware, Next, after_response, before_request, on_error
-from httpware.request import Request
-from httpware.response import Response, StreamResponse
+from httpware.middleware import (
+    Middleware,
+    Next,
+    after_response,
+    before_request,
+    on_error,
+)
+from httpware.middleware.chain import compose
 
 
-class _SignalMiddleware:
-    """Minimal valid Middleware implementation used by tests."""
-
-    async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-        return await next(request)
+def _make_request(url: str = "https://example.test/x") -> httpx2.Request:
+    return httpx2.Request("GET", url)
 
 
-def test_runtime_checkable_isinstance_works() -> None:
-    """A class implementing `__call__` satisfies the Middleware Protocol at runtime."""
-    # runtime_checkable checks for presence of __call__, not signature details
-    assert isinstance(_SignalMiddleware(), Middleware)
+def _make_response(status: int = HTTPStatus.OK, *, request: httpx2.Request | None = None) -> httpx2.Response:
+    if request is None:  # pragma: no cover
+        request = _make_request()
+    return httpx2.Response(status, request=request)
 
 
-def test_next_type_alias_resolves_to_callable() -> None:
-    """`Next` resolves to `Callable[[Request], Awaitable[Response]]`."""
-    expected = Callable[[Request], Awaitable[Response]]
-    assert Next == expected
+async def test_middleware_protocol_is_runtime_checkable() -> None:
+    class _OkMiddleware:
+        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002  # pragma: no cover
+            return await next(request)
+
+    assert isinstance(_OkMiddleware(), Middleware)
 
 
-def test_next_annotation_on_signal_middleware() -> None:
-    """`next` parameter on `_SignalMiddleware.__call__` is annotated with `Next`."""
-    hints = get_type_hints(_SignalMiddleware.__call__)
-    assert hints["next"] == Next
+async def test_empty_chain_calls_terminal_directly() -> None:
+    seen: list[httpx2.Request] = []
 
+    async def terminal(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return _make_response(200, request=request)
 
-def _ok_transport() -> RecordedTransport:
-    return RecordedTransport(
-        default=Response(
-            status=200,
-            headers={"x-from": "transport"},
-            content=b"transport",
-            url="/",
-            elapsed=0.0,
-        )
-    )
-
-
-def _make_request(method: str = "GET", url: str = "https://example.test/") -> Request:
-    return Request(method=method, url=url)
-
-
-async def test_empty_list_composes_to_transport_call() -> None:
-    """compose([], transport) yields a callable that behaves like transport(req)."""
-    transport = _ok_transport()
-    dispatch = compose([], transport)
-
+    dispatch = compose((), terminal)
     request = _make_request()
     response = await dispatch(request)
-
-    assert response.status == HTTPStatus.OK
-    assert response.content == b"transport"
-    assert response.headers["x-from"] == "transport"
-
-
-async def test_single_middleware_wraps_transport() -> None:
-    """One middleware sees the request, calls next, returns the transport's response unchanged."""
-    seen: list[Request] = []
-
-    class Tap:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            seen.append(request)
-            return await next(request)
-
-    transport = _ok_transport()
-    request = _make_request()
-
-    response = await compose([Tap()], transport)(request)
-
+    assert response.status_code == HTTPStatus.OK
     assert seen == [request]
-    assert response.content == b"transport"
 
 
-async def test_chain_runs_outer_to_inner() -> None:
-    """Three middlewares form an onion: outer→inner→transport→inner→outer."""
-    log: list[str] = []
+async def test_chain_runs_middleware_in_order() -> None:
+    order: list[str] = []
 
-    def labeled(name: str) -> Middleware:
-        class Labeled:
-            async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-                log.append(f"{name}:before")
-                response = await next(request)
-                log.append(f"{name}:after")
-                return response
+    class _M:
+        def __init__(self, label: str) -> None:
+            self.label = label
 
-        return Labeled()
-
-    dispatch = compose([labeled("A"), labeled("B"), labeled("C")], _ok_transport())
-    await dispatch(_make_request())
-
-    assert log == [
-        "A:before",
-        "B:before",
-        "C:before",
-        "C:after",
-        "B:after",
-        "A:after",
-    ]
-
-
-async def test_middleware_can_transform_request_before_forwarding() -> None:
-    """An outer middleware mutates the request via with_header; the inner sees the mutation."""
-    seen: list[Request] = []
-
-    class Stamp:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            stamped = request.with_header("x-trace", "abc123")
-            return await next(stamped)
-
-    class Inspect:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            seen.append(request)
-            return await next(request)
-
-    await compose([Stamp(), Inspect()], _ok_transport())(_make_request())
-
-    assert seen[0].headers["x-trace"] == "abc123"
-
-
-async def test_middleware_can_transform_response_before_returning() -> None:
-    """An outer middleware awaits next, then returns a modified Response; caller sees it."""
-
-    class AddHeader:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+            order.append(f"{self.label}.before")
             response = await next(request)
-            return Response(
-                status=response.status,
-                headers={**response.headers, "x-trace": "abc123"},
-                content=response.content,
-                url=response.url,
-                elapsed=response.elapsed,
-            )
+            order.append(f"{self.label}.after")
+            return response
 
-    response = await compose([AddHeader()], _ok_transport())(_make_request())
+    async def terminal(request: httpx2.Request) -> httpx2.Response:
+        order.append("terminal")
+        return _make_response(200, request=request)
 
-    assert response.headers["x-trace"] == "abc123"
-    assert response.headers["x-from"] == "transport"  # original still present
+    dispatch = compose((_M("a"), _M("b")), terminal)
+    await dispatch(_make_request())
+    assert order == ["a.before", "b.before", "terminal", "b.after", "a.after"]
 
 
-async def test_short_circuit_returns_synthesized_response() -> None:
-    """A middleware that does NOT call next returns a synthesized Response; transport never runs."""
-    transport_calls = 0
-
-    class CountingTransport:
-        async def __call__(self, request: Request) -> Response:  # noqa: ARG002
-            nonlocal transport_calls
-            transport_calls += 1
-            return Response(
-                status=200,
-                headers={"x-from": "transport"},
-                content=b"transport",
-                url="/",
-                elapsed=0.0,
-            )
-
-        def stream(self, request: Request) -> AbstractAsyncContextManager[StreamResponse]:  # pragma: no cover
-            raise NotImplementedError
-
-        async def aclose(self) -> None:  # pragma: no cover
-            return None
-
-    class ShortCircuit:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
-            return Response(
-                status=418,
-                headers={},
-                content=b"teapot",
-                url=request.url,
-                elapsed=0.0,
-            )
-
-    class NeverReached:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
-            msg = "inner middleware should not be invoked"
-            raise AssertionError(msg)
-
-    response = await compose([ShortCircuit(), NeverReached()], CountingTransport())(_make_request())
-
-    assert response.status == HTTPStatus.IM_A_TEAPOT
-    assert response.content == b"teapot"
-    assert transport_calls == 0
-
-
-async def test_exception_in_middleware_propagates() -> None:
-    """A custom exception raised inside a middleware bubbles through the chain unchanged."""
-
-    class CustomError(Exception):
-        pass
-
-    class Boom:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
-            msg = "boom"
-            raise CustomError(msg)
-
-    with pytest.raises(CustomError, match="boom"):
-        await compose([Boom()], _ok_transport())(_make_request())
-
-
-async def test_exception_in_transport_propagates_through_chain() -> None:
-    """An exception raised by the transport passes through every middleware unmodified."""
-
-    class TransportFail:
-        async def __call__(self, request: Request) -> Response:  # noqa: ARG002
-            msg = "transport failed"
-            raise RuntimeError(msg)
-
-        def stream(  # pragma: no cover - not exercised
-            self, request: Request
-        ) -> AbstractAsyncContextManager[StreamResponse]:
-            raise NotImplementedError
-
-        async def aclose(self) -> None:  # pragma: no cover - not exercised
-            return None
-
-    class Passthrough:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            return await next(request)
-
-    with pytest.raises(RuntimeError, match="transport failed"):
-        await compose([Passthrough(), Passthrough()], TransportFail())(_make_request())
-
-
-async def test_cancelled_error_propagates_through_chain() -> None:
-    """asyncio.CancelledError raised mid-chain propagates to the caller (NFR15)."""
-
-    class Cancel:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
-            raise asyncio.CancelledError
-
-    class Passthrough:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            return await next(request)
-
-    with pytest.raises(asyncio.CancelledError):
-        await compose([Passthrough(), Cancel()], _ok_transport())(_make_request())
-
-
-async def test_compose_returned_callable_is_reusable() -> None:
-    """The Next returned by compose can be awaited sequentially across multiple requests."""
-    count = 0
-
-    class Counter:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            nonlocal count
-            count += 1
-            return await next(request)
-
-    dispatch = compose([Counter()], _ok_transport())
-
-    for _ in range(3):
-        response = await dispatch(_make_request())
-        assert response.status == HTTPStatus.OK
-
-    assert count == 3  # noqa: PLR2004
-
-
-async def test_before_request_transforms_request() -> None:
-    """@before_request wraps an async request transform; downstream sees the mutation."""
-
+async def test_before_request_decorator_transforms_request() -> None:
     @before_request
-    async def stamp(request: Request) -> Request:
-        return request.with_header("x-trace", "abc123")
+    async def add_header(request: httpx2.Request) -> httpx2.Request:
+        return httpx2.Request(request.method, request.url, headers={**request.headers, "X-Custom": "1"})
 
-    seen: list[Request] = []
+    captured: list[httpx2.Request] = []
 
-    class Inspect:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            seen.append(request)
-            return await next(request)
+    async def terminal(request: httpx2.Request) -> httpx2.Response:
+        captured.append(request)
+        return _make_response(200, request=request)
 
-    await compose([stamp, Inspect()], _ok_transport())(_make_request())
+    dispatch = compose((add_header,), terminal)
+    await dispatch(_make_request())
+    assert captured[0].headers["x-custom"] == "1"
 
-    assert seen[0].headers["x-trace"] == "abc123"
 
-
-async def test_after_response_transforms_response() -> None:
-    """@after_response wraps an async response transform; caller sees the modification."""
-
+async def test_after_response_decorator_transforms_response() -> None:
     @after_response
-    async def add_header(request: Request, response: Response) -> Response:  # noqa: ARG001
-        return Response(
-            status=response.status,
-            headers={**response.headers, "x-trace": "abc123"},
-            content=response.content,
-            url=response.url,
-            elapsed=response.elapsed,
-        )
+    async def upgrade_status(request: httpx2.Request, response: httpx2.Response) -> httpx2.Response:
+        return httpx2.Response(HTTPStatus.IM_USED, request=request, headers=response.headers, content=response.content)
 
-    response = await compose([add_header], _ok_transport())(_make_request())
+    async def terminal(request: httpx2.Request) -> httpx2.Response:
+        return _make_response(HTTPStatus.OK, request=request)
 
-    assert response.headers["x-trace"] == "abc123"
-    assert response.headers["x-from"] == "transport"  # original still present
+    dispatch = compose((upgrade_status,), terminal)
+    response = await dispatch(_make_request())
+    assert response.status_code == HTTPStatus.IM_USED
 
 
-def test_middleware_and_next_are_reexported_at_package_root() -> None:
-    """`from httpware import Middleware, Next` works in addition to the subpackage path."""
-    assert httpware.Middleware is Middleware
-    assert httpware.Next is Next
-    assert "Middleware" in httpware.__all__
-    assert "Next" in httpware.__all__
-
-
-async def test_on_error_returns_response_swallows_exception() -> None:
-    """When the handler returns a Response, the caller gets it; no exception escapes."""
-
+async def test_on_error_decorator_can_translate_exception() -> None:
     @on_error
-    async def recover(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
-        return Response(
-            status=503,
-            headers={"x-recovered": "true"},
-            content=b"recovered",
-            url=request.url,
-            elapsed=0.0,
-        )
+    async def swallow(request: httpx2.Request, exc: Exception) -> httpx2.Response | None:
+        if isinstance(exc, RuntimeError) and str(exc) == "boom":
+            return _make_response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
+        return None  # pragma: no cover
 
-    transport = RecordedTransport(default=RuntimeError("boom"))
-    response = await compose([recover], transport)(_make_request())
+    async def terminal(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "boom"
+        raise RuntimeError(msg)
 
-    assert response.status == HTTPStatus.SERVICE_UNAVAILABLE
-    assert response.headers["x-recovered"] == "true"
-    assert response.content == b"recovered"
+    dispatch = compose((swallow,), terminal)
+    response = await dispatch(_make_request())
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
 
 
 async def test_on_error_returns_none_reraises() -> None:
-    """When the handler returns None, the original exception is re-raised with traceback intact."""
-
     @on_error
-    async def pass_through(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
+    async def passthrough(
+        request: httpx2.Request,  # noqa: ARG001
+        exc: Exception,  # noqa: ARG001
+    ) -> httpx2.Response | None:
         return None
 
-    transport = RecordedTransport(default=RuntimeError("boom"))
+    async def terminal(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "boom"
+        raise RuntimeError(msg)
 
+    dispatch = compose((passthrough,), terminal)
     with pytest.raises(RuntimeError, match="boom"):
-        await compose([pass_through], transport)(_make_request())
+        await dispatch(_make_request())
 
 
-async def test_on_error_does_not_catch_cancelled_error() -> None:
-    """asyncio.CancelledError is not Exception; the handler must not be invoked."""
-    invocations: list[Exception] = []
+def test_before_request_repr() -> None:
+    @before_request
+    async def my_transform(request: httpx2.Request) -> httpx2.Request:
+        return request  # pragma: no cover
 
+    assert "before_request" in repr(my_transform)
+    assert "my_transform" in repr(my_transform)
+
+
+def test_after_response_repr() -> None:
+    @after_response
+    async def my_transform(request: httpx2.Request, response: httpx2.Response) -> httpx2.Response:  # noqa: ARG001
+        return response  # pragma: no cover
+
+    assert "after_response" in repr(my_transform)
+    assert "my_transform" in repr(my_transform)
+
+
+def test_on_error_repr() -> None:
     @on_error
-    async def should_not_run(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
-        invocations.append(exc)
-        return None
+    async def my_handler(request: httpx2.Request, exc: Exception) -> httpx2.Response | None:  # noqa: ARG001
+        return None  # pragma: no cover
 
-    class Cancel:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002, ARG002
-            raise asyncio.CancelledError
+    assert "on_error" in repr(my_handler)
+    assert "my_handler" in repr(my_handler)
 
+
+async def test_on_error_lets_cancelled_propagate() -> None:
+    @on_error
+    async def swallow_all(
+        request: httpx2.Request,  # noqa: ARG001
+        exc: Exception,  # noqa: ARG001
+    ) -> httpx2.Response | None:  # pragma: no cover
+        msg = "should not catch CancelledError"
+        raise AssertionError(msg)
+
+    async def terminal(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        raise asyncio.CancelledError
+
+    dispatch = compose((swallow_all,), terminal)
     with pytest.raises(asyncio.CancelledError):
-        await compose([should_not_run, Cancel()], _ok_transport())(_make_request())
-
-    assert invocations == []
-
-
-async def test_on_error_handler_receives_correct_exception_instance() -> None:
-    """The handler's `exc` parameter is the same instance the transport raised."""
-    raised = RuntimeError("specific instance")
-    seen: list[Exception] = []
-
-    @on_error
-    async def capture(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
-        seen.append(exc)
-        return None
-
-    with pytest.raises(RuntimeError):
-        await compose([capture], RecordedTransport(default=raised))(_make_request())
-
-    assert seen == [raised]
-    assert seen[0] is raised
-
-
-def test_decorators_satisfy_middleware_protocol() -> None:
-    """Each decorator returns an object that isinstance() recognizes as Middleware."""
-
-    @before_request
-    async def br(request: Request) -> Request:
-        return request
-
-    @after_response
-    async def ar(request: Request, response: Response) -> Response:  # noqa: ARG001
-        return response
-
-    @on_error
-    async def oe(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
-        return None
-
-    assert isinstance(br, Middleware)
-    assert isinstance(ar, Middleware)
-    assert isinstance(oe, Middleware)
-
-
-async def test_decorated_middlewares_compose_in_chain() -> None:
-    """Phase decorators interoperate with class-based middleware in one compose() call."""
-
-    @before_request
-    async def stamp(request: Request) -> Request:
-        return request.with_header("x-stamp", "1")
-
-    @after_response
-    async def tag(request: Request, response: Response) -> Response:  # noqa: ARG001
-        return Response(
-            status=response.status,
-            headers={**response.headers, "x-tag": "1"},
-            content=response.content,
-            url=response.url,
-            elapsed=response.elapsed,
-        )
-
-    seen_headers: list[str] = []
-
-    class Inspect:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
-            seen_headers.append(request.headers.get("x-stamp", ""))
-            return await next(request)
-
-    response = await compose([stamp, Inspect(), tag], _ok_transport())(_make_request())
-
-    assert seen_headers == ["1"]  # stamp ran before Inspect
-    assert response.headers["x-tag"] == "1"  # tag ran after the chain
-
-
-def test_repr_shows_original_function_name() -> None:
-    """repr() includes the phase name and the original user function's qualname."""
-
-    @before_request
-    async def my_stamp(request: Request) -> Request:
-        return request
-
-    @after_response
-    async def my_tag(request: Request, response: Response) -> Response:  # noqa: ARG001
-        return response
-
-    @on_error
-    async def my_recover(request: Request, exc: Exception) -> Response | None:  # noqa: ARG001
-        return None
-
-    assert "before_request" in repr(my_stamp)
-    assert "my_stamp" in repr(my_stamp)
-    assert "after_response" in repr(my_tag)
-    assert "my_tag" in repr(my_tag)
-    assert "on_error" in repr(my_recover)
-    assert "my_recover" in repr(my_recover)
-
-
-def test_decorators_reexported_at_package_root() -> None:
-    """`from httpware import before_request, after_response, on_error` works."""
-    assert httpware.before_request is before_request
-    assert httpware.after_response is after_response
-    assert httpware.on_error is on_error
-    assert "before_request" in httpware.__all__
-    assert "after_response" in httpware.__all__
-    assert "on_error" in httpware.__all__
+        await dispatch(_make_request())

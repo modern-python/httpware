@@ -1,40 +1,33 @@
-"""Middleware protocol — the AsyncClient ↔ Middleware seam (Seam 2)."""
+"""Middleware protocol, Next type, and phase-shortcut decorators.
+
+Middleware operates directly on httpx2.Request / httpx2.Response — there is
+no httpware-owned request type. The chain is composed at AsyncClient.__init__
+(see client.py) and frozen for the client's lifetime.
+"""
 
 from collections.abc import Awaitable, Callable
 from typing import Protocol, TypeAlias, runtime_checkable
 
-from httpware.request import Request
-from httpware.response import Response
+import httpx2
 
 
-Next: TypeAlias = Callable[[Request], Awaitable[Response]]
+Next: TypeAlias = Callable[[httpx2.Request], Awaitable[httpx2.Response]]
 
 
 @runtime_checkable
 class Middleware(Protocol):
-    """Structural protocol every middleware satisfies.
+    """Structural protocol every middleware satisfies."""
 
-    A middleware receives the incoming `Request` and a `Next` callable. It may
-    inspect/transform the request, await `next(request)` to forward to the rest
-    of the chain (eventually the transport), inspect/transform the returned
-    `Response`, short-circuit by returning a `Response` without calling `next`,
-    or raise.
-    """
-
-    async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
         """Process `request`; call `next(request)` to forward, or synthesize a Response."""
         ...
 
 
-def before_request(f: Callable[[Request], Awaitable[Request]]) -> Middleware:
-    """Wrap an async request transform into a Middleware.
-
-    The decorated function receives the incoming Request and returns a
-    (possibly modified) Request, which is then forwarded down the chain.
-    """
+def before_request(f: Callable[[httpx2.Request], Awaitable[httpx2.Request]]) -> Middleware:
+    """Wrap an async request transform into a Middleware."""
 
     class _BeforeRequestMiddleware:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
             return await next(await f(request))
 
         def __repr__(self) -> str:
@@ -43,15 +36,13 @@ def before_request(f: Callable[[Request], Awaitable[Request]]) -> Middleware:
     return _BeforeRequestMiddleware()
 
 
-def after_response(f: Callable[[Request, Response], Awaitable[Response]]) -> Middleware:
-    """Wrap an async response transform into a Middleware.
-
-    The decorated function receives the original Request and the Response
-    returned by the chain, and returns a (possibly modified) Response.
-    """
+def after_response(
+    f: Callable[[httpx2.Request, httpx2.Response], Awaitable[httpx2.Response]],
+) -> Middleware:
+    """Wrap an async response transform into a Middleware."""
 
     class _AfterResponseMiddleware:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
             response = await next(request)
             return await f(request, response)
 
@@ -61,17 +52,17 @@ def after_response(f: Callable[[Request, Response], Awaitable[Response]]) -> Mid
     return _AfterResponseMiddleware()
 
 
-def on_error(f: Callable[[Request, Exception], Awaitable[Response | None]]) -> Middleware:
+def on_error(
+    f: Callable[[httpx2.Request, Exception], Awaitable[httpx2.Response | None]],
+) -> Middleware:
     """Wrap an async error handler into a Middleware.
 
-    Catches Exception (not BaseException, so asyncio.CancelledError
-    propagates). If the handler returns a Response, that Response is
-    returned to the caller. If the handler returns None, the original
-    exception is re-raised.
+    Catches Exception (not BaseException), so asyncio.CancelledError propagates.
+    Handler returning None re-raises; returning a Response replaces the failure.
     """
 
     class _OnErrorMiddleware:
-        async def __call__(self, request: Request, next: Next) -> Response:  # noqa: A002
+        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
             try:
                 return await next(request)
             except Exception as exc:
@@ -84,6 +75,3 @@ def on_error(f: Callable[[Request, Exception], Awaitable[Response | None]]) -> M
             return f"<on_error({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
 
     return _OnErrorMiddleware()
-
-
-__all__ = ["Middleware", "Next", "after_response", "before_request", "on_error"]

@@ -1,43 +1,53 @@
-"""Type-checked verification that AsyncClient.{get,post,...} overloads narrow correctly.
+"""Static-typing tests for AsyncClient overloads.
 
-This file is checked by `ty` as part of `just lint-ci`. If the @overload
-declarations are wrong, the typed assignments below fail to type-check.
-
-The runtime test below just ensures the module imports cleanly so coverage
-notices the file.
+These assert overload selection at runtime via isinstance checks. ty/mypy
+catches the static-typing variant during `just lint`.
 """
 
-from pydantic import BaseModel
+from http import HTTPStatus
 
-from httpware import AsyncClient, Response
+import httpx2
+import pydantic
+
+from httpware import AsyncClient
 
 
-class _Item(BaseModel):
+class _User(pydantic.BaseModel):
+    id: int
     name: str
 
 
-async def _check_overload_types(client: AsyncClient) -> None:
-    # No response_model → Response
-    resp: Response = await client.get("/foo")
-    assert resp is not None
-
-    # response_model=type[T] → T
-    item: _Item = await client.get("/foo", response_model=_Item)
-    assert item is not None
-
-    # POST: same pattern
-    resp_post: Response = await client.post("/foo", json={"a": 1})
-    item_post: _Item = await client.post("/foo", json={"a": 1}, response_model=_Item)
-    assert resp_post is not None
-    assert item_post is not None
-
-    # request(method, path, ...) shape
-    resp_req: Response = await client.request("PURGE", "/foo")
-    item_req: _Item = await client.request("PURGE", "/foo", response_model=_Item)
-    assert resp_req is not None
-    assert item_req is not None
+async def test_get_without_response_model_returns_response() -> None:
+    transport = httpx2.MockTransport(
+        lambda req: httpx2.Response(HTTPStatus.OK, request=req, json={"id": 1, "name": "a"})
+    )
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    result = await client.get("https://example.test/x")
+    assert isinstance(result, httpx2.Response)
 
 
-def test_typing_module_imports_cleanly() -> None:
-    """Runtime stub so coverage notices this file is reachable; ty does the real work."""
-    assert AsyncClient is not None
+async def test_get_with_response_model_returns_typed() -> None:
+    transport = httpx2.MockTransport(
+        lambda req: httpx2.Response(HTTPStatus.OK, request=req, json={"id": 1, "name": "a"})
+    )
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    result = await client.get("https://example.test/x", response_model=_User)
+    assert isinstance(result, _User)
+
+
+async def test_send_without_response_model_returns_response() -> None:
+    transport = httpx2.MockTransport(
+        lambda req: httpx2.Response(HTTPStatus.OK, request=req, json={"id": 1, "name": "a"})
+    )
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    result = await client.send(httpx2.Request("GET", "https://example.test/x"))
+    assert isinstance(result, httpx2.Response)
+
+
+async def test_send_with_response_model_returns_typed() -> None:
+    transport = httpx2.MockTransport(
+        lambda req: httpx2.Response(HTTPStatus.OK, request=req, json={"id": 1, "name": "a"})
+    )
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    result = await client.send(httpx2.Request("GET", "https://example.test/x"), response_model=_User)
+    assert isinstance(result, _User)

@@ -1,58 +1,35 @@
-"""Status-keyed exception hierarchy with plain typed fields.
+"""Status-keyed exception hierarchy.
 
-Fallback rule: unknown 4xx statuses fall back to ``ClientStatusError``;
-unknown 5xx fall back to ``ServerStatusError``. The fallback assumes
-``400 <= status < 600`` — callers must guard against non-error statuses
-(1xx informational, 2xx success, 3xx redirect) before consulting
-``STATUS_TO_EXCEPTION``. The resolution logic lives at the transport
-seam (Story 1.4); this module only ships the classes and the lookup dict.
+Auto-raise rule lives at AsyncClient's internal terminal (see client.py).
+Unknown 4xx falls back to ClientStatusError; unknown 5xx to ServerStatusError.
+The fallback assumes 400 <= status < 600.
 
-``__repr__`` and the summary message passed to ``Exception.__init__``
-strip ``user:pass@`` userinfo from ``request_url`` to avoid leaking
-credentials in tracebacks, log lines, and exception reporters.
-Query-string secrets (e.g. ``?api_key=...``) are NOT stripped here —
-full redaction is the responsibility of the ``Redactor`` middleware
-(Story 5.3).
+__repr__ and the summary message strip user:pass@ userinfo from
+response.request.url to avoid leaking credentials in tracebacks.
+Query-string secrets are NOT stripped here.
 """
 
 import builtins
 from collections.abc import Mapping
-from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import httpx2
+
 
 def _strip_userinfo(url: str) -> str:
-    """Drop the ``user:pass@`` portion of ``url`` if present."""
     if "@" not in url or "://" not in url:
         return url
     parts = urlsplit(url)
     if parts.username is None and parts.password is None:
         return url
-    netloc = parts.hostname or ""
+    hostname = parts.hostname or ""
+    if ":" in hostname:  # IPv6 literal — re-wrap in brackets
+        hostname = f"[{hostname}]"
+    netloc = hostname
     if parts.port is not None:
         netloc = f"{netloc}:{parts.port}"
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-
-
-def _reconstruct_status_error(
-    cls: "type[StatusError]",
-    status: int,
-    body: bytes,
-    headers: Mapping[str, str],
-    json: Any,  # noqa: ANN401
-    request_method: str,
-    request_url: str,
-) -> "StatusError":
-    """Pickle / copy reconstructor for ``StatusError`` subclasses."""
-    return cls(
-        status=status,
-        body=body,
-        headers=headers,
-        json=json,
-        request_method=request_method,
-        request_url=request_url,
-    )
 
 
 class ClientError(Exception):
@@ -66,70 +43,42 @@ class TransportError(ClientError):
 class TimeoutError(ClientError, builtins.TimeoutError):  # noqa: A001
     """Client-side timeout (connect / read / write / pool).
 
-    Inherits from both ``httpware.ClientError`` and ``builtins.TimeoutError``
-    so ``except httpware.TimeoutError`` catches httpware-raised timeouts AND
+    Inherits from both ``httpware.ClientError`` and ``builtins.TimeoutError`` so
     ``except builtins.TimeoutError`` / ``except OSError`` (the form
-    ``asyncio.wait_for`` uses) also catches them. Deliberately shadows
-    ``builtins.TimeoutError``; see Decision 3 in ``docs/architecture.md``.
-    Do not "fix" this name.
+    ``asyncio.wait_for`` uses) also catches httpware-raised timeouts.
+    Deliberate shadowing of the builtin; do not rename.
     """
 
 
+def _reconstruct_status_error(cls: "type[StatusError]", response: httpx2.Response) -> "StatusError":
+    return cls(response)
+
+
 class StatusError(ClientError):
-    """Base for HTTP-status-keyed errors with plain typed fields."""
+    """Base for HTTP-status-keyed errors.
 
-    status: int
-    body: bytes
-    headers: Mapping[str, str]
-    json: Any
-    request_method: str
-    request_url: str
+    Holds the raw httpx2.Response. Subclasses do not override __init__.
+    """
 
-    def __init__(
-        self,
-        *,
-        status: int,
-        body: bytes,
-        headers: Mapping[str, str],
-        json: Any | None,  # noqa: ANN401
-        request_method: str,
-        request_url: str,
-    ) -> None:
-        """Store all six fields and emit a short summary message to ``Exception.__init__``.
+    response: httpx2.Response
 
-        Subclasses overriding ``__init__`` MUST call
-        ``super().__init__(status=..., body=..., headers=..., json=...,
-        request_method=..., request_url=...)`` to register ``args`` and the
-        summary message; otherwise ``str(exc)`` is silently empty.
-        ``headers`` is defensively copied into a read-only ``MappingProxyType``
-        so caller mutations after ``raise`` do not bleed into the exception.
-        """
-        self.status = status
-        self.body = body
-        self.headers = MappingProxyType(dict(headers))
-        self.json = json
-        self.request_method = request_method
-        self.request_url = request_url
-        super().__init__(f"{status} {request_method} {_strip_userinfo(request_url)}")
+    def __init__(self, response: httpx2.Response) -> None:
+        self.response = response
+        super().__init__(self._summary())
+
+    def _summary(self) -> str:
+        method = self.response.request.method
+        url = _strip_userinfo(str(self.response.request.url))
+        return f"{self.response.status_code} {method} {url}"
 
     def __repr__(self) -> str:
         cls_name = type(self).__name__
-        safe_url = _strip_userinfo(self.request_url)
-        return f"<{cls_name} status={self.status} method={self.request_method} url={safe_url}>"
+        method = self.response.request.method
+        url = _strip_userinfo(str(self.response.request.url))
+        return f"<{cls_name} status={self.response.status_code} method={method} url={url}>"
 
     def __reduce__(self) -> tuple[Any, ...]:
-        return (
-            _reconstruct_status_error,
-            (
-                type(self),
-                self.status,
-                self.body,
-                dict(self.headers),
-                self.json,
-                self.request_method,
-                self.request_url,
-            ),
-        )
+        return (_reconstruct_status_error, (type(self), self.response))
 
 
 class ClientStatusError(StatusError):
@@ -141,46 +90,41 @@ class ServerStatusError(StatusError):
 
 
 class BadRequestError(ClientStatusError):
-    """HTTP 400 Bad Request."""
+    """HTTP 400."""
 
 
 class UnauthorizedError(ClientStatusError):
-    """HTTP 401 Unauthorized."""
+    """HTTP 401."""
 
 
 class ForbiddenError(ClientStatusError):
-    """HTTP 403 Forbidden."""
+    """HTTP 403."""
 
 
 class NotFoundError(ClientStatusError):
-    """HTTP 404 Not Found."""
+    """HTTP 404."""
 
 
 class ConflictError(ClientStatusError):
-    """HTTP 409 Conflict."""
+    """HTTP 409."""
 
 
 class UnprocessableEntityError(ClientStatusError):
-    """HTTP 422 Unprocessable Entity."""
+    """HTTP 422."""
 
 
 class RateLimitedError(ClientStatusError):
-    """HTTP 429 Too Many Requests."""
+    """HTTP 429."""
 
 
 class InternalServerError(ServerStatusError):
-    """HTTP 500 Internal Server Error."""
+    """HTTP 500."""
 
 
 class ServiceUnavailableError(ServerStatusError):
-    """HTTP 503 Service Unavailable."""
+    """HTTP 503."""
 
 
-# Unknown 4xx → ``ClientStatusError``; unknown 5xx → ``ServerStatusError``.
-# Fallback assumes ``400 <= status < 600`` — callers must guard against
-# non-error codes (1xx/2xx/3xx) before consulting this dict. The fallback
-# resolution lives at the call site (Story 1.4 inlines it at the transport
-# seam).
 STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {
     400: BadRequestError,
     401: UnauthorizedError,
