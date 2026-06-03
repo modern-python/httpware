@@ -28,10 +28,6 @@ _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
     f"{_FORWARDED_KWARG_NAMES}; configure the httpx2.AsyncClient you pass instead."
 )
 
-_CLIENT_ERROR_LOW = HTTPStatus.BAD_REQUEST.value  # 400
-_SERVER_ERROR_LOW = HTTPStatus.INTERNAL_SERVER_ERROR.value  # 500
-_SERVER_ERROR_HIGH = 600  # synthetic upper bound; no standard HTTP status reaches this
-
 
 class AsyncClient:
     """Async HTTP client: thin wrapper around httpx2 with typed decoding and middleware."""
@@ -107,10 +103,10 @@ class AsyncClient:
                 raise TransportError(str(exc)) from exc
             raise
         status = response.status_code
-        if _CLIENT_ERROR_LOW <= status < _SERVER_ERROR_HIGH:
+        if HTTPStatus.BAD_REQUEST <= status < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
             exc_class = STATUS_TO_EXCEPTION.get(
                 status,
-                ClientStatusError if status < _SERVER_ERROR_LOW else ServerStatusError,
+                ClientStatusError if status < HTTPStatus.INTERNAL_SERVER_ERROR else ServerStatusError,
             )
             raise exc_class(response)
         return response

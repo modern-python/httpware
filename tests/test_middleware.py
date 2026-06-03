@@ -1,6 +1,7 @@
 """Tests for the Middleware protocol, Next type, chain composition, and decorators."""
 
 import asyncio
+from http import HTTPStatus
 
 import httpx2
 import pytest
@@ -19,12 +20,7 @@ def _make_request(url: str = "https://example.test/x") -> httpx2.Request:
     return httpx2.Request("GET", url)
 
 
-_STATUS_OK = 200
-_STATUS_UPGRADED = 299
-_STATUS_SERVICE_UNAVAILABLE = 503
-
-
-def _make_response(status: int = _STATUS_OK, *, request: httpx2.Request | None = None) -> httpx2.Response:
+def _make_response(status: int = HTTPStatus.OK, *, request: httpx2.Request | None = None) -> httpx2.Response:
     if request is None:
         request = _make_request()
     return httpx2.Response(status, request=request)
@@ -48,7 +44,7 @@ async def test_empty_chain_calls_terminal_directly() -> None:
     dispatch = compose((), terminal)
     request = _make_request()
     response = await dispatch(request)
-    assert response.status_code == _STATUS_OK
+    assert response.status_code == HTTPStatus.OK
     assert seen == [request]
 
 
@@ -93,21 +89,21 @@ async def test_before_request_decorator_transforms_request() -> None:
 async def test_after_response_decorator_transforms_response() -> None:
     @after_response
     async def upgrade_status(request: httpx2.Request, response: httpx2.Response) -> httpx2.Response:
-        return httpx2.Response(299, request=request, headers=response.headers, content=response.content)
+        return httpx2.Response(HTTPStatus.IM_USED, request=request, headers=response.headers, content=response.content)
 
     async def terminal(request: httpx2.Request) -> httpx2.Response:
-        return _make_response(200, request=request)
+        return _make_response(HTTPStatus.OK, request=request)
 
     dispatch = compose((upgrade_status,), terminal)
     response = await dispatch(_make_request())
-    assert response.status_code == _STATUS_UPGRADED
+    assert response.status_code == HTTPStatus.IM_USED
 
 
 async def test_on_error_decorator_can_translate_exception() -> None:
     @on_error
     async def swallow(request: httpx2.Request, exc: Exception) -> httpx2.Response | None:
         if isinstance(exc, RuntimeError) and str(exc) == "boom":
-            return _make_response(503, request=request)
+            return _make_response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
         return None
 
     async def terminal(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
@@ -116,7 +112,7 @@ async def test_on_error_decorator_can_translate_exception() -> None:
 
     dispatch = compose((swallow,), terminal)
     response = await dispatch(_make_request())
-    assert response.status_code == _STATUS_SERVICE_UNAVAILABLE
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
 
 
 async def test_on_error_returns_none_reraises() -> None:
