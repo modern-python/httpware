@@ -32,8 +32,8 @@ def test_async_client_accepts_explicit_decoder_without_pydantic() -> None:
     """An explicit decoder= escapes the fail-fast even when pydantic is 'missing'."""
 
     class _FakeDecoder:
-        def decode(self, _content: bytes, model: type) -> object:  # pragma: no cover
-            return model()
+        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002 — name pinned by ResponseDecoder protocol
+            return model()  # pragma: no cover
 
     with patch("httpware._internal.import_checker.is_pydantic_installed", False):
         client = AsyncClient(decoder=_FakeDecoder())
