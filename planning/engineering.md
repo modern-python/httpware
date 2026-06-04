@@ -4,7 +4,7 @@ This doc is the single distilled reference for `httpware` design rationale, prot
 
 ## 1. Project intent
 
-`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request` and `httpx2.Response` as the public request/response surface and adds three things on top: typed response decoding (via a `ResponseDecoder` protocol; Pydantic ships as the default, msgspec as an opt-in extra), a middleware chain composed at client construction, and a status-keyed exception tree raised automatically on 4xx and 5xx.
+`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request` and `httpx2.Response` as the public request/response surface and adds three things on top: typed response decoding (via a `ResponseDecoder` protocol; pydantic and msgspec are both opt-in extras as of 0.3.0), a middleware chain composed at client construction, and a status-keyed exception tree raised automatically on 4xx and 5xx. `AsyncClient(decoder=None)` defaults to constructing a `PydanticDecoder` and so requires the `pydantic` extra; callers can supply an explicit `decoder=` argument to escape the default.
 
 The 0.1.0 release attempted to own a full abstraction over the underlying HTTP client. v0.2 walks that back: `httpx2` is part of the public surface.
 
@@ -43,6 +43,7 @@ The 0.1.0 seams numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) h
 - **Where:** `pyproject.toml` extras (`[project.optional-dependencies]`) ↔ the adapter modules that import them.
 - **Contract:** each optional dependency is imported only inside its own dedicated module (e.g., `pydantic` in `decoders/pydantic.py`; `msgspec` in `decoders/msgspec.py`; `opentelemetry` in `middleware/observability/otel.py` when Epic 5 lands).
 - **Rule:** never import an extra at package top-level. The package must import cleanly when the extra is not installed.
+- **Verification:** `tests/test_optional_extras_isolation.py` runs a fresh-subprocess `import httpware` and asserts that neither pydantic nor msgspec ends up in `sys.modules`. New extras must add the same isolation test.
 
 ## 4. Exception contract
 
@@ -102,7 +103,7 @@ msgspec = ["msgspec>=0.18"]
 otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 ```
 
-Each extra's code lives in a single dedicated module (e.g., `decoders/pydantic.py`, `decoders/msgspec.py`, `middleware/observability/otel.py`). The `import` of the extra happens **inside** that module — never at package top level. This way, `import httpware` works cleanly without the extras installed, and the seam stays observable: grep for `import pydantic` should return exactly one file.
+Each extra's code lives in a single dedicated module (`decoders/pydantic.py`, `decoders/msgspec.py`, `middleware/observability/otel.py` when Epic 5 lands). The `import` of the extra happens **inside** that module behind an `is_<extra>_installed` guard from `_internal/import_checker.py` — never at package top level. This way, `import httpware` works cleanly without the extras installed, and the seam stays observable: `grep -rE '^from pydantic|^import pydantic' src/httpware/` returns exactly one file (the guarded import in `decoders/pydantic.py`), and the same is true for `msgspec`.
 
 Caller-facing pattern: consumers select the implementation by passing it explicitly, e.g., `AsyncClient(decoder=PydanticDecoder())`. There is no auto-detection or implicit registry.
 

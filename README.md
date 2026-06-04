@@ -7,25 +7,24 @@
 
 **Async HTTP client framework for Python.**
 
-`httpware` is a typed, async HTTP client library with a protocol-based seam so the transport is swappable (`httpx2` ships as the default). Middleware composes via an onion model. Pydantic and msgspec response decoding ship out of the box. `RecordedTransport` replaces `respx` for transport-level tests.
+`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain composed at client construction, supports opt-in typed response decoding (pydantic and msgspec are both extras), and raises a status-keyed exception tree automatically on 4xx/5xx.
 
-> **Status:** Pre-1.0 (0.1.0 alpha). Public API is subject to change between minor releases until v1.0. Resilience middleware (retry / timeout / bulkhead), streaming, and observability are not yet shipped.
+> **Status:** Pre-1.0 (0.3.0). Public API is subject to change between minor releases until v1.0. Resilience middleware (retry / timeout / bulkhead), streaming, and observability are not yet shipped.
 
 ## Install
 
 ```bash
-pip install httpware
+pip install httpware                # core only — no decoder
+pip install httpware[pydantic]      # + PydanticDecoder (the default-decoder path)
+pip install httpware[msgspec]       # + MsgspecDecoder
+pip install httpware[all]           # everything declared above (pydantic, msgspec, otel)
 ```
 
-Optional extras:
-
-```bash
-pip install httpware[msgspec]    # MsgspecDecoder
-```
-
-(`otel`, `niquests`, and `all` extras are declared; integrations have not shipped yet.)
+`AsyncClient()` with no `decoder=` argument defaults to constructing a `PydanticDecoder`; that path requires the `pydantic` extra and raises `ImportError` at `AsyncClient.__init__` if it is missing. The `otel` extra is declared but the OpenTelemetry middleware (Epic 5) has not shipped yet.
 
 ## Quickstart
+
+> Requires: `pip install httpware[pydantic]`
 
 ```python
 from httpware import AsyncClient
