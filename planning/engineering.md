@@ -103,7 +103,7 @@ msgspec = ["msgspec>=0.18"]
 otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 ```
 
-Each extra's code lives in a single dedicated module (`decoders/pydantic.py`, `decoders/msgspec.py`, `middleware/observability/otel.py` when Epic 5 lands). The `import` of the extra happens **inside** that module behind an `is_<extra>_installed` guard from `_internal/import_checker.py` — never at package top level. This way, `import httpware` works cleanly without the extras installed, and the seam stays observable: `grep -rE '^from pydantic|^import pydantic' src/httpware/` returns exactly one file (the guarded import in `decoders/pydantic.py`), and the same is true for `msgspec`.
+Each extra's code lives in a single dedicated module (`decoders/pydantic.py`, `decoders/msgspec.py`, `middleware/observability/otel.py` when Epic 5 lands). The `import` of the extra happens **inside** that module behind an `is_<extra>_installed` guard from `_internal/import_checker.py` — never at package top level. This way, `import httpware` works cleanly without the extras installed, and the seam stays observable: `grep -rnE 'from pydantic|import pydantic' src/httpware/ | grep -v import_checker` returns exactly one indented line (the guarded import in `decoders/pydantic.py`), and the same is true for `msgspec`.
 
 Caller-facing pattern: consumers select the implementation by passing it explicitly, e.g., `AsyncClient(decoder=PydanticDecoder())`. There is no auto-detection or implicit registry.
 
