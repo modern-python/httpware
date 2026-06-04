@@ -7,13 +7,13 @@ Items raised in reviews that are real but not actionable now.
 ### Decoder-side
 
 - **`_get_adapter` `lru_cache` is module-global, not per-decoder instance** — keyed by `model` only; two `PydanticDecoder()` instances with different configurations (none today) would share adapters, and the cache survives across tests unless explicitly cleared. Revisit if/when a configurable `PydanticDecoder(mode=..., strict=...)` lands. (`src/httpware/decoders/pydantic.py:12-14`)
-- **Empty/malformed payload tests** — `b""`, `b"null"`, `b"{}"`, invalid UTF-8: current pydantic-core behavior is correct but unpinned; a future pydantic upgrade could change error types undetected. (`tests/test_decoders_pydantic.py`)
 
-### Tooling
+### In progress for 0.3.0
 
-- **Unpinned `ruff`/`ty` with `select=["ALL"]`** — any new ruff release adds rules and can break CI overnight. Pin major versions or pin specific rules when a regression occurs. (`pyproject.toml` `[dependency-groups] lint`, `[tool.ruff.lint] select`)
-- **No `[test]` extra; CI installs all extras** — `just install` runs `uv sync --all-extras --group lint`, so every CI run pulls msgspec/otel/niquests even though most tests don't need them. Declare a `test` extra (or move test-only deps into a dedicated dependency-group) and switch CI to the narrower install. (`pyproject.toml` `[project.optional-dependencies]`, `Justfile:install`)
-- **`pydantic` import not guarded the way `msgspec` is** — `decoders/pydantic.py` imports `pydantic` at module top; `decoders/msgspec.py` guards via `is_msgspec_installed`. Either drop the optional-extras framing for pydantic (it is already a required dependency) or guard pydantic the same way. (`src/httpware/decoders/pydantic.py:5`, `pyproject.toml` `[project] dependencies`)
+Tracked by `planning/specs/2026-06-04-pydantic-optional-extra-design.md` (forthcoming).
+
+- **`pydantic` import not guarded the way `msgspec` is** — `decoders/pydantic.py` imports `pydantic` at module top; `decoders/msgspec.py` guards via `is_msgspec_installed`. 0.3.0 moves `pydantic` into `[project.optional-dependencies]` and guards the import the same way. Closes on 0.3.0 merge. (`src/httpware/decoders/pydantic.py:5`, `pyproject.toml` `[project] dependencies`)
+- **Empty/malformed payload tests** — `b""`, `b"null"`, `b"{}"`, invalid UTF-8: current pydantic-core behavior is correct but unpinned; a future pydantic upgrade could change error types undetected. Folded into the 0.3.0 spec. Closes on 0.3.0 merge. (`tests/test_decoders_pydantic.py`)
 
 ## Closed by the v0.2 thin-wrapper pivot (2026-06-03)
 
