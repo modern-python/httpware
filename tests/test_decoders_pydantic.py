@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pydantic
 import pytest
 
-from httpware import PydanticDecoder, ResponseDecoder
-from httpware.decoders.pydantic import _get_adapter
+from httpware import ResponseDecoder
+from httpware.decoders.pydantic import PydanticDecoder, _get_adapter
 
 
 class User(pydantic.BaseModel):
