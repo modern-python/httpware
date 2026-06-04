@@ -6,8 +6,8 @@ from http import HTTPStatus
 
 import httpx2
 
+from httpware._internal import import_checker
 from httpware.decoders import ResponseDecoder
-from httpware.decoders.pydantic import PydanticDecoder
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
     ClientStatusError,
@@ -27,6 +27,20 @@ _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
     "AsyncClient(httpx2_client=...) cannot be combined with any of "
     f"{_FORWARDED_KWARG_NAMES}; configure the httpx2.AsyncClient you pass instead."
 )
+
+_DEFAULT_DECODER_MISSING_MESSAGE = (
+    "AsyncClient(decoder=None) defaults to PydanticDecoder, which requires the "
+    "'pydantic' extra. Either install it (`pip install httpware[pydantic]`) or "
+    "pass an explicit decoder=..."
+)
+
+
+def _default_pydantic_decoder() -> ResponseDecoder:
+    if not import_checker.is_pydantic_installed:
+        raise ImportError(_DEFAULT_DECODER_MISSING_MESSAGE)
+    from httpware.decoders.pydantic import PydanticDecoder  # noqa: PLC0415 — lazy by design
+
+    return PydanticDecoder()
 
 
 class AsyncClient:
@@ -85,7 +99,7 @@ class AsyncClient:
             self._httpx2_client = httpx2.AsyncClient(**kwargs)
             self._owns_client = True
 
-        self._decoder = decoder if decoder is not None else PydanticDecoder()
+        self._decoder = decoder if decoder is not None else _default_pydantic_decoder()
         self._user_middleware = tuple(middleware)
         self._dispatch = compose(self._user_middleware, self._terminal)
 

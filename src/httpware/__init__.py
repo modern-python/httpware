@@ -2,7 +2,6 @@
 
 from httpware.client import AsyncClient
 from httpware.decoders import ResponseDecoder
-from httpware.decoders.pydantic import PydanticDecoder
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
@@ -36,7 +35,6 @@ __all__ = [
     "Middleware",
     "Next",
     "NotFoundError",
-    "PydanticDecoder",
     "RateLimitedError",
     "ResponseDecoder",
     "ServerStatusError",

@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pydantic
 import pytest
 
-from httpware import PydanticDecoder, ResponseDecoder
-from httpware.decoders.pydantic import _get_adapter
+from httpware import ResponseDecoder
+from httpware.decoders.pydantic import PydanticDecoder, _get_adapter
 
 
 class User(pydantic.BaseModel):
@@ -154,3 +154,25 @@ def test_unhashable_model_falls_back_to_uncached_adapter() -> None:
 
         with pytest.raises(pydantic.ValidationError):
             PydanticDecoder().decode(b'"not-an-int"', int)
+
+
+@pytest.mark.parametrize(
+    ("payload", "model"),
+    [
+        (b"", int),
+        (b"", User),
+        (b"null", int),
+        (b"null", User),
+        (b"{}", User),
+        (b"{not-json}", User),
+        (b"\xff\xfe\x00\x00", User),
+    ],
+)
+def test_malformed_payload_raises_validation_error(payload: bytes, model: type) -> None:
+    """Pin current pydantic-core behavior for malformed payloads.
+
+    A future pydantic upgrade that changes which error type surfaces will fail
+    this test, surfacing the change for explicit acceptance or workaround.
+    """
+    with pytest.raises(pydantic.ValidationError):
+        PydanticDecoder().decode(payload, model)

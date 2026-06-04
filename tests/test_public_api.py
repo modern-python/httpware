@@ -20,9 +20,10 @@ def test_no_removed_symbols_leaked() -> None:
         "Httpx2Transport",
         "RecordedTransport",
         "AuthValue",
+        "PydanticDecoder",
     }
     leaked = removed & set(dir(httpware))
-    assert not leaked, f"removed 0.1 symbols still exposed: {leaked}"
+    assert not leaked, f"removed symbols still exposed: {leaked}"
 
 
 def test_expected_exports() -> None:
@@ -31,7 +32,6 @@ def test_expected_exports() -> None:
         "Middleware",
         "Next",
         "ResponseDecoder",
-        "PydanticDecoder",
         "ClientError",
         "TransportError",
         "TimeoutError",
