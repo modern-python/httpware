@@ -11,6 +11,9 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 - [`planning/engineering.md`](planning/engineering.md) — the distilled design reference: invariants and *why*, the three protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
 - [`planning/deferred-work.md`](planning/deferred-work.md) — review-surfaced items that are real but not actionable now.
 - [`planning/specs/`](planning/specs/) and [`planning/plans/`](planning/plans/) — per-feature design specs and implementation plans (active work).
+- [`planning/archive/specs/`](planning/archive/specs/) and [`planning/archive/plans/`](planning/archive/plans/) — shipped or superseded work, kept for historical context.
+- [`planning/retros/`](planning/retros/) — release- and epic-level retrospectives.
+- [`planning/releases/`](planning/releases/) — per-version release notes (also published on GitHub Releases).
 
 **Per-feature workflow:** brainstorming → spec in `planning/specs/` → writing-plans → plan in `planning/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
 
