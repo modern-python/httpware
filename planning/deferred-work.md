@@ -8,12 +8,12 @@ Items raised in reviews that are real but not actionable now.
 
 - **`_get_adapter` `lru_cache` is module-global, not per-decoder instance** — keyed by `model` only; two `PydanticDecoder()` instances with different configurations (none today) would share adapters, and the cache survives across tests unless explicitly cleared. Revisit if/when a configurable `PydanticDecoder(mode=..., strict=...)` lands. (`src/httpware/decoders/pydantic.py:12-14`)
 
-### In progress for 0.3.0
+## Closed by the 0.3.0 release (2026-06-04)
 
-Tracked by `planning/specs/2026-06-04-pydantic-optional-extra-design.md` (forthcoming).
+PR #21 (`feat/v0.3-pydantic-optional`) shipped 0.3.0 with pydantic moved to `[project.optional-dependencies]`, guarded the same way `msgspec` is, and fail-fast at `AsyncClient.__init__` when the extra is missing. Spec/plan archived under `planning/archive/`.
 
-- **`pydantic` import not guarded the way `msgspec` is** — `decoders/pydantic.py` imports `pydantic` at module top; `decoders/msgspec.py` guards via `is_msgspec_installed`. 0.3.0 moves `pydantic` into `[project.optional-dependencies]` and guards the import the same way. Closes on 0.3.0 merge. (`src/httpware/decoders/pydantic.py:5`, `pyproject.toml` `[project] dependencies`)
-- **Empty/malformed payload tests** — `b""`, `b"null"`, `b"{}"`, invalid UTF-8: current pydantic-core behavior is correct but unpinned; a future pydantic upgrade could change error types undetected. Folded into the 0.3.0 spec. Closes on 0.3.0 merge. (`tests/test_decoders_pydantic.py`)
+- **`pydantic` import not guarded the way `msgspec` is** — closed. `decoders/pydantic.py` now guards via `import_checker.is_pydantic_installed`; `PydanticDecoder.__init__` raises `ImportError` with the install hint; `AsyncClient(decoder=None)` fail-fast in `_default_pydantic_decoder()`.
+- **Empty/malformed payload tests** — closed. `tests/test_decoders_pydantic.py::test_malformed_payload_raises_validation_error` is a 7-case parametrized test pinning current pydantic-core behavior for `b""`, `b"null"`, `b"{}"`, malformed JSON, and invalid UTF-8.
 
 ## Closed by the v0.2 thin-wrapper pivot (2026-06-03)
 
