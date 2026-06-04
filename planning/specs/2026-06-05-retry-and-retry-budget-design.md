@@ -16,10 +16,24 @@ Items deliberately deferred so this slice ships clean:
 
 - **No per-call retry override.** No `extensions["httpware_retry"]` key in v1. Callers with heterogeneous retry needs construct a second `AsyncClient` with different middleware. Purely additive to add later.
 - **No `Backoff` protocol.** Backoff is hardcoded to exponential with full jitter (AWS-recommended). Add a protocol later if a real use case emerges (YAGNI).
-- **No `retry_on_exception=` configuration.** The retryable-exception set is hardcoded to `(httpware.ConnectError, httpware.TimeoutError, asyncio.TimeoutError)`. Users wanting `ChunkedEncodingError`-style additions wait for v0.5.
+- **No `retry_on_exception=` configuration.** The retryable-exception set is hardcoded to `(httpware.NetworkError, httpware.TimeoutError, asyncio.TimeoutError)`. Users wanting `ChunkedEncodingError`-style additions wait for v0.5.
 - **No `Bulkhead`.** Slice C, separate spec.
 - **No standalone per-attempt-timeout middleware.** Folded into `Retry.attempt_timeout=` (3-1 dissolved during brainstorming — `asyncio.timeout()` and httpx2's built-in per-op timeouts cover the standalone use case).
 - **No status-code re-classification.** `RetryBudgetExhaustedError` and `httpware.TimeoutError` map cleanly to existing exception types — no new `_internal/` plumbing.
+
+## Prerequisite refinement: `NetworkError`
+
+The current `AsyncClient._terminal` maps every non-timeout `httpx2.HTTPError` (including non-transient `InvalidURL` and `CookieConflict`) to `httpware.TransportError`. Retrying on `TransportError` would noisily retry typos and bad cookies. This slice adds:
+
+```python
+# In src/httpware/errors.py:
+class NetworkError(TransportError):
+    """Transient network-layer failure (connect / read / write / pool). Safe to retry."""
+```
+
+And refines the terminal mapping so that `httpx2`'s transient-network exception family (`httpx2.NetworkError` per httpx convention, or whichever symbols httpx2 exposes for the same hierarchy) raises `httpware.NetworkError` rather than the broader `TransportError`. `InvalidURL` and `CookieConflict` continue to raise `TransportError` directly so they are NOT retried. Existing tests catching `TransportError` keep working (`NetworkError` is a subclass).
+
+This is the single load-bearing assumption Retry depends on — without it, Retry can't distinguish transient from permanent transport-layer failures.
 
 ## Architecture & module layout
 
@@ -131,8 +145,8 @@ For each completed attempt (exception OR response), `Retry` evaluates:
 
 1. **Idempotency gate.** If `request.method.upper() not in retry_methods`, return the result as-is. POST/PATCH never retry by default.
 2. **Failure-type gate.** Retry IF:
-   - the attempt raised `httpware.ConnectError`, `httpware.TimeoutError`, or `asyncio.TimeoutError`; OR
-   - the attempt returned a response with `status_code in retry_status_codes`.
+   - the attempt raised `httpware.NetworkError`, `httpware.TimeoutError`, or `asyncio.TimeoutError`; OR
+   - the attempt raised an `httpware.StatusError` subclass whose `.response.status_code` is in `retry_status_codes` (since the `AsyncClient` terminal raises `StatusError` on 4xx/5xx, retryable status codes surface as exceptions, not response objects — see "Implementation note" below).
 3. **Attempt-count gate.** If `attempt_index + 1 >= max_attempts`, stop.
 4. **Budget gate.** Call `budget.try_withdraw()`. If `False`, raise `RetryBudgetExhaustedError` (see "Errors raised" below).
 5. **Sleep, then retry.** Compute delay via backoff (Retry-After overrides if applicable), `await self._sleep(delay)`, increment attempt index.
@@ -180,7 +194,11 @@ Rationale: putting `Retry` at the outermost position means each attempt re-runs 
 - **`max_attempts` exhausted**: the *last* error (exception or `StatusError`) is **re-raised unwrapped**. `exc.__notes__` is appended with `"httpware: gave up after N attempts"` (PEP 678) so the gave-up-after context is preserved without changing the exception type. This keeps consumer `except SomeStatusError:` blocks working unchanged.
 - **`attempt_timeout` firing**: caught as `asyncio.TimeoutError` inside the retry loop, re-raised as `httpware.TimeoutError` (whether retried or surfaced as the final error). This matches the existing httpx2-error-mapping pattern in the `AsyncClient` terminal.
 
-`RetryBudgetExhaustedError` lives in `src/httpware/errors.py` alongside the existing exception tree, exported from `httpware/__init__.py`.
+`RetryBudgetExhaustedError` and `NetworkError` both live in `src/httpware/errors.py` alongside the existing exception tree, exported from `httpware/__init__.py`.
+
+### Implementation note: `StatusError` surfaces as exception, not response
+
+The `AsyncClient` terminal (`client.py:106-126`) raises a `StatusError` subclass on 4xx/5xx — the middleware chain receives an exception, not a `Response` object with a non-2xx status. Retry's status-code check therefore lives in an `except StatusError as exc:` branch, inspecting `exc.response.status_code`. On exhaustion, the original `StatusError` subclass is re-raised unwrapped (preserving consumer `except NotFoundError:` patterns).
 
 ## Testing
 
@@ -197,8 +215,9 @@ Per `planning/engineering.md §6` (test patterns):
   - `Retry-After` capped at `max_delay`
   - skips non-idempotent methods by default (POST returns 503 → not retried)
   - honors `attempt_timeout` (slow mock transport → `httpware.TimeoutError`)
-  - retries on `httpware.ConnectError` / `httpware.TimeoutError`
+  - retries on `httpware.NetworkError` / `httpware.TimeoutError`
   - does NOT retry on `httpware.NotFoundError` (404)
+  - does NOT retry on bare `httpware.TransportError` (e.g., `InvalidURL`) — only on the `NetworkError` subclass
   - `RetryBudgetExhaustedError` raised when budget refuses
   - exhausted budget exposes `last_response` / `last_exception` / `attempts`
   - explicit `budget=` parameter shared across two `Retry` middlewares accumulates correctly
