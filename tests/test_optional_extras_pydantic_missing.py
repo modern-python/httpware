@@ -15,15 +15,17 @@ from httpware.decoders.pydantic import PydanticDecoder
 
 
 def test_pydantic_decoder_init_raises_when_pydantic_missing() -> None:
-    with patch("httpware._internal.import_checker.is_pydantic_installed", False), pytest.raises(
-        ImportError, match=r"httpware\[pydantic\]"
+    with (
+        patch("httpware._internal.import_checker.is_pydantic_installed", False),
+        pytest.raises(ImportError, match=r"httpware\[pydantic\]"),
     ):
         PydanticDecoder()
 
 
 def test_async_client_default_decoder_raises_when_pydantic_missing() -> None:
-    with patch("httpware._internal.import_checker.is_pydantic_installed", False), pytest.raises(
-        ImportError, match=r"httpware\[pydantic\]"
+    with (
+        patch("httpware._internal.import_checker.is_pydantic_installed", False),
+        pytest.raises(ImportError, match=r"httpware\[pydantic\]"),
     ):
         AsyncClient()
 
