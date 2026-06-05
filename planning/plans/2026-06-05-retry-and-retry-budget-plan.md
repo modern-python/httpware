@@ -63,12 +63,14 @@ mkdir -p src/httpware/middleware/resilience
 
 Then create each file with the contents below. Use the Write tool, not bash heredocs.
 
-`src/httpware/middleware/resilience/__init__.py`:
+`src/httpware/middleware/resilience/__init__.py` (docstring-only — re-exports defer to Task 7 so intermediate tasks can `import httpware.middleware.resilience.budget` without tripping an import-time `ImportError` from this `__init__.py`):
 ```python
-"""Resilience primitives: Retry middleware and RetryBudget token bucket."""
+"""Resilience primitives: Retry middleware and RetryBudget token bucket.
 
-from httpware.middleware.resilience.budget import RetryBudget
-from httpware.middleware.resilience.retry import Retry
+Re-exports land in Task 7 once both classes exist; until then this file is
+docstring-only so that importing ``httpware.middleware.resilience.budget``
+during the intermediate tasks does not trip an import-time ``ImportError``.
+"""
 ```
 
 `src/httpware/middleware/resilience/budget.py`:
@@ -1029,15 +1031,30 @@ class Retry:
 Run: `uv run pytest tests/test_retry.py -v`
 Expected: all PASS.
 
-- [ ] **Step 4: Lint**
+- [ ] **Step 4: Wire `Retry` + `RetryBudget` into `resilience/__init__.py`**
 
-Run: `uv run ruff check src/httpware/middleware/resilience/retry.py tests/test_retry.py && uv run ty check src/httpware/middleware/resilience/retry.py`
+Now that both classes exist, replace `src/httpware/middleware/resilience/__init__.py` with:
+```python
+"""Resilience primitives: Retry middleware and RetryBudget token bucket."""
+
+from httpware.middleware.resilience.budget import RetryBudget
+from httpware.middleware.resilience.retry import Retry
+
+
+__all__ = ["Retry", "RetryBudget"]
+```
+
+The `__all__` is required to silence ruff F401 ("imported but unused") and matches the pattern used by `httpware/__init__.py` and `httpware/decoders/__init__.py`.
+
+- [ ] **Step 5: Lint**
+
+Run: `uv run ruff check src/httpware/middleware/resilience/ tests/test_retry.py && uv run ty check src/httpware/middleware/resilience/`
 Expected: clean. If ruff flags `Callable` / `Awaitable` import paths, adjust per existing project pattern (see `middleware/__init__.py` which uses `from collections.abc import Awaitable, Callable`).
 
-- [ ] **Step 5: Stage and commit**
+- [ ] **Step 6: Stage and commit**
 
 ```bash
-git add src/httpware/middleware/resilience/retry.py tests/test_retry.py
+git add src/httpware/middleware/resilience/retry.py src/httpware/middleware/resilience/__init__.py tests/test_retry.py
 git commit -m "feat(resilience): Retry middleware — status-code retry + exhaustion
 
 Covers: happy path, 503-then-200, max_attempts exhaustion with PEP-678 note,
