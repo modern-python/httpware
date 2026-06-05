@@ -47,7 +47,7 @@ The same refusal note is added at the non-idempotent early-exit sites (when stre
 
 On exhaustion, `Retry` re-raises the *last* exception observed (e.g., `ServiceUnavailableError`, `NetworkError`), preserving the original class so `except ServiceUnavailableError` still catches it. A PEP 678 note is added: `httpware: gave up after N attempts`.
 
-If exhaustion is caused by the budget refusing a retry (not by `max_attempts`), the raised exception is `RetryBudgetExhaustedError` instead, with `last_response` / `last_exception` / `attempts` fields populated. See the Errors reference.
+If exhaustion is caused by the budget refusing a retry (not by `max_attempts`), the raised exception is `RetryBudgetExhaustedError` instead, with `last_response` / `last_exception` / `attempts` fields populated. See the [Errors reference](errors.md).
 
 ## `RetryBudget`
 
@@ -139,7 +139,7 @@ async with (
 
 ### Rejection
 
-When `acquire_timeout` elapses without a slot opening, `Bulkhead` raises `BulkheadFullError` (carries the configured `max_concurrent` and `acquire_timeout` for caller logging). See the Errors reference. The `httpware.bulkhead` `bulkhead.rejected` observability event fires at the same site — see [Observability](index.md#observability).
+When `acquire_timeout` elapses without a slot opening, `Bulkhead` raises `BulkheadFullError` (carries the configured `max_concurrent` and `acquire_timeout` for caller logging). See the [Errors reference](errors.md). The `httpware.bulkhead` `bulkhead.rejected` observability event fires at the same site — see [Observability](index.md#observability).
 
 ## Composition
 
@@ -168,6 +168,6 @@ Cross-cutting middleware that emit per-call state (e.g., the Request-ID middlewa
 ## See also
 
 - **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `Retry` and `Bulkhead` use.
-- **Errors reference** — `RetryBudgetExhaustedError`, `BulkheadFullError`, and the broader exception tree.
+- **[Errors reference](errors.md)** — `RetryBudgetExhaustedError`, `BulkheadFullError`, and the broader exception tree.
 - **[Observability](index.md#observability)** — the four operational events these middleware emit.
 - **`planning/engineering.md` §3** — the formal Middleware/Seam-A contract.
