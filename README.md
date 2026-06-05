@@ -61,6 +61,25 @@ async def main() -> None:
         user = await client.get("/users/1", response_model=User)
 ```
 
+### Streaming responses
+
+For large responses or server-sent events, stream the body chunk-by-chunk. `stream()` is an async context manager:
+
+```python
+from httpware import AsyncClient
+
+
+async def main() -> None:
+    async with AsyncClient(base_url="https://api.example.com") as client:
+        async with client.stream("GET", "/big-file") as response:
+            async for chunk in response.aiter_bytes():
+                process(chunk)
+```
+
+`stream()` auto-raises `StatusError` subclasses on 4xx/5xx with the response body pre-read, so `exc.response.content` is accessible from the caught exception.
+
+It does NOT pass through the middleware chain: `Retry`, `Bulkhead`, and any custom middleware are bypassed. (Retry separately refuses to retry any request — stream or non-stream — whose body was an async-iterable, since streams can't replay across attempts.)
+
 ## Errors
 
 All 4xx/5xx responses raise typed exceptions automatically: `NotFoundError`, `ServiceUnavailableError`, `RateLimitedError`, etc. — all subclasses of `httpware.StatusError`. Transport-layer transient failures raise `NetworkError`; the resilience middleware raise `RetryBudgetExhaustedError` and `BulkheadFullError`. Everything inherits `httpware.ClientError`.
