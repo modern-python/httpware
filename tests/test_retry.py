@@ -520,3 +520,133 @@ def test_is_streaming_body_true_for_async_iterable_files() -> None:
         yield b"x"  # pragma: no cover
 
     assert _is_streaming_body(streamed_files()) is True
+
+
+async def test_retry_refuses_streamed_body_request() -> None:
+    """Retry must not replay a request with a streaming body — re-raise with a PEP-678 note."""
+    sleeper = _SleepRecorder()
+    call_count = {"n": 0}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        call_count["n"] += 1
+        return httpx2.Response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
+
+    async def streamed_body() -> typing.AsyncIterator[bytes]:
+        yield b"x"
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
+    )
+
+    with pytest.raises(ServiceUnavailableError) as info:
+        await client.post("https://example.test/upload", content=streamed_body())
+
+    assert call_count["n"] == 1
+    assert sleeper.calls == []  # no retry attempted
+    notes = getattr(info.value, "__notes__", [])
+    assert any("not retrying" in note and "stream" in note for note in notes)
+
+
+async def test_retry_refuses_streamed_body_does_not_consume_budget() -> None:
+    """When Retry refuses for streaming-body reasons, no budget token is withdrawn."""
+    sleeper = _SleepRecorder()
+    budget = RetryBudget(ttl=10.0, min_retries_per_sec=10.0, percent_can_retry=0.2)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
+
+    async def streamed_body() -> typing.AsyncIterator[bytes]:
+        yield b"x"
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[Retry(_sleep=sleeper, budget=budget, base_delay=0.001, max_delay=0.002)],
+    )
+
+    with pytest.raises(ServiceUnavailableError):
+        await client.post("https://example.test/upload", content=streamed_body())
+
+    # Budget should be untouched: deposits OK (every attempt deposits), but no withdrawals.
+    # Check via _withdrawn deque emptiness.
+    assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
+
+
+async def test_retry_refuses_streamed_body_network_error_non_idempotent() -> None:
+    """Streaming POST that hits a NetworkError gets the PEP-678 note."""
+    sleeper = _SleepRecorder()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "transient"
+        raise httpx2.ConnectError(msg)
+
+    async def streamed_body() -> typing.AsyncIterator[bytes]:
+        yield b"x"
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
+    )
+
+    with pytest.raises(NetworkError) as info:
+        await client.post("https://example.test/upload", content=streamed_body())
+
+    assert sleeper.calls == []  # no retry attempted
+    notes = getattr(info.value, "__notes__", [])
+    assert any("not retrying" in note and "stream" in note for note in notes)
+
+
+async def test_retry_refuses_streamed_body_attempt_timeout_non_idempotent() -> None:
+    """Streaming POST that times out per attempt_timeout gets the PEP-678 note."""
+    sleeper = _SleepRecorder()
+
+    async def slow_handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        await asyncio.sleep(1.0)
+        msg = "should not reach"  # pragma: no cover
+        raise AssertionError(msg)  # pragma: no cover
+
+    async def streamed_body() -> typing.AsyncIterator[bytes]:
+        yield b"x"
+
+    transport = httpx2.MockTransport(slow_handler)
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[Retry(_sleep=sleeper, attempt_timeout=0.05, base_delay=0.001, max_delay=0.002)],
+    )
+
+    with pytest.raises(HttpwareTimeoutError) as info:
+        await client.post("https://example.test/upload", content=streamed_body())
+
+    assert sleeper.calls == []  # no retry attempted
+    notes = getattr(info.value, "__notes__", [])
+    assert any("not retrying" in note and "stream" in note for note in notes)
+
+
+async def test_retry_refuses_streamed_body_idempotent_method() -> None:
+    """Streaming GET that hits a retryable status gets the PEP-678 note instead of retrying."""
+    sleeper = _SleepRecorder()
+    call_count = {"n": 0}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        call_count["n"] += 1
+        return httpx2.Response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
+
+    async def streamed_body() -> typing.AsyncIterator[bytes]:
+        yield b"x"
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
+    )
+
+    with pytest.raises(ServiceUnavailableError) as info:
+        await client.put("https://example.test/data", content=streamed_body())
+
+    assert call_count["n"] == 1
+    assert sleeper.calls == []  # no retry attempted
+    notes = getattr(info.value, "__notes__", [])
+    assert any("not retrying" in note and "stream" in note for note in notes)
