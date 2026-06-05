@@ -71,6 +71,13 @@ def _raise_on_status_error(response: httpx2.Response) -> None:
         raise exc_class(response)
 
 
+STREAMING_BODY_MARKER = "httpware.streaming_body"
+"""Key set on ``httpx2.Request.extensions`` by ``_request_with_body`` when content/data/files is an async-iterable.
+
+``Retry.__call__`` reads this marker to refuse retrying a streamed-body request
+(the consumed iterator cannot replay across attempts)."""
+
+
 def _is_streaming_body(value: typing.Any) -> bool:
     """Return True if value is an async-iterable that cannot be safely replayed for retry."""
     if value is None:
@@ -210,7 +217,7 @@ class AsyncClient:
             kwargs["files"] = files
         request = self._httpx2_client.build_request(method, url, **kwargs)
         if _is_streaming_body(content) or _is_streaming_body(data) or _is_streaming_body(files):
-            request.extensions["httpware.streaming_body"] = True
+            request.extensions[STREAMING_BODY_MARKER] = True
         return await self.send(request, response_model=response_model)
 
     @typing.overload

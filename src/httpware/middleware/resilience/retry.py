@@ -16,6 +16,7 @@ from http import HTTPStatus
 
 import httpx2
 
+from httpware.client import STREAMING_BODY_MARKER
 from httpware.errors import NetworkError, RetryBudgetExhaustedError, StatusError, TimeoutError  # noqa: A004
 from httpware.middleware import Next
 from httpware.middleware.resilience._backoff import full_jitter_delay
@@ -43,6 +44,7 @@ DEFAULT_IDEMPOTENT_METHODS = frozenset(
 )
 
 _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
+_STREAMING_BODY_REFUSAL_NOTE = "httpware: not retrying — request body is a stream that cannot replay across attempts"
 
 
 def _parse_retry_after(value: str) -> float | None:
@@ -108,19 +110,15 @@ class Retry:
             except StatusError as exc:
                 retryable_status = exc.response.status_code in self.retry_status_codes
                 if not method_eligible or not retryable_status:
-                    if retryable_status and request.extensions.get("httpware.streaming_body"):
-                        exc.add_note(
-                            "httpware: not retrying — request body is a stream that cannot replay across attempts"
-                        )
+                    if retryable_status and request.extensions.get(STREAMING_BODY_MARKER):
+                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = exc.response
             except (NetworkError, TimeoutError) as exc:
                 if not method_eligible:
-                    if request.extensions.get("httpware.streaming_body"):
-                        exc.add_note(
-                            "httpware: not retrying — request body is a stream that cannot replay across attempts"
-                        )
+                    if request.extensions.get(STREAMING_BODY_MARKER):
+                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = None
@@ -128,22 +126,18 @@ class Retry:
                 wrapped = TimeoutError("attempt timed out")
                 wrapped.__cause__ = exc  # set now; the retry path (last_exc = wrapped) has no `from` clause
                 if not method_eligible:
-                    if request.extensions.get("httpware.streaming_body"):
-                        wrapped.add_note(
-                            "httpware: not retrying — request body is a stream that cannot replay across attempts"
-                        )
+                    if request.extensions.get(STREAMING_BODY_MARKER):
+                        wrapped.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise wrapped from exc
                 last_exc = wrapped
                 last_response = None
 
             # ---- retryable failure path
-            if request.extensions.get("httpware.streaming_body"):
+            if request.extensions.get(STREAMING_BODY_MARKER):
                 if last_exc is None:  # pragma: no cover — invariant from except branch
                     msg = "Retry: streaming-body refusal reached with no last_exc"
                     raise AssertionError(msg)
-                last_exc.add_note(
-                    "httpware: not retrying — request body is a stream that cannot replay across attempts"
-                )
+                last_exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                 raise last_exc
 
             if is_last:
