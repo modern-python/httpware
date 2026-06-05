@@ -14,8 +14,10 @@ from httpware.errors import (
     ConflictError,
     ForbiddenError,
     InternalServerError,
+    NetworkError,
     NotFoundError,
     RateLimitedError,
+    RetryBudgetExhaustedError,
     ServerStatusError,
     ServiceUnavailableError,
     StatusError,
@@ -94,6 +96,9 @@ def test_status_error_repr_strips_userinfo() -> None:
 
 
 _NOT_FOUND = 404
+_RETRY_ATTEMPTS_3 = 3
+_RETRY_ATTEMPTS_2 = 2
+_RETRY_ATTEMPTS_5 = 5
 
 
 def test_status_error_pickleable() -> None:
@@ -157,3 +162,49 @@ def test_timeout_error_is_builtin_timeout_error() -> None:
 def test_transport_error_is_client_error() -> None:
     exc = TransportError("connection refused")
     assert isinstance(exc, ClientError)
+
+
+def test_network_error_is_transport_error() -> None:
+    exc = NetworkError("connection refused")
+    assert isinstance(exc, TransportError)
+    assert isinstance(exc, ClientError)
+
+
+def test_retry_budget_exhausted_error_is_client_error() -> None:
+    exc = RetryBudgetExhaustedError(last_response=None, last_exception=None, attempts=_RETRY_ATTEMPTS_3)
+    assert isinstance(exc, ClientError)
+    assert exc.last_response is None
+    assert exc.last_exception is None
+    assert exc.attempts == _RETRY_ATTEMPTS_3
+
+
+def test_retry_budget_exhausted_error_carries_last_response_and_exception() -> None:
+    response = _make_response(503, url="https://example.test/x")
+    inner = RuntimeError("boom")
+    exc = RetryBudgetExhaustedError(last_response=response, last_exception=inner, attempts=_RETRY_ATTEMPTS_2)
+    assert exc.last_response is response
+    assert exc.last_exception is inner
+    assert exc.attempts == _RETRY_ATTEMPTS_2
+
+
+def test_retry_budget_exhausted_error_summary_mentions_attempts() -> None:
+    exc = RetryBudgetExhaustedError(last_response=None, last_exception=None, attempts=_RETRY_ATTEMPTS_5)
+    assert str(exc) == f"retry budget exhausted after {_RETRY_ATTEMPTS_5} attempt(s)"
+
+
+_SERVICE_UNAVAILABLE = 503
+
+
+def test_retry_budget_exhausted_error_pickleable() -> None:
+    response = _make_response(_SERVICE_UNAVAILABLE, url="https://example.test/x")
+    inner = RuntimeError("boom")
+    exc = RetryBudgetExhaustedError(
+        last_response=response,
+        last_exception=inner,
+        attempts=_RETRY_ATTEMPTS_3,
+    )
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(restored, RetryBudgetExhaustedError)
+    assert restored.attempts == _RETRY_ATTEMPTS_3
+    assert restored.last_response is not None
+    assert restored.last_response.status_code == _SERVICE_UNAVAILABLE

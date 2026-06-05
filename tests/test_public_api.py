@@ -30,8 +30,12 @@ def test_expected_exports() -> None:
     expected = {
         "AsyncClient",
         "Middleware",
+        "NetworkError",
         "Next",
         "ResponseDecoder",
+        "Retry",
+        "RetryBudget",
+        "RetryBudgetExhaustedError",
         "ClientError",
         "TransportError",
         "TimeoutError",

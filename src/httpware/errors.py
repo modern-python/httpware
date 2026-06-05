@@ -40,6 +40,14 @@ class TransportError(ClientError):
     """Connection / network / protocol failure raised before a response was received."""
 
 
+class NetworkError(TransportError):
+    """Transient network-layer failure (connect/read/write/close). Safe to retry.
+
+    Pool-acquisition timeouts are NOT under this class; they raise ``TimeoutError``
+    via ``httpx2.PoolTimeout`` (a ``TimeoutException`` subclass).
+    """
+
+
 class TimeoutError(ClientError, builtins.TimeoutError):  # noqa: A001
     """Client-side timeout (connect / read / write / pool).
 
@@ -136,3 +144,42 @@ STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {
     500: InternalServerError,
     503: ServiceUnavailableError,
 }
+
+
+def _reconstruct_budget_exhausted(
+    cls: "type[RetryBudgetExhaustedError]",
+    last_response: httpx2.Response | None,
+    last_exception: BaseException | None,
+    attempts: int,
+) -> "RetryBudgetExhaustedError":
+    return cls(last_response=last_response, last_exception=last_exception, attempts=attempts)
+
+
+class RetryBudgetExhaustedError(ClientError):
+    """Raised when a retry was needed but the RetryBudget refused to permit it.
+
+    Carries the last response and/or exception observed before the budget refused,
+    plus the number of attempts already completed.
+    """
+
+    last_response: httpx2.Response | None
+    last_exception: BaseException | None
+    attempts: int
+
+    def __init__(
+        self,
+        *,
+        last_response: httpx2.Response | None,
+        last_exception: BaseException | None,
+        attempts: int,
+    ) -> None:
+        self.last_response = last_response
+        self.last_exception = last_exception
+        self.attempts = attempts
+        super().__init__(f"retry budget exhausted after {attempts} attempt(s)")
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_budget_exhausted,
+            (type(self), self.last_response, self.last_exception, self.attempts),
+        )

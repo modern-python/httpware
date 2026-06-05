@@ -11,6 +11,7 @@ from httpware.decoders import ResponseDecoder
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
     ClientStatusError,
+    NetworkError,
     ServerStatusError,
     TimeoutError,  # noqa: A004
     TransportError,
@@ -110,6 +111,8 @@ class AsyncClient:
             raise TimeoutError(str(exc)) from exc
         except (httpx2.InvalidURL, httpx2.CookieConflict) as exc:
             raise TransportError(str(exc)) from exc
+        except httpx2.NetworkError as exc:
+            raise NetworkError(str(exc)) from exc
         except httpx2.HTTPError as exc:
             raise TransportError(str(exc)) from exc
         except RuntimeError as exc:

@@ -10,8 +10,10 @@ from httpware.errors import (
     ConflictError,
     ForbiddenError,
     InternalServerError,
+    NetworkError,
     NotFoundError,
     RateLimitedError,
+    RetryBudgetExhaustedError,
     ServerStatusError,
     ServiceUnavailableError,
     StatusError,
@@ -21,6 +23,7 @@ from httpware.errors import (
     UnprocessableEntityError,
 )
 from httpware.middleware import Middleware, Next, after_response, before_request, on_error
+from httpware.middleware.resilience import Retry, RetryBudget
 
 
 __all__ = [
@@ -33,10 +36,14 @@ __all__ = [
     "ForbiddenError",
     "InternalServerError",
     "Middleware",
+    "NetworkError",
     "Next",
     "NotFoundError",
     "RateLimitedError",
     "ResponseDecoder",
+    "Retry",
+    "RetryBudget",
+    "RetryBudgetExhaustedError",
     "ServerStatusError",
     "ServiceUnavailableError",
     "StatusError",

@@ -63,12 +63,14 @@ mkdir -p src/httpware/middleware/resilience
 
 Then create each file with the contents below. Use the Write tool, not bash heredocs.
 
-`src/httpware/middleware/resilience/__init__.py`:
+`src/httpware/middleware/resilience/__init__.py` (docstring-only — re-exports defer to Task 7 so intermediate tasks can `import httpware.middleware.resilience.budget` without tripping an import-time `ImportError` from this `__init__.py`):
 ```python
-"""Resilience primitives: Retry middleware and RetryBudget token bucket."""
+"""Resilience primitives: Retry middleware and RetryBudget token bucket.
 
-from httpware.middleware.resilience.budget import RetryBudget
-from httpware.middleware.resilience.retry import Retry
+Re-exports land in Task 7 once both classes exist; until then this file is
+docstring-only so that importing ``httpware.middleware.resilience.budget``
+during the intermediate tasks does not trip an import-time ``ImportError``.
+"""
 ```
 
 `src/httpware/middleware/resilience/budget.py`:
@@ -137,7 +139,11 @@ Expected: FAIL (`ImportError: cannot import name 'NetworkError'`).
 Edit `src/httpware/errors.py`. Add a new class immediately after the existing `class TransportError`:
 ```python
 class NetworkError(TransportError):
-    """Transient network-layer failure (connect/read/write/pool). Safe to retry."""
+    """Transient network-layer failure (connect/read/write/close). Safe to retry.
+
+Pool-acquisition timeouts are NOT under this class; they raise ``TimeoutError``
+via ``httpx2.PoolTimeout`` (a ``TimeoutException`` subclass).
+"""
 ```
 
 Run: `uv run pytest tests/test_errors.py::test_network_error_is_transport_error -v`
@@ -218,7 +224,7 @@ Becomes:
 
 The `httpx2.NetworkError` branch must come BEFORE `httpx2.HTTPError` (HTTPError is the broader base). `httpx2.NetworkError` is httpx's documented base for `ConnectError`, `ReadError`, `WriteError`, `PoolTimeout` — if `httpx2`'s symbol name differs (e.g., `httpx2.exceptions.NetworkError`), use whichever import path mirrors the existing `httpx2.ConnectError` import in `tests/test_error_mapping_terminal.py` (which works via top-level `httpx2`).
 
-If `httpx2.NetworkError` does not exist, fall back to enumerating the transient subset explicitly: `except (httpx2.ConnectError, httpx2.ReadError, httpx2.WriteError, httpx2.PoolTimeout) as exc:`. The plan author has confirmed `httpx2.ConnectError` and `httpx2.ReadTimeout` already work in the existing tests; the enumeration fallback is safe.
+If `httpx2.NetworkError` does not exist, fall back to enumerating the transient subset explicitly: `except (httpx2.ConnectError, httpx2.ReadError, httpx2.WriteError, httpx2.CloseError) as exc:`. (`PoolTimeout` is NOT in this list — it inherits from `httpx2.TimeoutException` and is already caught by the timeout branch above.) The plan author has confirmed `httpx2.ConnectError` and `httpx2.ReadTimeout` already work in the existing tests; the enumeration fallback is safe.
 
 - [ ] **Step 6: Run the new terminal-mapping test**
 
@@ -265,7 +271,7 @@ git add src/httpware/errors.py src/httpware/client.py tests/test_errors.py tests
 git commit -m "feat(errors): add NetworkError(TransportError) for transient httpx2 failures
 
 Refines _terminal so httpx2.NetworkError-family exceptions (ConnectError, ReadError,
-WriteError, PoolTimeout) map to httpware.NetworkError. InvalidURL and CookieConflict
+WriteError, CloseError) map to httpware.NetworkError. InvalidURL and CookieConflict
 stay bare TransportError. Prerequisite for the Retry middleware so it can retry
 transient failures without retrying typos."
 ```
@@ -1029,15 +1035,30 @@ class Retry:
 Run: `uv run pytest tests/test_retry.py -v`
 Expected: all PASS.
 
-- [ ] **Step 4: Lint**
+- [ ] **Step 4: Wire `Retry` + `RetryBudget` into `resilience/__init__.py`**
 
-Run: `uv run ruff check src/httpware/middleware/resilience/retry.py tests/test_retry.py && uv run ty check src/httpware/middleware/resilience/retry.py`
+Now that both classes exist, replace `src/httpware/middleware/resilience/__init__.py` with:
+```python
+"""Resilience primitives: Retry middleware and RetryBudget token bucket."""
+
+from httpware.middleware.resilience.budget import RetryBudget
+from httpware.middleware.resilience.retry import Retry
+
+
+__all__ = ["Retry", "RetryBudget"]
+```
+
+The `__all__` is required to silence ruff F401 ("imported but unused") and matches the pattern used by `httpware/__init__.py` and `httpware/decoders/__init__.py`.
+
+- [ ] **Step 5: Lint**
+
+Run: `uv run ruff check src/httpware/middleware/resilience/ tests/test_retry.py && uv run ty check src/httpware/middleware/resilience/`
 Expected: clean. If ruff flags `Callable` / `Awaitable` import paths, adjust per existing project pattern (see `middleware/__init__.py` which uses `from collections.abc import Awaitable, Callable`).
 
-- [ ] **Step 5: Stage and commit**
+- [ ] **Step 6: Stage and commit**
 
 ```bash
-git add src/httpware/middleware/resilience/retry.py tests/test_retry.py
+git add src/httpware/middleware/resilience/retry.py src/httpware/middleware/resilience/__init__.py tests/test_retry.py
 git commit -m "feat(resilience): Retry middleware — status-code retry + exhaustion
 
 Covers: happy path, 503-then-200, max_attempts exhaustion with PEP-678 note,

@@ -28,7 +28,7 @@ The current `AsyncClient._terminal` maps every non-timeout `httpx2.HTTPError` (i
 ```python
 # In src/httpware/errors.py:
 class NetworkError(TransportError):
-    """Transient network-layer failure (connect / read / write / pool). Safe to retry."""
+    """Transient network-layer failure (connect / read / write / close). Safe to retry."""
 ```
 
 And refines the terminal mapping so that `httpx2`'s transient-network exception family (`httpx2.NetworkError` per httpx convention, or whichever symbols httpx2 exposes for the same hierarchy) raises `httpware.NetworkError` rather than the broader `TransportError`. `InvalidURL` and `CookieConflict` continue to raise `TransportError` directly so they are NOT retried. Existing tests catching `TransportError` keep working (`NetworkError` is a subclass).
