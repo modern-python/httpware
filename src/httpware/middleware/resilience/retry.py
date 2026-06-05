@@ -103,5 +103,5 @@ class Retry:
             delay = full_jitter_delay(attempt, base_delay=self.base_delay, max_delay=self.max_delay)
             await self._sleep(delay)
 
-        msg = "unreachable"
+        msg = "unreachable"  # pragma: no cover
         raise AssertionError(msg)  # pragma: no cover
