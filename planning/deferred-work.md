@@ -4,6 +4,10 @@ Items raised in reviews that are real but not actionable now.
 
 ## Open
 
+### Retry + streaming bodies (Epic 4 interaction)
+
+- **`Retry` re-invokes `next(request)` with the same `httpx2.Request` on each attempt.** Safe for in-memory bytes/JSON bodies; unsafe for streaming/async-iterable bodies (consumed iterator can't replay). When Epic 4 ships `AsyncClient.stream` (`4-3`), Retry needs to refuse to retry streamed-body requests (or document that callers supply a body factory). Spec: `planning/specs/2026-06-05-retry-and-retry-budget-design.md` §"Open questions".
+
 ### Decoder-side
 
 - **`_get_adapter` `lru_cache` is module-global, not per-decoder instance** — keyed by `model` only; two `PydanticDecoder()` instances with different configurations (none today) would share adapters, and the cache survives across tests unless explicitly cleared. Revisit if/when a configurable `PydanticDecoder(mode=..., strict=...)` lands. (`src/httpware/decoders/pydantic.py:12-14`)

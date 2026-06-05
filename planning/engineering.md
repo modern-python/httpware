@@ -121,7 +121,9 @@ Post-pivot, the roadmap has three categories. Topic slugs in `planning/specs/` a
 
 ### Surviving (land in subsequent PRs)
 
-- **Epic 3 — Resilience:** `3-1` per-attempt timeout, `3-2` retry, `3-3` `RetryBudget`, `3-4` `RetryBudget` middleware integration, `3-5` `Bulkhead`, `3-6` extension-slot docs.
+- **Epic 3 — Resilience:**
+  - **Shipped in v0.4 slice 1:** `Retry` middleware + Finagle-style `RetryBudget` token bucket + `attempt_timeout=` parameter (folded-in 3-1). See [`planning/specs/2026-06-05-retry-and-retry-budget-design.md`](specs/2026-06-05-retry-and-retry-budget-design.md) and [`planning/plans/2026-06-05-retry-and-retry-budget-plan.md`](plans/2026-06-05-retry-and-retry-budget-plan.md).
+  - **Remaining:** `3-5` `Bulkhead`, `3-6` extension-slot docs.
 - **Epic 4 — Streaming:** `4-3` `AsyncClient.stream` context manager (forwards to `httpx2.AsyncClient.stream`; no `StreamResponse` type).
 - **Epic 5 — Observability:** `5-1` Layer 1 middleware hooks, `5-2` wire into resilience middlewares, `5-4` OpenTelemetry middleware (`otel` extra), `5-5` logging policy CI grep.
 - **Epic 6 — Ship v1.0:** `6-2` docs site (`mkdocs`), `6-3` benchmarks, `6-5` release flow (Trusted Publishers + Sigstore).
