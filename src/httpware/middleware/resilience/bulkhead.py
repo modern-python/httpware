@@ -12,15 +12,19 @@ AsyncClient(middleware=[shared]) calls to enforce a joint cap across clients.
 """
 
 import asyncio
+import logging
 
 import httpx2
 
+from httpware._internal.observability import _emit_event
 from httpware.errors import BulkheadFullError
 from httpware.middleware import Next
 
 
 _MAX_CONCURRENT_INVALID = "max_concurrent must be >= 1"
 _ACQUIRE_TIMEOUT_INVALID = "acquire_timeout must be >= 0"
+
+_LOGGER = logging.getLogger("httpware.bulkhead")
 
 
 class Bulkhead:
@@ -64,6 +68,18 @@ class Bulkhead:
                 async with asyncio.timeout(self._acquire_timeout):
                     await self._sem.acquire()
         except TimeoutError as exc:
+            _emit_event(
+                _LOGGER,
+                "bulkhead.rejected",
+                level=logging.WARNING,
+                message="bulkhead rejected request — acquire_timeout exceeded",
+                attributes={
+                    "max_concurrent": self._max_concurrent,
+                    "acquire_timeout": self._acquire_timeout,
+                    "method": request.method,
+                    "url": str(request.url),
+                },
+            )
             raise BulkheadFullError(
                 max_concurrent=self._max_concurrent,
                 acquire_timeout=self._acquire_timeout,
