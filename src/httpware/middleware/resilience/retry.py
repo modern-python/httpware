@@ -98,7 +98,7 @@ class Retry:
                 last_response = None
             except builtins.TimeoutError as exc:
                 wrapped = TimeoutError("attempt timed out")
-                wrapped.__cause__ = exc
+                wrapped.__cause__ = exc  # set now; the retry path (last_exc = wrapped) has no `from` clause
                 if not method_eligible:
                     raise wrapped from exc
                 last_exc = wrapped

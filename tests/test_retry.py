@@ -255,9 +255,9 @@ async def test_attempt_timeout_fires_and_retries() -> None:
         middleware=[Retry(_sleep=sleeper, attempt_timeout=0.05, base_delay=0.01, max_delay=0.02)],
     )
     response = await client.get("https://example.test/x")
-    # coverage: asyncio.timeout fires a CancelledError that the retry loop catches; coverage's
-    # thread tracer loses the coroutine frame at that point. These assertions DO execute
-    # (the test passes), but need the pragma to satisfy the fail-under=100 gate.
+    # coverage[thread] loses the coroutine frame after asyncio.timeout-induced cancellation.
+    # The assertions DO execute — verified by intentionally breaking them (test fails as
+    # expected). Pragmas mask a tooling limitation, not dead code.
     assert response.status_code == HTTPStatus.OK  # pragma: no cover
     assert call_count["n"] == 2  # pragma: no cover  # noqa: PLR2004 — "2" is intentional literal in test assertion
 
