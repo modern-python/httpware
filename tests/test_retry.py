@@ -5,6 +5,8 @@ callable so the suite runs instantly without freezegun.
 """
 
 import asyncio
+import datetime
+import email.utils
 from collections.abc import Callable
 from http import HTTPStatus
 
@@ -297,3 +299,90 @@ async def test_attempt_timeout_does_not_retry_on_non_idempotent_method() -> None
     with pytest.raises(HttpwareTimeoutError):
         await client.post("https://example.test/x", json={"x": 1})
     assert sleeper.calls == []  # not retried
+
+
+class _ResponseSequenceWithHeaders:
+    """Mock handler that returns (status, headers) tuples in sequence."""
+
+    def __init__(self, responses: list[tuple[int, dict[str, str]]]) -> None:
+        self._responses = list(responses)
+        self.calls = 0
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.calls += 1
+        status, headers = self._responses.pop(0)
+        return httpx2.Response(status, request=request, headers=headers)
+
+
+async def test_retry_after_seconds_overrides_backoff() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "2"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=5.0))
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert sleeper.calls == [2.0]
+
+
+async def test_retry_after_http_date_overrides_backoff() -> None:
+    sleeper = _SleepRecorder()
+    future = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=3)
+    http_date = email.utils.format_datetime(future, usegmt=True)
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": http_date}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=10.0))
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert len(sleeper.calls) == 1
+    assert 2.0 <= sleeper.calls[0] <= 4.0  # noqa: PLR2004 — ~3 seconds, with clock-skew tolerance
+
+
+async def test_retry_after_capped_at_max_delay() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9999"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
+    await client.get("https://example.test/x")
+    assert sleeper.calls == [2.5]
+
+
+async def test_malformed_retry_after_falls_back_to_backoff() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "not-a-number"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.05))
+    await client.get("https://example.test/x")
+    assert len(sleeper.calls) == 1
+    assert 0.0 <= sleeper.calls[0] <= 0.05  # noqa: PLR2004 — 0.05 matches max_delay literal above
+
+
+async def test_respect_retry_after_false_ignores_header() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "5"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(
+        handler,
+        retry=Retry(_sleep=sleeper, respect_retry_after=False, base_delay=0.01, max_delay=0.02),
+    )
+    await client.get("https://example.test/x")
+    assert 0.0 <= sleeper.calls[0] <= 0.02  # noqa: PLR2004 — backoff range, not 5

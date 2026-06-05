@@ -9,6 +9,8 @@ StatusError subclass is re-raised unwrapped on exhaustion, with a PEP 678 note a
 
 import asyncio
 import builtins
+import datetime
+import email.utils
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 
@@ -43,6 +45,23 @@ DEFAULT_IDEMPOTENT_METHODS = frozenset(
 _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
 
 
+def _parse_retry_after(value: str) -> float | None:
+    """Parse a Retry-After header value. Returns None on malformed input."""
+    try:
+        return float(int(value))
+    except ValueError:
+        pass
+    try:
+        parsed = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed is None:  # pragma: no cover — parsedate_to_datetime raises rather than returning None in CPython 3.11+
+        return None
+    now = datetime.datetime.now(datetime.UTC)
+    delta = (parsed - now).total_seconds()
+    return max(0.0, delta)
+
+
 class Retry:
     """Retry middleware. See module docstring for default policy."""
 
@@ -71,7 +90,7 @@ class Retry:
         self.budget = budget if budget is not None else RetryBudget()
         self._sleep = _sleep
 
-    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, C901 — complexity budget: 3 error clauses + idempotency gate + budget gate + backoff
+    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, C901, PLR0912 — complexity budget: 3 error clauses + idempotency gate + budget gate + Retry-After branch + backoff
         """Process a request through the retry loop. See module docstring."""
         method_eligible = request.method.upper() in self.retry_methods
         last_exc: BaseException | None = None
@@ -119,7 +138,20 @@ class Retry:
                     attempts=attempt + 1,
                 ) from last_exc
 
-            delay = full_jitter_delay(attempt, base_delay=self.base_delay, max_delay=self.max_delay)
+            retry_after: float | None = None
+            if self.respect_retry_after and last_response is not None:
+                header = last_response.headers.get("Retry-After")
+                if header is not None:
+                    retry_after = _parse_retry_after(header)
+
+            if retry_after is not None:
+                delay = min(retry_after, self.max_delay)
+            else:
+                delay = full_jitter_delay(
+                    attempt,
+                    base_delay=self.base_delay,
+                    max_delay=self.max_delay,
+                )
             await self._sleep(delay)
 
         msg = "unreachable"  # pragma: no cover
