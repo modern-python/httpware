@@ -89,7 +89,9 @@ class Retry:
 
             # ---- retryable failure path
             if is_last:
-                assert last_exc is not None
+                if last_exc is None:  # pragma: no cover — structural invariant from except branch
+                    msg = "Retry: last_exc unset on final attempt — unreachable"
+                    raise AssertionError(msg)
                 last_exc.add_note(f"httpware: gave up after {attempt + 1} attempts")
                 raise last_exc
 

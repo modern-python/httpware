@@ -139,6 +139,9 @@ def test_max_attempts_zero_rejected() -> None:
 
 
 async def test_budget_exhausted_raises_retry_budget_exhausted_error() -> None:
+    # NOTE: lives here for coverage of the Retry loop's budget-exhaustion branch.
+    # Task 11 adds the broader budget-gate + sharing tests (carry-through behavior,
+    # last_response / last_exception field population). Do NOT duplicate this test.
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.SERVICE_UNAVAILABLE])
     # Budget with zero tolerance: percent_can_retry=0.0, min_retries_per_sec=0.0 → ceiling=0
