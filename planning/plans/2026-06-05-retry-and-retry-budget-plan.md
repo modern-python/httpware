@@ -139,7 +139,11 @@ Expected: FAIL (`ImportError: cannot import name 'NetworkError'`).
 Edit `src/httpware/errors.py`. Add a new class immediately after the existing `class TransportError`:
 ```python
 class NetworkError(TransportError):
-    """Transient network-layer failure (connect/read/write/pool). Safe to retry."""
+    """Transient network-layer failure (connect/read/write/close). Safe to retry.
+
+Pool-acquisition timeouts are NOT under this class; they raise ``TimeoutError``
+via ``httpx2.PoolTimeout`` (a ``TimeoutException`` subclass).
+"""
 ```
 
 Run: `uv run pytest tests/test_errors.py::test_network_error_is_transport_error -v`
@@ -220,7 +224,7 @@ Becomes:
 
 The `httpx2.NetworkError` branch must come BEFORE `httpx2.HTTPError` (HTTPError is the broader base). `httpx2.NetworkError` is httpx's documented base for `ConnectError`, `ReadError`, `WriteError`, `PoolTimeout` — if `httpx2`'s symbol name differs (e.g., `httpx2.exceptions.NetworkError`), use whichever import path mirrors the existing `httpx2.ConnectError` import in `tests/test_error_mapping_terminal.py` (which works via top-level `httpx2`).
 
-If `httpx2.NetworkError` does not exist, fall back to enumerating the transient subset explicitly: `except (httpx2.ConnectError, httpx2.ReadError, httpx2.WriteError, httpx2.PoolTimeout) as exc:`. The plan author has confirmed `httpx2.ConnectError` and `httpx2.ReadTimeout` already work in the existing tests; the enumeration fallback is safe.
+If `httpx2.NetworkError` does not exist, fall back to enumerating the transient subset explicitly: `except (httpx2.ConnectError, httpx2.ReadError, httpx2.WriteError, httpx2.CloseError) as exc:`. (`PoolTimeout` is NOT in this list — it inherits from `httpx2.TimeoutException` and is already caught by the timeout branch above.) The plan author has confirmed `httpx2.ConnectError` and `httpx2.ReadTimeout` already work in the existing tests; the enumeration fallback is safe.
 
 - [ ] **Step 6: Run the new terminal-mapping test**
 
@@ -267,7 +271,7 @@ git add src/httpware/errors.py src/httpware/client.py tests/test_errors.py tests
 git commit -m "feat(errors): add NetworkError(TransportError) for transient httpx2 failures
 
 Refines _terminal so httpx2.NetworkError-family exceptions (ConnectError, ReadError,
-WriteError, PoolTimeout) map to httpware.NetworkError. InvalidURL and CookieConflict
+WriteError, CloseError) map to httpware.NetworkError. InvalidURL and CookieConflict
 stay bare TransportError. Prerequisite for the Retry middleware so it can retry
 transient failures without retrying typos."
 ```

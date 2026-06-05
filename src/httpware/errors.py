@@ -41,7 +41,11 @@ class TransportError(ClientError):
 
 
 class NetworkError(TransportError):
-    """Transient network-layer failure (connect/read/write/pool). Safe to retry."""
+    """Transient network-layer failure (connect/read/write/close). Safe to retry.
+
+    Pool-acquisition timeouts are NOT under this class; they raise ``TimeoutError``
+    via ``httpx2.PoolTimeout`` (a ``TimeoutException`` subclass).
+    """
 
 
 class TimeoutError(ClientError, builtins.TimeoutError):  # noqa: A001
