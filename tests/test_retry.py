@@ -190,6 +190,7 @@ async def test_retries_on_httpware_timeout_error() -> None:
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert call_count["n"] == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
+    assert len(sleeper.calls) == 1
 
 
 async def test_does_not_retry_on_bare_transport_error_like_invalid_url() -> None:
