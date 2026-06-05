@@ -1,9 +1,9 @@
-# Spec: Bulkhead middleware (0.5.0, Epic 3 slice 2)
+# Spec: Bulkhead middleware (0.4.0, Epic 3 slice 2)
 
 **Date:** 2026-06-05
 **Topic slug:** `bulkhead`
 **Status:** drafted, awaiting user review
-**Target release:** 0.5.0 (0.4.0 release notes already drafted without this slice).
+**Target release:** 0.4.0 (bundled with slice 1 — Retry + RetryBudget).
 **Epic 3 stories rolled in:** 3-5 (Bulkhead).
 
 ## Purpose

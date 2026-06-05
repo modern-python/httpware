@@ -1,4 +1,4 @@
-# Bulkhead middleware (0.5.0, Epic 3 slice 2) Implementation Plan
+# Bulkhead middleware (0.4.0, Epic 3 slice 2) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3.11+ (`asyncio.timeout` requires 3.11), `httpx2`, `pytest` / `pytest-asyncio` (auto mode), `hypothesis`, `uv`, `just`, `ruff`, `ty`.
 
-**Target branch:** `feat/v0.5-bulkhead`. Create from `main` before Task 1: `git checkout main && git pull && git checkout -b feat/v0.5-bulkhead`.
+**Target branch:** `feat/v0.4-bulkhead`. Create from `main` before Task 1: `git checkout main && git pull && git checkout -b feat/v0.4-bulkhead`.
 
 **Source spec:** [`planning/specs/2026-06-05-bulkhead-design.md`](../specs/2026-06-05-bulkhead-design.md). Read it before starting — the *why* for each decision lives there.
 
@@ -44,7 +44,7 @@ This task creates only the empty module. The class arrives in Task 3 and the `re
 
 Run:
 ```bash
-git checkout main && git pull && git checkout -b feat/v0.5-bulkhead
+git checkout main && git pull && git checkout -b feat/v0.4-bulkhead
 ```
 Expected: switched to a new branch.
 
@@ -881,7 +881,7 @@ Update to:
 ```
 - **Epic 3 — Resilience:**
   - **Shipped in v0.4 slice 1:** `Retry` middleware + Finagle-style `RetryBudget` token bucket + `attempt_timeout=` parameter (folded-in 3-1). See [`planning/specs/2026-06-05-retry-and-retry-budget-design.md`](specs/2026-06-05-retry-and-retry-budget-design.md) and [`planning/plans/2026-06-05-retry-and-retry-budget-plan.md`](plans/2026-06-05-retry-and-retry-budget-plan.md).
-  - **Shipped in v0.5:** `Bulkhead` middleware (concurrency limiter via `asyncio.Semaphore` with bounded acquire wait). See [`planning/specs/2026-06-05-bulkhead-design.md`](specs/2026-06-05-bulkhead-design.md) and [`planning/plans/2026-06-05-bulkhead-plan.md`](plans/2026-06-05-bulkhead-plan.md).
+  - **Shipped in v0.4 slice 2:** `Bulkhead` middleware (concurrency limiter via `asyncio.Semaphore` with bounded acquire wait). See [`planning/specs/2026-06-05-bulkhead-design.md`](specs/2026-06-05-bulkhead-design.md) and [`planning/plans/2026-06-05-bulkhead-plan.md`](plans/2026-06-05-bulkhead-plan.md).
   - **Remaining:** `3-6` extension-slot docs.
 ```
 
@@ -922,7 +922,7 @@ Expected: PASS.
 git add src/httpware/__init__.py tests/test_public_api.py
 git commit -m "feat(api): export Bulkhead and BulkheadFullError
 
-Completes the v0.5 slice: Bulkhead concurrency limiter middleware + its
+Completes the v0.4 slice 2 slice: Bulkhead concurrency limiter middleware + its
 backpressure exception. Pure-stdlib core, no new optional extra."
 ```
 
@@ -930,16 +930,16 @@ backpressure exception. Pure-stdlib core, no new optional extra."
 
 ```bash
 git add planning/engineering.md
-git commit -m "docs(planning): mark 3-5 Bulkhead shipped in v0.5"
+git commit -m "docs(planning): mark 3-5 Bulkhead shipped in v0.4 slice 2"
 ```
 
 - [ ] **Step 11: Push the branch and open the PR**
 
 ```bash
-git push -u origin feat/v0.5-bulkhead
+git push -u origin feat/v0.4-bulkhead
 ```
 
-Then create a PR per the project's normal cadence (`gh pr create`). The PR body should reference both the spec (`planning/specs/2026-06-05-bulkhead-design.md`) and this plan. Do NOT bundle release-notes work into this PR — release notes for 0.5.0 happen in a separate release-prep PR (potentially bundled with 3-6 docs).
+Then create a PR per the project's normal cadence (`gh pr create`). The PR body should reference both the spec (`planning/specs/2026-06-05-bulkhead-design.md`) and this plan. The PR includes an amendment to `planning/releases/0.4.0.md` describing Bulkhead alongside Retry (per the decision to ship Bulkhead in 0.4.0). The amendment commit lives at the start of the branch.
 
 ---
 
@@ -952,4 +952,4 @@ These items are deliberately deferred. Do NOT implement them as part of this sli
 - Queue-depth / in-flight metrics on the `Bulkhead` object.
 - Fallback / shed-load callbacks.
 - Connection-pool integration with `httpx2.Limits`.
-- Release notes / version bump for 0.5.0 — happens in a separate release-prep PR.
+- Version bump for 0.4.0 — happens in a separate release-prep PR. Release notes for 0.4.0 are amended in this branch to describe Bulkhead alongside Retry.
