@@ -9,6 +9,7 @@ import contextlib
 from collections.abc import Callable, Coroutine
 from http import HTTPStatus
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx2
 import pytest
@@ -369,18 +370,15 @@ async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
     bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
     transport = httpx2.MockTransport(handler)
 
-    sleep_calls: list[float] = []
-
-    async def _sleep(
-        delay: float,
-    ) -> None:  # pragma: no cover — assert is `sleep_calls == []`, so this body must never run
-        sleep_calls.append(delay)
+    # AsyncMock so the never-called assertion is structural — no user-defined
+    # body that would need # pragma: no cover.
+    mock_sleep = AsyncMock()
 
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
         middleware=[
             bulkhead,
-            Retry(_sleep=_sleep, max_attempts=3, base_delay=0.001, max_delay=0.002),
+            Retry(_sleep=mock_sleep, max_attempts=3, base_delay=0.001, max_delay=0.002),
         ],
     )
 
@@ -391,7 +389,7 @@ async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
     # Second call hits a full Bulkhead. Retry must NOT swallow + retry it.
     with pytest.raises(BulkheadFullError):
         await client.get("https://example.test/rejected")
-    assert sleep_calls == []  # Retry never slept — it didn't try to retry
+    mock_sleep.assert_not_called()  # Retry never slept — it didn't try to retry
 
     # Cleanup.
     first.cancel()
