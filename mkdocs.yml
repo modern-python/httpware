@@ -7,7 +7,6 @@ edit_uri: edit/main/docs/
 nav:
   - Quick-Start: index.md
   - Development:
-      - Engineering Notes: dev/engineering.md
       - Contributing: dev/contributing.md
 
 theme:

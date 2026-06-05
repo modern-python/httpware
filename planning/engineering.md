@@ -4,7 +4,7 @@ This doc is the single distilled reference for `httpware` design rationale, prot
 
 ## 1. Project intent
 
-`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request` and `httpx2.Response` as the public request/response surface and adds three things on top: typed response decoding (via a `ResponseDecoder` protocol; pydantic and msgspec are both opt-in extras as of 0.3.0), a middleware chain composed at client construction, and a status-keyed exception tree raised automatically on 4xx and 5xx. `AsyncClient(decoder=None)` defaults to constructing a `PydanticDecoder` and so requires the `pydantic` extra; callers can supply an explicit `decoder=` argument to escape the default.
+`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request` and `httpx2.Response` as the public request/response surface and adds three things on top: typed response decoding (via a `ResponseDecoder` protocol; pydantic and msgspec are both opt-in extras as of 0.3.0), a middleware chain composed at client construction, and a status-keyed exception tree raised automatically on 4xx and 5xx. `AsyncClient(decoder=None)` defaults to constructing a `PydanticDecoder` and so requires the `pydantic` extra; callers can supply an explicit `decoder=` argument to escape the default. As of 0.4.0, the package ships a small resilience suite under `httpware.middleware.resilience` — a `Retry` middleware with a Finagle-style `RetryBudget`, plus a `Bulkhead` concurrency limiter — composed via the standard middleware chain.
 
 The 0.1.0 release attempted to own a full abstraction over the underlying HTTP client. v0.2 walks that back: `httpx2` is part of the public surface.
 
@@ -70,10 +70,16 @@ src/httpware/
 ├── __init__.py            # public exports
 ├── py.typed
 ├── client.py              # AsyncClient
-├── errors.py              # status-keyed exception tree (response: httpx2.Response)
+├── errors.py              # status-keyed exception tree + NetworkError + RetryBudgetExhaustedError + BulkheadFullError
 ├── middleware/
 │   ├── __init__.py        # Middleware protocol, Next type, @before_request/@after_response/@on_error
-│   └── chain.py           # compose(middleware, terminal) -> Next
+│   ├── chain.py           # compose(middleware, terminal) -> Next
+│   └── resilience/
+│       ├── __init__.py    # re-exports Bulkhead, Retry, RetryBudget
+│       ├── bulkhead.py    # Bulkhead middleware (concurrency limiter)
+│       ├── budget.py      # RetryBudget (Finagle-style token bucket)
+│       ├── retry.py       # Retry middleware
+│       └── _backoff.py    # full-jitter exponential backoff helper (private)
 ├── decoders/
 │   ├── __init__.py        # ResponseDecoder protocol
 │   ├── pydantic.py        # PydanticDecoder (extra: pydantic)

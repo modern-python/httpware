@@ -31,11 +31,11 @@ just test           # pytest with coverage
 
 These are enforced by CI grep gates. Do not break them in pull requests:
 
-- No `import httpx2` outside `src/httpware/transports/httpx2.py`.
 - No `httpx2._*` (private API) usage anywhere in the library.
 - No `from __future__ import annotations`.
 - No `print()` calls.
 - No `logging.basicConfig()` or bare `logging.getLogger()`.
+- Type suppressions use `# ty: ignore[<rule>]`, never `# type: ignore` or `# mypy: ignore`.
 
 ## Code of Conduct
 
