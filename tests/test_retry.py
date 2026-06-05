@@ -385,4 +385,5 @@ async def test_respect_retry_after_false_ignores_header() -> None:
         retry=Retry(_sleep=sleeper, respect_retry_after=False, base_delay=0.01, max_delay=0.02),
     )
     await client.get("https://example.test/x")
+    assert len(sleeper.calls) == 1
     assert 0.0 <= sleeper.calls[0] <= 0.02  # noqa: PLR2004 — backoff range, not 5

@@ -48,7 +48,7 @@ _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
 def _parse_retry_after(value: str) -> float | None:
     """Parse a Retry-After header value. Returns None on malformed input."""
     try:
-        return float(int(value))
+        return max(0.0, float(int(value)))  # clamp: negative integers are malformed servers
     except ValueError:
         pass
     try:
