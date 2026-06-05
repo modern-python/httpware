@@ -70,7 +70,7 @@ def test_try_withdraw_returns_false_when_exhausted() -> None:
 
 
 def test_deposit_after_exhaustion_does_not_immediately_unblock() -> None:
-    """A single deposit at 20% percent_can_retry contributes 0.2 → floor (int truncation) → 0 new retries."""
+    """A single deposit at 20% percent_can_retry contributes 0.2 → int() truncates to 0 → no new retries."""
     clock = _Clock()
     budget = RetryBudget(ttl=10.0, min_retries_per_sec=1.0, percent_can_retry=0.2, _now=clock.now)
     # exhaust the floor (10)

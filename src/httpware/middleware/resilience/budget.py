@@ -35,6 +35,7 @@ class RetryBudget:
         self._withdrawn: deque[float] = deque()
 
     def _purge(self, now: float) -> None:
+        # Strict `< cutoff` keeps entries at exactly `now - ttl`: window is [now - ttl, now].
         cutoff = now - self._ttl
         while self._deposits and self._deposits[0] < cutoff:
             self._deposits.popleft()
