@@ -8,6 +8,7 @@ StatusError subclass is re-raised unwrapped on exhaustion, with a PEP 678 note a
 """
 
 import asyncio
+import builtins
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 
@@ -70,7 +71,7 @@ class Retry:
         self.budget = budget if budget is not None else RetryBudget()
         self._sleep = _sleep
 
-    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, C901 — complexity budget: 3 error clauses + idempotency gate + budget gate + backoff
         """Process a request through the retry loop. See module docstring."""
         method_eligible = request.method.upper() in self.retry_methods
         last_exc: BaseException | None = None
@@ -80,7 +81,11 @@ class Retry:
             is_last = attempt + 1 >= self.max_attempts
             self.budget.deposit()
             try:
-                return await next(request)
+                if self.attempt_timeout is not None:
+                    async with asyncio.timeout(self.attempt_timeout):
+                        return await next(request)
+                else:
+                    return await next(request)
             except StatusError as exc:
                 if not method_eligible or exc.response.status_code not in self.retry_status_codes:
                     raise
@@ -90,6 +95,13 @@ class Retry:
                 if not method_eligible:
                     raise
                 last_exc = exc
+                last_response = None
+            except builtins.TimeoutError as exc:
+                wrapped = TimeoutError("attempt timed out")
+                wrapped.__cause__ = exc
+                if not method_eligible:
+                    raise wrapped from exc
+                last_exc = wrapped
                 last_response = None
 
             # ---- retryable failure path
