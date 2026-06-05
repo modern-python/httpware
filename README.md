@@ -61,6 +61,8 @@ async def main() -> None:
         user = await client.get("/users/1", response_model=User)
 ```
 
+Need a custom middleware (auth, tracing, request-ID propagation, etc.)? See the [Middleware guide](docs/middleware.md).
+
 ### Streaming responses
 
 For large responses or server-sent events, stream the body chunk-by-chunk. `stream()` is an async context manager:
