@@ -106,6 +106,7 @@ When installed, `_emit_event` calls `trace.get_current_span().add_event(name, at
 
 ## Where to go next
 
+- **[Middleware guide](middleware.md)** — write your own middleware. Covers the Middleware Protocol, the phase decorators, and a worked Request-ID propagation example.
 - **[Engineering Notes](https://github.com/modern-python/httpware/blob/main/planning/engineering.md)** — design invariants, the three protocol seams, exception contract, module layout, testing patterns, optional-extras pattern. Lives in the repo at `planning/engineering.md`.
 - **[Contributing](dev/contributing.md)** — setup, conventions, workflow.
 - **[Release notes](https://github.com/modern-python/httpware/releases)** — per-version changelogs.
