@@ -9,6 +9,7 @@ import pytest
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
+    BulkheadFullError,
     ClientError,
     ClientStatusError,
     ConflictError,
@@ -99,6 +100,8 @@ _NOT_FOUND = 404
 _RETRY_ATTEMPTS_3 = 3
 _RETRY_ATTEMPTS_2 = 2
 _RETRY_ATTEMPTS_5 = 5
+_MAX_CONCURRENT_5 = 5
+_ACQUIRE_TIMEOUT_1_0 = 1.0
 
 
 def test_status_error_pickleable() -> None:
@@ -208,3 +211,28 @@ def test_retry_budget_exhausted_error_pickleable() -> None:
     assert restored.attempts == _RETRY_ATTEMPTS_3
     assert restored.last_response is not None
     assert restored.last_response.status_code == _SERVICE_UNAVAILABLE
+
+
+def test_bulkhead_full_error_is_client_error() -> None:
+    exc = BulkheadFullError(max_concurrent=_MAX_CONCURRENT_5, acquire_timeout=_ACQUIRE_TIMEOUT_1_0)
+    assert isinstance(exc, ClientError)
+    assert exc.max_concurrent == _MAX_CONCURRENT_5
+    assert exc.acquire_timeout == _ACQUIRE_TIMEOUT_1_0
+
+
+def test_bulkhead_full_error_accepts_none_acquire_timeout() -> None:
+    exc = BulkheadFullError(max_concurrent=_MAX_CONCURRENT_5, acquire_timeout=None)
+    assert exc.acquire_timeout is None
+
+
+def test_bulkhead_full_error_summary_mentions_caps() -> None:
+    exc = BulkheadFullError(max_concurrent=_MAX_CONCURRENT_5, acquire_timeout=_ACQUIRE_TIMEOUT_1_0)
+    assert str(exc) == "bulkhead full (max_concurrent=5, acquire_timeout=1.0)"
+
+
+def test_bulkhead_full_error_pickleable() -> None:
+    exc = BulkheadFullError(max_concurrent=_MAX_CONCURRENT_5, acquire_timeout=_ACQUIRE_TIMEOUT_1_0)
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(restored, BulkheadFullError)
+    assert restored.max_concurrent == _MAX_CONCURRENT_5
+    assert restored.acquire_timeout == _ACQUIRE_TIMEOUT_1_0

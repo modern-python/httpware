@@ -5,6 +5,7 @@ from httpware.decoders import ResponseDecoder
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
+    BulkheadFullError,
     ClientError,
     ClientStatusError,
     ConflictError,
@@ -23,13 +24,15 @@ from httpware.errors import (
     UnprocessableEntityError,
 )
 from httpware.middleware import Middleware, Next, after_response, before_request, on_error
-from httpware.middleware.resilience import Retry, RetryBudget
+from httpware.middleware.resilience import Bulkhead, Retry, RetryBudget
 
 
 __all__ = [
     "STATUS_TO_EXCEPTION",
     "AsyncClient",
     "BadRequestError",
+    "Bulkhead",
+    "BulkheadFullError",
     "ClientError",
     "ClientStatusError",
     "ConflictError",
