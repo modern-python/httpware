@@ -1,7 +1,8 @@
-"""Unit test for the full-jitter backoff helper.
+"""Unit tests for the full-jitter backoff helper.
 
-Integration via Retry middleware lands in Task 7's tests; this file exists
-only to keep the 100% coverage gate passing through Tasks 6-7.
+Integration coverage comes from ``tests/test_retry.py`` (Retry middleware drives
+``full_jitter_delay`` per attempt). The pure-function tests here pin the bound
+and the cap independently of the middleware orchestration.
 """
 
 from httpware.middleware.resilience._backoff import full_jitter_delay
