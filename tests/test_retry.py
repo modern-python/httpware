@@ -7,6 +7,7 @@ callable so the suite runs instantly without freezegun.
 import asyncio
 import datetime
 import email.utils
+import logging
 import typing
 from collections.abc import Callable
 from http import HTTPStatus
@@ -650,3 +651,69 @@ async def test_retry_refuses_streamed_body_idempotent_method() -> None:
     assert sleeper.calls == []  # no retry attempted
     notes = getattr(info.value, "__notes__", [])
     assert any("not retrying" in note and "stream" in note for note in notes)
+
+
+async def test_retry_giving_up_emits_observability_event(caplog: pytest.LogCaptureFixture) -> None:
+    """When max_attempts is exhausted, emit one WARNING record on httpware.retry."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE] * 3)
+    client = _client(handler, retry=Retry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002))
+
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
+        await client.get("https://example.test/x")
+
+    retry_records = [r for r in caplog.records if r.name == "httpware.retry"]
+    giving_up_records = [r for r in retry_records if r.message.startswith("retry gave up")]
+    assert len(giving_up_records) == 1
+    record = giving_up_records[0]
+    assert record.levelno == logging.WARNING
+    assert record.attempts == 3  # noqa: PLR2004 — 3 matches max_attempts=3 literal above  # ty: ignore[unresolved-attribute]
+    assert record.method == "GET"  # ty: ignore[unresolved-attribute]
+    assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[unresolved-attribute]
+    assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
+
+
+async def test_retry_budget_refused_emits_observability_event(caplog: pytest.LogCaptureFixture) -> None:
+    """When the budget refuses a retry, emit one WARNING record on httpware.retry."""
+    sleeper = _SleepRecorder()
+    stingy_budget = RetryBudget(percent_can_retry=0.0, min_retries_per_sec=0.0)
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.SERVICE_UNAVAILABLE])
+    client = _client(
+        handler,
+        retry=Retry(_sleep=sleeper, budget=stingy_budget, max_attempts=3, base_delay=0.001),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(RetryBudgetExhaustedError):
+        await client.get("https://example.test/x")
+
+    retry_records = [r for r in caplog.records if r.name == "httpware.retry"]
+    budget_records = [r for r in retry_records if "budget" in r.message]
+    assert len(budget_records) == 1
+    record = budget_records[0]
+    assert record.attempts == 1  # ty: ignore[unresolved-attribute]
+    assert record.method == "GET"  # ty: ignore[unresolved-attribute]
+    assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[unresolved-attribute]
+
+
+async def test_retry_streaming_refused_emits_observability_event(caplog: pytest.LogCaptureFixture) -> None:
+    """When the streaming-body marker prevents a retryable retry, emit one WARNING record on httpware.retry.
+
+    Uses an idempotent method (PUT) so we hit the retryable-failure-path streaming-refusal site,
+    NOT the non-idempotent early-exit sites (which don't emit the event per the spec).
+    """
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.SERVICE_UNAVAILABLE])
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002))
+
+    async def streamed_body() -> typing.AsyncIterator[bytes]:
+        yield b"x"
+
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
+        await client.put("https://example.test/x", content=streamed_body())
+
+    retry_records = [r for r in caplog.records if r.name == "httpware.retry"]
+    streaming_records = [r for r in retry_records if "stream" in r.message]
+    assert len(streaming_records) == 1
+    record = streaming_records[0]
+    assert record.method == "PUT"  # ty: ignore[unresolved-attribute]
+    assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]

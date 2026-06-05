@@ -34,7 +34,8 @@ dependencies = [
 [project.optional-dependencies]
 pydantic = ["pydantic>=2.0,<3.0"]
 msgspec = ["msgspec>=0.18"]
-all = ["httpware[pydantic,msgspec]"]
+otel = ["opentelemetry-api>=1.20"]
+all = ["httpware[pydantic,msgspec,otel]"]
 
 [project.urls]
 repository = "https://github.com/modern-python/httpware"

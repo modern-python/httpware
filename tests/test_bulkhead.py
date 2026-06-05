@@ -6,6 +6,7 @@ asyncio coroutines with sub-100ms timeouts so the suite stays fast.
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import Callable, Coroutine
 from http import HTTPStatus
 from typing import Any
@@ -395,3 +396,38 @@ async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
     first.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await first
+
+
+async def test_bulkhead_rejected_emits_observability_event(caplog: pytest.LogCaptureFixture) -> None:
+    """When the bulkhead rejects a request via acquire_timeout, emit one WARNING on httpware.bulkhead."""
+    bulkhead = Bulkhead(max_concurrent=1, acquire_timeout=0.0)
+
+    async def slow_handler(request: httpx2.Request) -> httpx2.Response:
+        await asyncio.sleep(0.05)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    transport = httpx2.MockTransport(slow_handler)
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[bulkhead],
+    )
+
+    async with client:
+        # First request occupies the only slot. Second should be rejected immediately.
+        first_task = asyncio.create_task(client.get("https://example.test/x"))
+        await asyncio.sleep(0)  # let first_task start and acquire the slot
+
+        with caplog.at_level(logging.WARNING, logger="httpware.bulkhead"), pytest.raises(BulkheadFullError):
+            await client.get("https://example.test/y")
+
+        await first_task
+
+    bulkhead_records = [r for r in caplog.records if r.name == "httpware.bulkhead"]
+    rejected_records = [r for r in bulkhead_records if "rejected" in r.message]
+    assert len(rejected_records) == 1
+    record = rejected_records[0]
+    assert record.levelno == logging.WARNING
+    assert record.max_concurrent == 1  # ty: ignore[unresolved-attribute]
+    assert record.acquire_timeout == 0.0  # ty: ignore[unresolved-attribute]
+    assert record.method == "GET"  # ty: ignore[unresolved-attribute]
+    assert "example.test/y" in record.url  # ty: ignore[unresolved-attribute]

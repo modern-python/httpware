@@ -2,7 +2,7 @@
 
 A Python async HTTP client framework for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `Retry` + `RetryBudget`, `Bulkhead`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 
-> **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0. Streaming and observability are not yet shipped.
+> **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
 ## Install
 
@@ -81,6 +81,28 @@ It does NOT pass through the middleware chain: `Retry`, `Bulkhead`, and any cust
 ## Errors
 
 All 4xx/5xx responses raise typed exceptions automatically: `NotFoundError`, `ServiceUnavailableError`, `RateLimitedError`, etc. — all subclasses of `httpware.StatusError`. Transport-layer transient failures raise `NetworkError`; the resilience middleware raise `RetryBudgetExhaustedError` and `BulkheadFullError`. Everything inherits `httpware.ClientError`.
+
+## Observability
+
+`Retry` and `Bulkhead` emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed).
+
+Logger names (`httpware.retry`, `httpware.bulkhead`) and event names (`retry.giving_up`, `retry.budget_refused`, `retry.streaming_refused`, `bulkhead.rejected`) are the stable public contract.
+
+```python
+import logging
+
+# Enable visibility into retry / bulkhead operational events
+logging.getLogger("httpware.retry").setLevel(logging.WARNING)
+logging.getLogger("httpware.bulkhead").setLevel(logging.WARNING)
+```
+
+For OTel attribute enrichment on the active span — install the extra:
+
+```bash
+pip install httpware[otel]
+```
+
+When installed, `_emit_event` calls `trace.get_current_span().add_event(name, attributes=...)` automatically. We never create our own spans; for HTTP-level tracing install `opentelemetry-instrumentation-httpx` separately.
 
 ## Where to go next
 
