@@ -44,3 +44,24 @@ def test_importing_httpware_does_not_import_pydantic() -> None:
     assert result.returncode == 0, (
         f"pydantic was loaded transitively by `import httpware`; stdout={result.stdout!r} stderr={result.stderr!r}"
     )
+
+
+def test_importing_httpware_does_not_import_opentelemetry() -> None:
+    """Fresh subprocess: opentelemetry must NOT appear in sys.modules after `import httpware`.
+
+    opentelemetry-api IS installed in the test environment (via `--all-extras`), so this
+    test runs in a subprocess with a clean interpreter to verify that nothing
+    in the httpware import chain pulls opentelemetry in.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import httpware; import sys; sys.exit(0 if 'opentelemetry' not in sys.modules else 1)",
+        ],
+        check=False,
+        capture_output=True,
+    )
+    assert result.returncode == 0, (
+        f"opentelemetry was loaded transitively by `import httpware`; stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
