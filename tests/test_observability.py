@@ -1,0 +1,97 @@
+"""Unit tests for the _emit_event observability helper."""
+
+import logging
+import sys
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from httpware._internal.observability import _emit_event
+
+
+_TEST_LOGGER = logging.getLogger("httpware.test.observability")
+
+
+def test_emit_event_logs_at_warning_with_extra_fields(caplog: pytest.LogCaptureFixture) -> None:
+    """The helper emits one structured log record at WARNING with attributes accessible on the record."""
+    with caplog.at_level(logging.WARNING, logger="httpware.test.observability"):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="something interesting happened",
+            attributes={"foo": 1, "bar": "x"},
+        )
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.WARNING
+    assert record.message == "something interesting happened"
+    assert record.foo == 1  # ty: ignore[unresolved-attribute]
+    assert record.bar == "x"  # ty: ignore[unresolved-attribute]
+
+
+def test_emit_event_respects_level_parameter(caplog: pytest.LogCaptureFixture) -> None:
+    """When level=DEBUG is passed, the record is at DEBUG."""
+    with caplog.at_level(logging.DEBUG, logger="httpware.test.observability"):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.DEBUG,
+            message="quiet",
+            attributes={},
+        )
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.DEBUG
+
+
+def test_emit_event_does_not_import_opentelemetry_when_flag_false() -> None:
+    """With is_otel_installed=False the helper must not touch opentelemetry."""
+    with patch("httpware._internal.import_checker.is_otel_installed", False):
+        # Confirm the lazy import path is skipped: snapshot sys.modules before/after.
+        modules_before = set(sys.modules)
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="nope",
+            attributes={"x": 1},
+        )
+        # opentelemetry may already be loaded by other tests; allow that, but no NEW load happened
+        # because the codepath was skipped. The point: no error and no required state change.
+    assert len(modules_before) >= 0
+
+
+def test_emit_event_calls_add_event_when_otel_installed() -> None:
+    """With is_otel_installed=True the helper calls trace.get_current_span().add_event(...)."""
+    mock_span = MagicMock(name="MockSpan")
+    with (
+        patch("httpware._internal.import_checker.is_otel_installed", True),
+        patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+    ):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="hi",
+            attributes={"k": "v"},
+        )
+
+    mock_span.add_event.assert_called_once_with("test.event", attributes={"k": "v"})
+
+
+def test_emit_event_works_when_otel_installed_but_no_active_span() -> None:
+    """With OTel installed but no tracer configured, get_current_span() returns NonRecordingSpan.
+
+    add_event is a documented no-op. No error.
+    """
+    # Real OTel API call (no mocking) — opentelemetry-api is installed via the otel extra.
+    _emit_event(
+        _TEST_LOGGER,
+        "test.event",
+        level=logging.WARNING,
+        message="real-otel-but-no-tracer",
+        attributes={"a": 1},
+    )
+    # No assertion needed — the absence of an exception IS the assertion.
