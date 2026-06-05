@@ -11,11 +11,13 @@ import asyncio
 import builtins
 import datetime
 import email.utils
+import logging
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 
 import httpx2
 
+from httpware._internal.observability import _emit_event
 from httpware.client import STREAMING_BODY_MARKER
 from httpware.errors import NetworkError, RetryBudgetExhaustedError, StatusError, TimeoutError  # noqa: A004
 from httpware.middleware import Next
@@ -45,6 +47,8 @@ DEFAULT_IDEMPOTENT_METHODS = frozenset(
 
 _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
 _STREAMING_BODY_REFUSAL_NOTE = "httpware: not retrying — request body is a stream that cannot replay across attempts"
+
+_LOGGER = logging.getLogger("httpware.retry")
 
 
 def _parse_retry_after(value: str) -> float | None:
@@ -138,6 +142,17 @@ class Retry:
                     msg = "Retry: streaming-body refusal reached with no last_exc"
                     raise AssertionError(msg)
                 last_exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
+                _emit_event(
+                    _LOGGER,
+                    "retry.streaming_refused",
+                    level=logging.WARNING,
+                    message="retry refused — request body is a stream that cannot replay",
+                    attributes={
+                        "method": request.method,
+                        "url": str(request.url),
+                        "last_exception_type": type(last_exc).__qualname__,
+                    },
+                )
                 raise last_exc
 
             if is_last:
@@ -145,9 +160,34 @@ class Retry:
                     msg = "Retry: last_exc unset on final attempt — unreachable"
                     raise AssertionError(msg)
                 last_exc.add_note(f"httpware: gave up after {attempt + 1} attempts")
+                _emit_event(
+                    _LOGGER,
+                    "retry.giving_up",
+                    level=logging.WARNING,
+                    message=f"retry gave up after {attempt + 1} attempts",
+                    attributes={
+                        "attempts": attempt + 1,
+                        "method": request.method,
+                        "url": str(request.url),
+                        "last_status": last_response.status_code if last_response is not None else None,
+                        "last_exception_type": type(last_exc).__qualname__,
+                    },
+                )
                 raise last_exc
 
             if not self.budget.try_withdraw():
+                _emit_event(
+                    _LOGGER,
+                    "retry.budget_refused",
+                    level=logging.WARNING,
+                    message=f"retry budget refused after {attempt + 1} attempts",
+                    attributes={
+                        "attempts": attempt + 1,
+                        "method": request.method,
+                        "url": str(request.url),
+                        "last_status": last_response.status_code if last_response is not None else None,
+                    },
+                )
                 raise RetryBudgetExhaustedError(
                     last_response=last_response,
                     last_exception=last_exc,
