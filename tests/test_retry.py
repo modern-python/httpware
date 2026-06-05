@@ -387,3 +387,57 @@ async def test_respect_retry_after_false_ignores_header() -> None:
     await client.get("https://example.test/x")
     assert len(sleeper.calls) == 1
     assert 0.0 <= sleeper.calls[0] <= 0.02  # noqa: PLR2004 — backoff range, not 5
+
+
+def _zero_budget() -> RetryBudget:
+    """Return a budget that always refuses withdrawal (floor=0, percent=0)."""
+    return RetryBudget(ttl=10.0, min_retries_per_sec=0.0, percent_can_retry=0.0)
+
+
+async def test_budget_exhausted_raises_specific_exception() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
+    client = _client(
+        handler,
+        retry=Retry(_sleep=sleeper, budget=_zero_budget(), base_delay=0.01, max_delay=0.02),
+    )
+    with pytest.raises(RetryBudgetExhaustedError) as info:
+        await client.get("https://example.test/x")
+    assert info.value.attempts == 1  # one attempt made, budget refused before retry
+    assert info.value.last_response is not None
+    assert info.value.last_response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    assert isinstance(info.value.last_exception, ServiceUnavailableError)
+
+
+async def test_budget_exhausted_on_network_error_carries_exception_not_response() -> None:
+    sleeper = _SleepRecorder()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "transient"
+        raise httpx2.ConnectError(msg)
+
+    client = _client(
+        handler,
+        retry=Retry(_sleep=sleeper, budget=_zero_budget(), base_delay=0.01, max_delay=0.02),
+    )
+    with pytest.raises(RetryBudgetExhaustedError) as info:
+        await client.get("https://example.test/x")
+    assert info.value.last_response is None
+    assert isinstance(info.value.last_exception, NetworkError)
+
+
+async def test_default_budget_is_fresh_per_instance() -> None:
+    r1 = Retry()
+    r2 = Retry()
+    assert r1.budget is not r2.budget
+
+
+async def test_explicit_budget_shared_across_retry_instances() -> None:
+    shared = RetryBudget(ttl=10.0, min_retries_per_sec=1.0, percent_can_retry=0.0)
+    r1 = Retry(budget=shared)
+    r2 = Retry(budget=shared)
+    assert r1.budget is r2.budget
+    # 10 retries total before exhaustion (floor=10)
+    for _ in range(10):
+        assert shared.try_withdraw() is True
+    assert shared.try_withdraw() is False
