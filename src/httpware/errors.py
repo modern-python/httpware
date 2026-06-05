@@ -183,3 +183,32 @@ class RetryBudgetExhaustedError(ClientError):
             _reconstruct_budget_exhausted,
             (type(self), self.last_response, self.last_exception, self.attempts),
         )
+
+
+def _reconstruct_bulkhead_full(
+    cls: "type[BulkheadFullError]",
+    max_concurrent: int,
+    acquire_timeout: float | None,
+) -> "BulkheadFullError":
+    return cls(max_concurrent=max_concurrent, acquire_timeout=acquire_timeout)
+
+
+class BulkheadFullError(ClientError):
+    """Raised when ``acquire_timeout`` elapses before a Bulkhead slot becomes available.
+
+    Carries the configured caps for caller logging/alerting.
+    """
+
+    max_concurrent: int
+    acquire_timeout: float | None
+
+    def __init__(self, *, max_concurrent: int, acquire_timeout: float | None) -> None:
+        self.max_concurrent = max_concurrent
+        self.acquire_timeout = acquire_timeout
+        super().__init__(f"bulkhead full (max_concurrent={max_concurrent}, acquire_timeout={acquire_timeout})")
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_bulkhead_full,
+            (type(self), self.max_concurrent, self.acquire_timeout),
+        )
