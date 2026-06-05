@@ -17,6 +17,7 @@ from httpware.errors import (
     NetworkError,
     NotFoundError,
     RateLimitedError,
+    RetryBudgetExhaustedError,
     ServerStatusError,
     ServiceUnavailableError,
     StatusError,
@@ -95,6 +96,9 @@ def test_status_error_repr_strips_userinfo() -> None:
 
 
 _NOT_FOUND = 404
+_RETRY_ATTEMPTS_3 = 3
+_RETRY_ATTEMPTS_2 = 2
+_RETRY_ATTEMPTS_5 = 5
 
 
 def test_status_error_pickleable() -> None:
@@ -164,3 +168,25 @@ def test_network_error_is_transport_error() -> None:
     exc = NetworkError("connection refused")
     assert isinstance(exc, TransportError)
     assert isinstance(exc, ClientError)
+
+
+def test_retry_budget_exhausted_error_is_client_error() -> None:
+    exc = RetryBudgetExhaustedError(last_response=None, last_exception=None, attempts=_RETRY_ATTEMPTS_3)
+    assert isinstance(exc, ClientError)
+    assert exc.last_response is None
+    assert exc.last_exception is None
+    assert exc.attempts == _RETRY_ATTEMPTS_3
+
+
+def test_retry_budget_exhausted_error_carries_last_response_and_exception() -> None:
+    response = _make_response(503, url="https://example.test/x")
+    inner = RuntimeError("boom")
+    exc = RetryBudgetExhaustedError(last_response=response, last_exception=inner, attempts=_RETRY_ATTEMPTS_2)
+    assert exc.last_response is response
+    assert exc.last_exception is inner
+    assert exc.attempts == _RETRY_ATTEMPTS_2
+
+
+def test_retry_budget_exhausted_error_summary_mentions_attempts() -> None:
+    exc = RetryBudgetExhaustedError(last_response=None, last_exception=None, attempts=_RETRY_ATTEMPTS_5)
+    assert str(_RETRY_ATTEMPTS_5) in str(exc)

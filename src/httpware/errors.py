@@ -144,3 +144,27 @@ STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {
     500: InternalServerError,
     503: ServiceUnavailableError,
 }
+
+
+class RetryBudgetExhaustedError(ClientError):
+    """Raised when a retry was needed but the RetryBudget refused to permit it.
+
+    Carries the last response and/or exception observed before the budget refused,
+    plus the number of attempts already completed.
+    """
+
+    last_response: httpx2.Response | None
+    last_exception: BaseException | None
+    attempts: int
+
+    def __init__(
+        self,
+        *,
+        last_response: httpx2.Response | None,
+        last_exception: BaseException | None,
+        attempts: int,
+    ) -> None:
+        self.last_response = last_response
+        self.last_exception = last_exception
+        self.attempts = attempts
+        super().__init__(f"retry budget exhausted after {attempts} attempt(s)")
