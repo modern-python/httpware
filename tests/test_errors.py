@@ -189,4 +189,22 @@ def test_retry_budget_exhausted_error_carries_last_response_and_exception() -> N
 
 def test_retry_budget_exhausted_error_summary_mentions_attempts() -> None:
     exc = RetryBudgetExhaustedError(last_response=None, last_exception=None, attempts=_RETRY_ATTEMPTS_5)
-    assert str(_RETRY_ATTEMPTS_5) in str(exc)
+    assert str(exc) == f"retry budget exhausted after {_RETRY_ATTEMPTS_5} attempt(s)"
+
+
+_SERVICE_UNAVAILABLE = 503
+
+
+def test_retry_budget_exhausted_error_pickleable() -> None:
+    response = _make_response(_SERVICE_UNAVAILABLE, url="https://example.test/x")
+    inner = RuntimeError("boom")
+    exc = RetryBudgetExhaustedError(
+        last_response=response,
+        last_exception=inner,
+        attempts=_RETRY_ATTEMPTS_3,
+    )
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(restored, RetryBudgetExhaustedError)
+    assert restored.attempts == _RETRY_ATTEMPTS_3
+    assert restored.last_response is not None
+    assert restored.last_response.status_code == _SERVICE_UNAVAILABLE

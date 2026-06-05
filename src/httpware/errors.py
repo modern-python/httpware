@@ -146,6 +146,15 @@ STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {
 }
 
 
+def _reconstruct_budget_exhausted(
+    cls: "type[RetryBudgetExhaustedError]",
+    last_response: httpx2.Response | None,
+    last_exception: BaseException | None,
+    attempts: int,
+) -> "RetryBudgetExhaustedError":
+    return cls(last_response=last_response, last_exception=last_exception, attempts=attempts)
+
+
 class RetryBudgetExhaustedError(ClientError):
     """Raised when a retry was needed but the RetryBudget refused to permit it.
 
@@ -168,3 +177,9 @@ class RetryBudgetExhaustedError(ClientError):
         self.last_exception = last_exception
         self.attempts = attempts
         super().__init__(f"retry budget exhausted after {attempts} attempt(s)")
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_budget_exhausted,
+            (type(self), self.last_response, self.last_exception, self.attempts),
+        )
