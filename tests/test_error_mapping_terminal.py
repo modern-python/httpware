@@ -17,6 +17,7 @@ from httpware import (
     TimeoutError,  # noqa: A004
     TransportError,
 )
+from httpware.errors import NetworkError
 
 
 def _client_with_handler(handler) -> AsyncClient:  # noqa: ANN001
@@ -81,13 +82,13 @@ async def test_httpx2_timeout_maps_to_httpware_timeout() -> None:
         await client.send(httpx2.Request("GET", "https://example.test/x"))
 
 
-async def test_httpx2_connect_error_maps_to_transport_error() -> None:
+async def test_httpx2_connect_error_maps_to_network_error() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
         msg = "connect refused"
         raise httpx2.ConnectError(msg)
 
     client = _client_with_handler(handler)
-    with pytest.raises(TransportError, match="connect refused"):
+    with pytest.raises(NetworkError, match="connect refused"):
         await client.send(httpx2.Request("GET", "https://example.test/x"))
 
 
@@ -108,3 +109,29 @@ async def test_send_on_closed_client_raises_transport_error() -> None:
     await underlying.aclose()
     with pytest.raises(TransportError):
         await client.send(httpx2.Request("GET", "https://example.test/x"))
+
+
+async def test_httpx2_decoding_error_maps_to_transport_error() -> None:
+    """Non-transient HTTPError (e.g. DecodingError) maps to bare TransportError, not NetworkError."""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "decoding failed"
+        raise httpx2.DecodingError(msg)
+
+    client = _client_with_handler(handler)
+    with pytest.raises(TransportError) as info:
+        await client.send(httpx2.Request("GET", "https://example.test/x"))
+    assert not isinstance(info.value, NetworkError)
+
+
+async def test_httpx2_invalid_url_does_not_map_to_network_error() -> None:
+    """Regression: only transient errors map to NetworkError; InvalidURL stays bare TransportError."""
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "bad url"
+        raise httpx2.InvalidURL(msg)
+
+    client = _client_with_handler(handler)
+    with pytest.raises(TransportError) as info:
+        await client.send(httpx2.Request("GET", "https://example.test/x"))
+    assert not isinstance(info.value, NetworkError)

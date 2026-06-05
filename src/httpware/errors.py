@@ -40,6 +40,10 @@ class TransportError(ClientError):
     """Connection / network / protocol failure raised before a response was received."""
 
 
+class NetworkError(TransportError):
+    """Transient network-layer failure (connect/read/write/pool). Safe to retry."""
+
+
 class TimeoutError(ClientError, builtins.TimeoutError):  # noqa: A001
     """Client-side timeout (connect / read / write / pool).
 

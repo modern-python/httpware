@@ -14,6 +14,7 @@ from httpware.errors import (
     ConflictError,
     ForbiddenError,
     InternalServerError,
+    NetworkError,
     NotFoundError,
     RateLimitedError,
     ServerStatusError,
@@ -156,4 +157,10 @@ def test_timeout_error_is_builtin_timeout_error() -> None:
 
 def test_transport_error_is_client_error() -> None:
     exc = TransportError("connection refused")
+    assert isinstance(exc, ClientError)
+
+
+def test_network_error_is_transport_error() -> None:
+    exc = NetworkError("connection refused")
+    assert isinstance(exc, TransportError)
     assert isinstance(exc, ClientError)
