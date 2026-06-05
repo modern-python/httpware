@@ -1,7 +1,8 @@
 """AsyncClient — the thin httpx2 wrapper."""
 
+import contextlib
 import typing
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from http import HTTPStatus
 
 import httpx2
@@ -42,6 +43,32 @@ def _default_pydantic_decoder() -> ResponseDecoder:
     from httpware.decoders.pydantic import PydanticDecoder  # noqa: PLC0415 — lazy by design
 
     return PydanticDecoder()
+
+
+@contextlib.asynccontextmanager
+async def _httpx2_exception_mapper() -> AsyncIterator[None]:
+    """Map httpx2 exceptions to httpware exceptions. Shared by AsyncClient._terminal and stream()."""
+    try:
+        yield
+    except httpx2.TimeoutException as exc:
+        raise TimeoutError(str(exc)) from exc
+    except (httpx2.InvalidURL, httpx2.CookieConflict) as exc:
+        raise TransportError(str(exc)) from exc
+    except httpx2.NetworkError as exc:
+        raise NetworkError(str(exc)) from exc
+    except httpx2.HTTPError as exc:
+        raise TransportError(str(exc)) from exc
+
+
+def _raise_on_status_error(response: httpx2.Response) -> None:
+    """Raise the appropriate StatusError subclass for a 4xx/5xx response. No-op for 2xx/3xx."""
+    status = response.status_code
+    if HTTPStatus.BAD_REQUEST <= status < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
+        exc_class = STATUS_TO_EXCEPTION.get(
+            status,
+            ClientStatusError if status < HTTPStatus.INTERNAL_SERVER_ERROR else ServerStatusError,
+        )
+        raise exc_class(response)
 
 
 class AsyncClient:
@@ -106,26 +133,13 @@ class AsyncClient:
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         try:
-            response = await self._httpx2_client.send(request)
-        except httpx2.TimeoutException as exc:
-            raise TimeoutError(str(exc)) from exc
-        except (httpx2.InvalidURL, httpx2.CookieConflict) as exc:
-            raise TransportError(str(exc)) from exc
-        except httpx2.NetworkError as exc:
-            raise NetworkError(str(exc)) from exc
-        except httpx2.HTTPError as exc:
-            raise TransportError(str(exc)) from exc
+            async with _httpx2_exception_mapper():
+                response = await self._httpx2_client.send(request)
         except RuntimeError as exc:
             if "closed" in str(exc):
                 raise TransportError(str(exc)) from exc
             raise
-        status = response.status_code
-        if HTTPStatus.BAD_REQUEST <= status < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-            exc_class = STATUS_TO_EXCEPTION.get(
-                status,
-                ClientStatusError if status < HTTPStatus.INTERNAL_SERVER_ERROR else ServerStatusError,
-            )
-            raise exc_class(response)
+        _raise_on_status_error(response)
         return response
 
     @typing.overload
