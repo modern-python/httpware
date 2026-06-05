@@ -128,6 +128,30 @@ The example pairs naturally with the 0.6.0 observability events: a `httpware.ret
 - **Per-call behavior that doesn't apply to other calls:** Pass through `request.extensions=` (or the `extensions=` kwarg at the call site) instead. Middleware exists for *cross-cutting* concerns.
 - **HTTP-level span creation for tracing:** Install `opentelemetry-instrumentation-httpx` instead of writing an OTel middleware in httpware. We retired story `5-4` (standalone OTel middleware) for this reason — `opentelemetry-instrumentation-httpx` already covers transport-level tracing, and a separate httpware layer would duplicate it. See `planning/engineering.md` §8.
 
+## Wiring OpenTelemetry
+
+`httpware[otel]` only ships `opentelemetry-api`. To make the observability events emitted by `Retry` and `Bulkhead` visible, you also need:
+
+- An **SDK** (`opentelemetry-sdk`) to actually collect spans
+- An **HTTP instrumentor** (`opentelemetry-instrumentation-httpx`) so each HTTP call creates a span — `httpware`'s events attach to that span via `trace.get_current_span().add_event(...)`
+
+Minimal setup (console exporter for development):
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+trace.set_tracer_provider(TracerProvider())
+trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+HTTPXClientInstrumentor().instrument()
+```
+
+After this runs, every `httpware` HTTP call gets an `HTTP <method>` span from the instrumentor, and Retry/Bulkhead observability events appear as span events on it (no extra configuration needed in `httpware` itself — the events fire whenever an active span is present).
+
+For production, swap `ConsoleSpanExporter` for your OTLP/Jaeger/Zipkin exporter. See the [OpenTelemetry Python docs](https://opentelemetry.io/docs/languages/python/) for the full SDK setup.
+
 ## See also
 
 - **`planning/engineering.md` §3 (Seam A)** — the formal protocol contract and why the chain is frozen at construction.
