@@ -13,7 +13,7 @@ from http import HTTPStatus
 
 import httpx2
 
-from httpware.errors import RetryBudgetExhaustedError, StatusError
+from httpware.errors import NetworkError, RetryBudgetExhaustedError, StatusError, TimeoutError  # noqa: A004
 from httpware.middleware import Next
 from httpware.middleware.resilience._backoff import full_jitter_delay
 from httpware.middleware.resilience.budget import RetryBudget
@@ -86,6 +86,11 @@ class Retry:
                     raise
                 last_exc = exc
                 last_response = exc.response
+            except (NetworkError, TimeoutError) as exc:
+                if not method_eligible:
+                    raise
+                last_exc = exc
+                last_response = None
 
             # ---- retryable failure path
             if is_last:

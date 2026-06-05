@@ -10,8 +10,8 @@ from http import HTTPStatus
 import httpx2
 import pytest
 
-from httpware import AsyncClient, NotFoundError, ServiceUnavailableError
-from httpware.errors import RetryBudgetExhaustedError
+from httpware import AsyncClient, NotFoundError, ServiceUnavailableError, TransportError
+from httpware.errors import NetworkError, RetryBudgetExhaustedError
 from httpware.middleware.resilience.budget import RetryBudget
 from httpware.middleware.resilience.retry import (
     DEFAULT_IDEMPOTENT_METHODS,
@@ -154,4 +154,83 @@ async def test_budget_exhausted_raises_retry_budget_exhausted_error() -> None:
         await client.get("https://example.test/x")
     assert handler.calls == 1
     assert info.value.attempts == 1
+    assert sleeper.calls == []
+
+
+async def test_retries_on_network_error() -> None:
+    sleeper = _SleepRecorder()
+    call_count = {"n": 0}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        call_count["n"] += 1
+        if call_count["n"] < 2:  # noqa: PLR2004 — "2" is intentional literal in test assertion
+            msg = "transient"
+            raise httpx2.ConnectError(msg)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert call_count["n"] == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
+    assert len(sleeper.calls) == 1
+
+
+async def test_retries_on_httpware_timeout_error() -> None:
+    sleeper = _SleepRecorder()
+    call_count = {"n": 0}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        call_count["n"] += 1
+        if call_count["n"] < 2:  # noqa: PLR2004 — "2" is intentional literal in test assertion
+            msg = "read timeout"
+            raise httpx2.ReadTimeout(msg)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert call_count["n"] == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
+
+
+async def test_does_not_retry_on_bare_transport_error_like_invalid_url() -> None:
+    sleeper = _SleepRecorder()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "bad url"
+        raise httpx2.InvalidURL(msg)
+
+    client = _client(handler, retry=Retry(_sleep=sleeper))
+    with pytest.raises(TransportError) as info:
+        await client.get("https://example.test/x")
+    assert not isinstance(info.value, NetworkError)
+    assert sleeper.calls == []
+
+
+async def test_network_error_exhaustion_reraises_with_note() -> None:
+    sleeper = _SleepRecorder()
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "never works"
+        raise httpx2.ConnectError(msg)
+
+    client = _client(handler, retry=Retry(_sleep=sleeper, max_attempts=2, base_delay=0.01, max_delay=0.02))
+    with pytest.raises(NetworkError) as info:
+        await client.get("https://example.test/x")
+    notes = getattr(info.value, "__notes__", [])
+    assert any("gave up after 2 attempts" in note for note in notes)
+
+
+async def test_does_not_retry_network_error_on_non_idempotent_method() -> None:
+    sleeper = _SleepRecorder()
+    call_count = {"n": 0}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        call_count["n"] += 1
+        msg = "transient"
+        raise httpx2.ConnectError(msg)
+
+    client = _client(handler, retry=Retry(_sleep=sleeper))
+    with pytest.raises(NetworkError):
+        await client.post("https://example.test/x", json={"x": 1})
+    assert call_count["n"] == 1
     assert sleeper.calls == []
