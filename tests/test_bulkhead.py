@@ -258,3 +258,51 @@ async def test_cancellation_before_acquire_does_not_hold_slot() -> None:
     response = await first
     assert response.status_code == HTTPStatus.OK
     assert handler.calls == 1  # second never reached the handler
+
+
+# Constructed at module scope on purpose — pins the construct-outside-loop behavior.
+_MODULE_SCOPE_BULKHEAD = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
+
+
+async def test_construct_outside_event_loop_then_use_inside() -> None:
+    """Bulkhead constructed at module scope must work when used inside an event loop."""
+    handler = _SlowHandler(delay=0.0)
+    client = _client(handler, bulkhead=_MODULE_SCOPE_BULKHEAD)
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_shared_bulkhead_enforces_joint_cap() -> None:
+    """One Bulkhead shared across two AsyncClients enforces the joint cap."""
+    # Both clients use ONE handler that tracks combined in-flight across all calls.
+    # asyncio is single-threaded so a plain dict counter is safe between awaits.
+    state = {"in_flight": 0, "max_in_flight": 0}
+
+    async def shared_handler(request: httpx2.Request) -> httpx2.Response:
+        state["in_flight"] += 1
+        state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+        try:
+            await asyncio.sleep(0.02)
+            return httpx2.Response(HTTPStatus.OK, request=request)
+        finally:
+            state["in_flight"] -= 1
+
+    shared = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
+    client_a = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(shared_handler)),
+        middleware=[shared],
+    )
+    client_b = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(shared_handler)),
+        middleware=[shared],
+    )
+
+    await asyncio.gather(
+        client_a.get("https://upstream-a.example.test/x"),
+        client_a.get("https://upstream-a.example.test/y"),
+        client_b.get("https://upstream-b.example.test/x"),
+        client_b.get("https://upstream-b.example.test/y"),
+    )
+
+    # The shared bulkhead enforces max=1 across BOTH clients combined.
+    assert state["max_in_flight"] <= _MAX_CONCURRENT_1
