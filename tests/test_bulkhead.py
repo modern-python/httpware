@@ -197,3 +197,64 @@ async def test_acquire_timeout_none_waits_forever() -> None:
     responses = await asyncio.wait_for(asyncio.gather(first, second), timeout=1.0)
     assert all(r.status_code == HTTPStatus.OK for r in responses)
     assert handler.calls == 2  # noqa: PLR2004 — both eventually succeeded
+
+
+async def test_slot_released_after_exception_in_next() -> None:
+    """If next() raises, the slot is released — subsequent calls succeed immediately."""
+    call_count = {"n": 0}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            msg = "boom"
+            raise RuntimeError(msg)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    client = _client(handler, bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0))
+
+    # First call raises; slot must release.
+    with pytest.raises(RuntimeError, match="boom"):
+        await client.get("https://example.test/a")
+
+    # Second call must succeed immediately — fail-fast=0 proves the slot is free.
+    response = await client.get("https://example.test/b")
+    assert response.status_code == HTTPStatus.OK
+    assert call_count["n"] == 2  # noqa: PLR2004 — second call reached handler
+
+
+async def test_slot_released_on_cancellation() -> None:
+    """If the calling task is cancelled while next() runs, the slot is released."""
+    handler = _SlowHandler(delay=0.5)  # would block indefinitely
+    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
+    client = _client(handler, bulkhead=bulkhead)
+
+    first = asyncio.create_task(client.get("https://example.test/a"))
+    await asyncio.sleep(0.01)  # let first acquire and start sleeping in handler
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    # Slot must now be released — fail-fast=0 next call proves it.
+    handler.delay = 0.0  # speed up the next request
+    response = await client.get("https://example.test/b")
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_cancellation_before_acquire_does_not_hold_slot() -> None:
+    """Cancellation while waiting for a slot must not leak the slot to the cancelled task."""
+    handler = _SlowHandler(delay=0.05)
+    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
+    client = _client(handler, bulkhead=bulkhead)
+
+    first = asyncio.create_task(client.get("https://example.test/a"))
+    await asyncio.sleep(0.005)  # first acquires
+    second = asyncio.create_task(client.get("https://example.test/b"))  # waits for slot
+    await asyncio.sleep(0.005)  # ensure second is parked on acquire
+    second.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await second
+
+    # First should still complete normally.
+    response = await first
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 1  # second never reached the handler
