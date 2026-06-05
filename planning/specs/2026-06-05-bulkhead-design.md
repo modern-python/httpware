@@ -109,7 +109,7 @@ async def __call__(self, request, next):
         else:
             async with asyncio.timeout(self._acquire_timeout):
                 await self._sem.acquire()
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:  # builtins.TimeoutError, which `asyncio.timeout` raises in 3.11+
         raise BulkheadFullError(
             max_concurrent=self._max_concurrent,
             acquire_timeout=self._acquire_timeout,
