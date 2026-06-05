@@ -21,6 +21,8 @@ from httpware.middleware.resilience.bulkhead import Bulkhead
 _MAX_CONCURRENT_1 = 1
 _MAX_CONCURRENT_2 = 2
 _ACQUIRE_TIMEOUT_FAST = 0.01
+_ACQUIRE_TIMEOUT_SHORT = 0.02
+_ACQUIRE_TIMEOUT_LONG = 0.1
 
 
 class _SlowHandler:
@@ -141,3 +143,57 @@ async def test_raises_bulkhead_full_error_when_acquire_timeout_exceeded() -> Non
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
+
+
+async def test_bounded_wait_raises_bulkhead_full_error() -> None:
+    """With max_concurrent=1 and acquire_timeout=0.02, the second call raises after ~20ms.
+
+    Complements test_raises_bulkhead_full_error_when_acquire_timeout_exceeded
+    (from Task 3, coverage smoke); this test additionally asserts the
+    BulkheadFullError fields (max_concurrent / acquire_timeout) carry the
+    configured values.
+    """
+    handler = _SlowHandler(delay=_ACQUIRE_TIMEOUT_LONG)  # holds slot for 100ms
+    client = _client(
+        handler,
+        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_SHORT),
+    )
+
+    first = asyncio.create_task(client.get("https://example.test/a"))
+    await asyncio.sleep(0.005)  # let first acquire the slot
+    with pytest.raises(BulkheadFullError) as info:
+        await client.get("https://example.test/b")
+    assert info.value.max_concurrent == _MAX_CONCURRENT_1
+    assert info.value.acquire_timeout == _ACQUIRE_TIMEOUT_SHORT
+    await first  # cleanup
+
+
+async def test_acquire_timeout_zero_fails_fast() -> None:
+    """With acquire_timeout=0, the second call raises immediately without waiting."""
+    handler = _SlowHandler(delay=_ACQUIRE_TIMEOUT_LONG)
+    client = _client(
+        handler,
+        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0),
+    )
+
+    first = asyncio.create_task(client.get("https://example.test/a"))
+    await asyncio.sleep(0.005)
+    with pytest.raises(BulkheadFullError) as info:
+        await client.get("https://example.test/b")
+    assert info.value.acquire_timeout == 0
+    await first
+
+
+async def test_acquire_timeout_none_waits_forever() -> None:
+    """With acquire_timeout=None, the second call waits until the first releases."""
+    handler = _SlowHandler(delay=_ACQUIRE_TIMEOUT_SHORT)
+    client = _client(
+        handler,
+        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
+    )
+
+    first = asyncio.create_task(client.get("https://example.test/a"))
+    second = asyncio.create_task(client.get("https://example.test/b"))
+    responses = await asyncio.wait_for(asyncio.gather(first, second), timeout=1.0)
+    assert all(r.status_code == HTTPStatus.OK for r in responses)
+    assert handler.calls == 2  # noqa: PLR2004 — both eventually succeeded
