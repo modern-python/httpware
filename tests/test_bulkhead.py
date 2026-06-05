@@ -16,6 +16,7 @@ import pytest
 from httpware import AsyncClient
 from httpware.errors import BulkheadFullError
 from httpware.middleware.resilience.bulkhead import Bulkhead
+from httpware.middleware.resilience.retry import Retry
 
 
 _MAX_CONCURRENT_1 = 1
@@ -241,7 +242,13 @@ async def test_slot_released_on_cancellation() -> None:
 
 
 async def test_cancellation_before_acquire_does_not_hold_slot() -> None:
-    """Cancellation while waiting for a slot must not leak the slot to the cancelled task."""
+    """Cancellation while waiting for a slot must not leak the slot to the cancelled task.
+
+    Stronger check than just "first completes": after the cancelled task is buried,
+    a fresh request issued WHILE first still holds the slot must wait for first to
+    release (it must NOT take the slot the cancelled task was waiting for). And once
+    first releases, the fresh request must complete normally.
+    """
     handler = _SlowHandler(delay=0.05)
     bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
     client = _client(handler, bulkhead=bulkhead)
@@ -254,10 +261,13 @@ async def test_cancellation_before_acquire_does_not_hold_slot() -> None:
     with pytest.raises(asyncio.CancelledError):
         await second
 
-    # First should still complete normally.
-    response = await first
-    assert response.status_code == HTTPStatus.OK
-    assert handler.calls == 1  # second never reached the handler
+    # Third request issued while first still holds the slot — must not see a phantom
+    # free slot left by the cancelled second.
+    third = asyncio.create_task(client.get("https://example.test/c"))
+    first_response, third_response = await asyncio.gather(first, third)
+    assert first_response.status_code == HTTPStatus.OK
+    assert third_response.status_code == HTTPStatus.OK
+    assert handler.calls == 2  # noqa: PLR2004 — first and third reached handler; second never did
 
 
 # Constructed at module scope on purpose — pins the construct-outside-loop behavior.
@@ -306,3 +316,84 @@ async def test_shared_bulkhead_enforces_joint_cap() -> None:
 
     # The shared bulkhead enforces max=1 across BOTH clients combined.
     assert state["max_in_flight"] <= _MAX_CONCURRENT_1
+
+
+# ----------------------------------------------------------------------------
+# Bulkhead + Retry composition tests
+#
+# The recommended ordering is [Bulkhead, Retry] in middleware= — Bulkhead OUTSIDE
+# Retry so a retrying request holds one slot across all attempts (rather than
+# re-acquiring per retry). These tests pin the documented composition.
+# ----------------------------------------------------------------------------
+
+
+async def test_bulkhead_outside_retry_holds_one_slot_across_attempts() -> None:
+    """[Bulkhead, Retry]: one slot covers the whole retry sequence, not per-attempt."""
+    state = {"in_flight": 0, "max_in_flight": 0}
+    call_count = {"n": 0}
+
+    async def handler(request: httpx2.Request) -> httpx2.Response:
+        call_count["n"] += 1
+        state["in_flight"] += 1
+        state["max_in_flight"] = max(state["max_in_flight"], state["in_flight"])
+        try:
+            # First call returns 503 (retryable); second call returns OK.
+            if call_count["n"] == 1:
+                return httpx2.Response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
+            return httpx2.Response(HTTPStatus.OK, request=request)
+        finally:
+            state["in_flight"] -= 1
+
+    transport = httpx2.MockTransport(handler)
+
+    async def _sleep(_: float) -> None:  # don't actually wait between retries
+        return
+
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[
+            Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
+            Retry(_sleep=_sleep, base_delay=0.001, max_delay=0.002),
+        ],
+    )
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert call_count["n"] == 2  # noqa: PLR2004 — first 503 + retry success
+    # max_in_flight stays at 1: the same Bulkhead slot covers both attempts.
+    assert state["max_in_flight"] == 1
+
+
+async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
+    """Retry does NOT retry BulkheadFullError — it's neither a StatusError nor a NetworkError/TimeoutError."""
+    handler = _SlowHandler(delay=0.5)  # holds the slot indefinitely
+    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
+    transport = httpx2.MockTransport(handler)
+
+    sleep_calls: list[float] = []
+
+    async def _sleep(
+        delay: float,
+    ) -> None:  # pragma: no cover — assert is `sleep_calls == []`, so this body must never run
+        sleep_calls.append(delay)
+
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[
+            bulkhead,
+            Retry(_sleep=_sleep, max_attempts=3, base_delay=0.001, max_delay=0.002),
+        ],
+    )
+
+    # Fill the slot with a long-lived task.
+    first = asyncio.create_task(client.get("https://example.test/holder"))
+    await asyncio.sleep(0.01)
+
+    # Second call hits a full Bulkhead. Retry must NOT swallow + retry it.
+    with pytest.raises(BulkheadFullError):
+        await client.get("https://example.test/rejected")
+    assert sleep_calls == []  # Retry never slept — it didn't try to retry
+
+    # Cleanup.
+    first.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await first

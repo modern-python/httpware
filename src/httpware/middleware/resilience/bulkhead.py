@@ -24,7 +24,22 @@ _ACQUIRE_TIMEOUT_INVALID = "acquire_timeout must be >= 0"
 
 
 class Bulkhead:
-    """Concurrency limiter middleware. See module docstring for behavior."""
+    """Concurrency limiter middleware backed by ``asyncio.Semaphore``.
+
+    Parameters
+    ----------
+    max_concurrent
+        Required. Maximum number of in-flight requests this Bulkhead permits.
+        Must be ``>= 1``. There is no default because no value is universally
+        correct — the right cap depends on downstream capacity and SLA.
+    acquire_timeout
+        Seconds to wait for a slot before raising ``BulkheadFullError``.
+        Defaults to ``1.0``. ``None`` waits forever; ``0`` fails fast. Must be
+        ``>= 0`` (or ``None``).
+
+    See the module docstring for the algorithm and middleware-ordering guidance.
+
+    """
 
     def __init__(
         self,
