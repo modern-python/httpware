@@ -17,10 +17,10 @@
 pip install httpware                # core only — no decoder
 pip install httpware[pydantic]      # + PydanticDecoder (the default-decoder path)
 pip install httpware[msgspec]       # + MsgspecDecoder
-pip install httpware[all]           # everything declared above (pydantic, msgspec, otel)
+pip install httpware[all]           # everything declared above (pydantic, msgspec)
 ```
 
-`AsyncClient()` with no `decoder=` argument defaults to constructing a `PydanticDecoder`; that path requires the `pydantic` extra and raises `ImportError` at `AsyncClient.__init__` if it is missing. The `otel` extra is declared but the OpenTelemetry middleware (Epic 5) has not shipped yet.
+`AsyncClient()` with no `decoder=` argument defaults to constructing a `PydanticDecoder`; that path requires the `pydantic` extra and raises `ImportError` at `AsyncClient.__init__` if it is missing.
 
 ## Quickstart
 

@@ -41,7 +41,7 @@ The 0.1.0 seams numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) h
 ### Seam C: `httpware ↔ optional extras`
 
 - **Where:** `pyproject.toml` extras (`[project.optional-dependencies]`) ↔ the adapter modules that import them.
-- **Contract:** each optional dependency is imported only inside its own dedicated module (e.g., `pydantic` in `decoders/pydantic.py`; `msgspec` in `decoders/msgspec.py`; `opentelemetry` in `middleware/observability/otel.py` when Epic 5 lands).
+- **Contract:** each optional dependency is imported only inside its own dedicated module (e.g., `pydantic` in `decoders/pydantic.py`; `msgspec` in `decoders/msgspec.py`). Future extras (e.g., OpenTelemetry under Epic 5) follow the same pattern, with the extra declared in `pyproject.toml` at the same time the code that uses it lands — not earlier.
 - **Rule:** never import an extra at package top-level. The package must import cleanly when the extra is not installed.
 - **Verification:** `tests/test_optional_extras_isolation.py` runs a fresh-subprocess `import httpware` and asserts that neither pydantic nor msgspec ends up in `sys.modules`. New extras must add the same isolation test.
 
@@ -94,16 +94,17 @@ src/httpware/
 
 ## 7. Optional-extras pattern
 
-`httpware` core has a small dependency set. Capabilities that pull in heavyweight dependencies (`pydantic`, `msgspec`, `opentelemetry`) live behind extras declared in `pyproject.toml`:
+`httpware` core has a small dependency set. Capabilities that pull in heavyweight dependencies (`pydantic`, `msgspec`) live behind extras declared in `pyproject.toml`:
 
 ```toml
 [project.optional-dependencies]
 pydantic = ["pydantic>=2"]
 msgspec = ["msgspec>=0.18"]
-otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 ```
 
-Each extra's code lives in a single dedicated module (`decoders/pydantic.py`, `decoders/msgspec.py`, `middleware/observability/otel.py` when Epic 5 lands). The `import` of the extra happens **inside** that module behind an `is_<extra>_installed` guard from `_internal/import_checker.py` — never at package top level. This way, `import httpware` works cleanly without the extras installed, and the seam stays observable: `grep -rnE 'from pydantic|import pydantic' src/httpware/ | grep -v import_checker` returns exactly one indented line (the guarded import in `decoders/pydantic.py`), and the same is true for `msgspec`.
+Each extra's code lives in a single dedicated module (`decoders/pydantic.py`, `decoders/msgspec.py`). The `import` of the extra happens **inside** that module behind an `is_<extra>_installed` guard from `_internal/import_checker.py` — never at package top level. This way, `import httpware` works cleanly without the extras installed, and the seam stays observable: `grep -rnE 'from pydantic|import pydantic' src/httpware/ | grep -v import_checker` returns exactly one indented line (the guarded import in `decoders/pydantic.py`), and the same is true for `msgspec`.
+
+New extras are added at the same time as the code that uses them — never preemptively. (An `otel` extra existed pre-0.4 but was removed once we noticed it was advertising functionality that didn't exist. Epic 5 will reintroduce it when the OpenTelemetry middleware actually lands.)
 
 Caller-facing pattern: consumers select the implementation by passing it explicitly, e.g., `AsyncClient(decoder=PydanticDecoder())`. There is no auto-detection or implicit registry.
 
@@ -125,7 +126,7 @@ Post-pivot, the roadmap has three categories. Topic slugs in `planning/specs/` a
   - **Shipped in v0.4 slice 1:** `Retry` middleware + Finagle-style `RetryBudget` token bucket + `attempt_timeout=` parameter (folded-in 3-1). See [`planning/specs/2026-06-05-retry-and-retry-budget-design.md`](specs/2026-06-05-retry-and-retry-budget-design.md) and [`planning/plans/2026-06-05-retry-and-retry-budget-plan.md`](plans/2026-06-05-retry-and-retry-budget-plan.md).
   - **Remaining:** `3-5` `Bulkhead`, `3-6` extension-slot docs.
 - **Epic 4 — Streaming:** `4-3` `AsyncClient.stream` context manager (forwards to `httpx2.AsyncClient.stream`; no `StreamResponse` type).
-- **Epic 5 — Observability:** `5-1` Layer 1 middleware hooks, `5-2` wire into resilience middlewares, `5-4` OpenTelemetry middleware (`otel` extra), `5-5` logging policy CI grep.
+- **Epic 5 — Observability:** `5-1` Layer 1 middleware hooks, `5-2` wire into resilience middlewares, `5-4` OpenTelemetry middleware (will declare the `otel` extra at the same time the code lands), `5-5` logging policy CI grep.
 - **Epic 6 — Ship v1.0:** `6-2` docs site (`mkdocs`), `6-3` benchmarks, `6-5` release flow (Trusted Publishers + Sigstore).
 - **Carry-forward decoder:** `1-6` msgspec decoder via extras — second `ResponseDecoder` adapter, already implemented; verified surviving in the pivot.
 - **Middleware protocol:** `2-1` and `2-2` already implemented in the pivot (protocol, chain, phase decorators).
