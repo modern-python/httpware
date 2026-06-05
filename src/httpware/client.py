@@ -71,6 +71,15 @@ def _raise_on_status_error(response: httpx2.Response) -> None:
         raise exc_class(response)
 
 
+def _is_streaming_body(value: typing.Any) -> bool:
+    """Return True if value is an async-iterable that cannot be safely replayed for retry."""
+    if value is None:
+        return False
+    if isinstance(value, (bytes, bytearray, memoryview, str, dict)):
+        return False
+    return hasattr(value, "__aiter__")
+
+
 class AsyncClient:
     """Async HTTP client: thin wrapper around httpx2 with typed decoding and middleware."""
 
@@ -164,7 +173,7 @@ class AsyncClient:
         """Delegate request construction to the wrapped httpx2.AsyncClient."""
         return self._httpx2_client.build_request(method, url, **kwargs)
 
-    async def _request_with_body(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def _request_with_body(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
         method: str,
         url: str,
@@ -200,6 +209,8 @@ class AsyncClient:
         if files is not None:
             kwargs["files"] = files
         request = self._httpx2_client.build_request(method, url, **kwargs)
+        if _is_streaming_body(content) or _is_streaming_body(data) or _is_streaming_body(files):
+            request.extensions["httpware.streaming_body"] = True
         return await self.send(request, response_model=response_model)
 
     @typing.overload

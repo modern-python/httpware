@@ -7,6 +7,7 @@ callable so the suite runs instantly without freezegun.
 import asyncio
 import datetime
 import email.utils
+import typing
 from collections.abc import Callable
 from http import HTTPStatus
 
@@ -14,6 +15,7 @@ import httpx2
 import pytest
 
 from httpware import AsyncClient, NotFoundError, ServiceUnavailableError, TransportError
+from httpware.client import _is_streaming_body
 from httpware.errors import NetworkError, RetryBudgetExhaustedError
 from httpware.errors import TimeoutError as HttpwareTimeoutError
 from httpware.middleware.resilience.budget import RetryBudget
@@ -441,3 +443,80 @@ async def test_explicit_budget_shared_across_retry_instances() -> None:
     for _ in range(10):
         assert shared.try_withdraw() is True
     assert shared.try_withdraw() is False
+
+
+async def test_client_post_with_async_iterable_content_marks_extensions() -> None:
+    """Posting with an async-iterable body sets the httpware.streaming_body marker on request.extensions."""
+    seen_extensions: list[dict[str, object]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_extensions.append(dict(request.extensions))
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    async def streamed_body() -> typing.AsyncIterator[bytes]:
+        yield b"chunk1"
+        yield b"chunk2"
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    await client.post("https://example.test/upload", content=streamed_body())
+
+    assert len(seen_extensions) == 1
+    assert seen_extensions[0].get("httpware.streaming_body") is True
+
+
+async def test_client_post_with_bytes_content_does_not_mark_extensions() -> None:
+    seen_extensions: list[dict[str, object]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_extensions.append(dict(request.extensions))
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    await client.post("https://example.test/upload", content=b"hi")
+
+    assert len(seen_extensions) == 1
+    assert "httpware.streaming_body" not in seen_extensions[0]
+
+
+async def test_client_post_with_dict_data_does_not_mark_extensions() -> None:
+    seen_extensions: list[dict[str, object]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_extensions.append(dict(request.extensions))
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    await client.post("https://example.test/upload", data={"k": "v"})
+
+    assert len(seen_extensions) == 1
+    assert "httpware.streaming_body" not in seen_extensions[0]
+
+
+async def test_client_post_with_async_iterable_data_marks_extensions() -> None:
+    seen_extensions: list[dict[str, object]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen_extensions.append(dict(request.extensions))
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    async def streamed_data() -> typing.AsyncIterator[bytes]:
+        yield b"x"
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
+    await client.post("https://example.test/upload", data=streamed_data())
+
+    assert len(seen_extensions) == 1
+    assert seen_extensions[0].get("httpware.streaming_body") is True
+
+
+def test_is_streaming_body_true_for_async_iterable_files() -> None:
+    """_is_streaming_body returns True for an async-iterable, covering the files= path."""
+
+    async def streamed_files() -> typing.AsyncIterator[bytes]:
+        yield b"x"  # pragma: no cover
+
+    assert _is_streaming_body(streamed_files()) is True
