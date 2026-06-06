@@ -56,7 +56,8 @@ class ServiceClients(Group):
     )
 
 # At Container(...) construction:
-# modern_di.exceptions.DuplicateProviderTypeError: AsyncClient is already registered
+# modern_di.exceptions.DuplicateProviderTypeError: Provider is duplicated by type
+# <class 'httpware.client.AsyncClient'>. To resolve this issue: ...
 ```
 
 `modern-di` resolves dependencies by `bound_type`, which defaults to the creator's return type. Both providers default to `bound_type=AsyncClient` and collide in the providers registry.
