@@ -768,3 +768,13 @@ class AsyncClient:
         """Exit the async context manager; close the underlying client only if owned."""
         if self._owns_client and not self._httpx2_client.is_closed:
             await self._httpx2_client.aclose()
+
+    async def aclose(self) -> None:
+        """Close the underlying httpx2 client if we own it.
+
+        Idempotent — safe to call after ``__aexit__`` or another ``aclose()`` call.
+        Use this when the client is not managed by ``async with`` (e.g., wired
+        into a DI container's lifecycle).
+        """
+        if self._owns_client and not self._httpx2_client.is_closed:
+            await self._httpx2_client.aclose()
