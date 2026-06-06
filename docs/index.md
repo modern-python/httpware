@@ -110,6 +110,7 @@ When installed, `_emit_event` calls `trace.get_current_span().add_event(name, at
 - **[Middleware guide](middleware.md)** — write your own middleware. Covers the Middleware Protocol, the phase decorators, a worked Request-ID propagation example, and OpenTelemetry wiring.
 - **[Errors reference](errors.md)** — the full exception tree, catching strategies, `exc.response.*` access pattern.
 - **[Testing guide](testing.md)** — mock-transport injection pattern for testing code that uses `httpware`.
+- **[Recipes](recipes/modern-di.md)** — wiring `AsyncClient` into a `modern-di` container.
 - **[Engineering Notes](https://github.com/modern-python/httpware/blob/main/planning/engineering.md)** — design invariants, the three protocol seams, exception contract, module layout, testing patterns, optional-extras pattern. Lives in the repo at `planning/engineering.md`.
 - **[Contributing](dev/contributing.md)** — setup, conventions, workflow.
 - **[Release notes](https://github.com/modern-python/httpware/releases)** — per-version changelogs.
