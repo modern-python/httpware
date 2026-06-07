@@ -8,6 +8,8 @@ This doc is the single distilled reference for `httpware` design rationale, prot
 
 The next release renames the async middleware surface to use the `Async*`/`async_*` prefix (aligning with httpx2's convention) and removes the seldom-used `attempt_timeout=` kwarg from `AsyncRetry` — see `planning/specs/2026-06-07-sync-client-design.md` for the rationale.
 
+The same release also adds a sync `Client` with full feature parity (typed decoding, middleware chain, `Retry`/`Bulkhead`, `stream()`). `RetryBudget` is now thread-safe (one class, both worlds). Sync `Bulkhead` uses `threading.Semaphore` and cannot share an instance with `AsyncBulkhead`. See `planning/specs/2026-06-07-sync-client-design.md`.
+
 The 0.1.0 release attempted to own a full abstraction over the underlying HTTP client. v0.2 walks that back: `httpx2` is part of the public surface.
 
 ## 2. Architectural invariants (CI-enforced)
@@ -28,10 +30,10 @@ A protocol seam is a documented internal boundary. AI agents and contributors mu
 
 The 0.1.0 seams numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) have collapsed into the `AsyncClient` terminal — there is no transport abstraction in v0.2.
 
-### Seam A: `AsyncClient ↔ AsyncMiddleware`
+### Seam A: `Client`/`AsyncClient` ↔ `Middleware`/`AsyncMiddleware`
 
 - **Where:** `src/httpware/client.py` ↔ `src/httpware/middleware/`.
-- **Contract:** the `AsyncMiddleware` chain is composed once via `compose_async` at `AsyncClient.__init__` and frozen for the client's lifetime. The chain bottom (the "terminal") is internal: it calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx. The continuation type passed to each middleware is `AsyncNext`.
+- **Contract:** the middleware chain is composed once at client construction and frozen for the client's lifetime. Both worlds follow the same contract; the only difference is the per-world type: `AsyncClient` composes `AsyncMiddleware` via `compose_async` (the continuation type is `AsyncNext`), and `Client` composes `Middleware` via `compose` (the continuation type is `Next`). Both `compose` and `compose_async` live in `src/httpware/middleware/chain.py`. The chain bottom (the "terminal") is internal: it calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx. Same lifecycle rules in both worlds.
 - **Rule:** mutating the chain after construction is not supported. Per-request behavior goes through `httpx2.Request.extensions` or through `extensions=` kwargs at call sites.
 
 ### Seam B: `AsyncClient ↔ ResponseDecoder`
@@ -65,29 +67,29 @@ The error-mapping table (what `httpx2` exception maps to which `httpware` except
 
 ## 5. Module layout
 
-Current tree (v0.2):
+Current tree:
 
 ```text
 src/httpware/
-├── __init__.py            # public exports
+├── __init__.py            # public exports (both worlds at top level)
 ├── py.typed
-├── client.py              # AsyncClient
-├── errors.py              # status-keyed exception tree + NetworkError + RetryBudgetExhaustedError + BulkheadFullError
+├── client.py              # Client (sync) + AsyncClient (async)
+├── errors.py              # status-keyed exception tree (shared)
 ├── middleware/
-│   ├── __init__.py        # AsyncMiddleware protocol, AsyncNext type, @async_before_request/@async_after_response/@async_on_error
-│   ├── chain.py           # compose_async(middleware, terminal) -> AsyncNext
+│   ├── __init__.py        # Middleware + AsyncMiddleware, Next + AsyncNext, decorators
+│   ├── chain.py           # compose + compose_async
 │   └── resilience/
-│       ├── __init__.py    # re-exports AsyncBulkhead, AsyncRetry, RetryBudget
-│       ├── bulkhead.py    # AsyncBulkhead middleware (concurrency limiter)
-│       ├── budget.py      # RetryBudget (Finagle-style token bucket)
-│       ├── retry.py       # AsyncRetry middleware
-│       └── _backoff.py    # full-jitter exponential backoff helper (private)
-├── decoders/
-│   ├── __init__.py        # ResponseDecoder protocol
-│   ├── pydantic.py        # PydanticDecoder (extra: pydantic)
-│   └── msgspec.py         # MsgspecDecoder (extra: msgspec)
+│       ├── __init__.py    # re-exports both worlds + RetryBudget
+│       ├── bulkhead.py    # Bulkhead + AsyncBulkhead
+│       ├── budget.py      # RetryBudget (thread-safe; shared)
+│       ├── retry.py       # Retry + AsyncRetry
+│       └── _backoff.py    # full-jitter helper (shared)
+├── decoders/              # shared (ResponseDecoder + adapters)
 └── _internal/
-    └── import_checker.py  # is_msgspec_installed, is_pydantic_installed
+    ├── exception_mapping.py  # map_httpx2_exception (shared)
+    ├── import_checker.py     # is_*_installed flags
+    ├── observability.py      # _emit_event
+    └── status.py             # _raise_on_status_error, _is_streaming_body_*, STREAMING_BODY_MARKER
 ```
 
 **Deleted relative to 0.1.0:** `request.py`, `response.py`, `config.py`, `transports/` (Transport protocol + Httpx2Transport), `_internal/auth.py`, `_internal/chain.py`. The `RecordedTransport` testing helper is gone; tests inject `httpx2.MockTransport` via `httpx2_client=` instead.

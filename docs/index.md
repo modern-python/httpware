@@ -19,9 +19,34 @@ pip install httpware[msgspec]    # MsgspecDecoder
 
 ## First request
 
+**Async usage:**
+
 ```python
 import asyncio
 
+from httpware import AsyncClient
+
+async def main() -> None:
+    async with AsyncClient(base_url="https://example.test") as client:
+        response = await client.get("/users/42")
+        print(response.json())
+
+asyncio.run(main())
+```
+
+**Sync usage:**
+
+```python
+from httpware import Client
+
+with Client(base_url="https://example.test") as client:
+    response = client.get("/users/42")
+    print(response.json())
+```
+
+Typed decoding via `response_model=` works the same way in both worlds:
+
+```python
 from httpware import AsyncClient
 from pydantic import BaseModel
 
@@ -35,9 +60,6 @@ async def main() -> None:
     async with AsyncClient(base_url="https://api.example.com") as client:
         user = await client.get("/users/1", response_model=User)
         print(user.name)
-
-
-asyncio.run(main())
 ```
 
 ### With resilience middleware

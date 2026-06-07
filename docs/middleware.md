@@ -136,6 +136,62 @@ After this runs, every `httpware` HTTP call gets an `HTTP <method>` span from th
 
 For production, swap `ConsoleSpanExporter` for your OTLP/Jaeger/Zipkin exporter. See the [OpenTelemetry Python docs](https://opentelemetry.io/docs/languages/python/) for the full SDK setup.
 
+## Sync middleware
+
+The same protocol shape, sync flavor. Use these when wiring middleware into a sync `Client` instead of `AsyncClient`.
+
+```python
+from httpware import Middleware, Next, before_request, after_response, on_error
+from httpware.middleware.chain import compose
+```
+
+A sync `Middleware` is a structural protocol — any callable with the right signature satisfies it:
+
+```python
+import httpx2
+
+from httpware import Client
+from httpware.middleware import Next
+
+
+class LoggingMiddleware:
+    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+        print(f"-> {request.method} {request.url}")
+        response = next(request)
+        print(f"<- {response.status_code}")
+        return response
+
+
+with Client(base_url="https://api.example.com", middleware=[LoggingMiddleware()]) as client:
+    client.get("/users/1")
+```
+
+Phase decorators (`@before_request`, `@after_response`, `@on_error`) have the same semantics as their `@async_*` siblings, but wrap sync functions:
+
+```python
+import uuid
+
+import httpx2
+
+from httpware import Client, before_request
+
+
+@before_request
+def add_request_id(request: httpx2.Request) -> httpx2.Request:
+    return httpx2.Request(
+        request.method,
+        request.url,
+        headers={**request.headers, "X-Request-ID": uuid.uuid4().hex},
+        content=request.content,
+    )
+
+
+with Client(base_url="https://api.example.com", middleware=[add_request_id]) as client:
+    client.get("/users/1")
+```
+
+Sync and async middleware classes do not interop: a `Middleware` cannot be passed to `AsyncClient(middleware=...)` and vice versa. Pick the flavor matching your client.
+
 ## See also
 
 - **`planning/engineering.md` §3 (Seam A)** — the formal protocol contract and why the chain is frozen at construction.

@@ -15,7 +15,7 @@ import httpx2
 import pytest
 
 from httpware import AsyncClient, NotFoundError, ServiceUnavailableError, TransportError
-from httpware.client import _is_streaming_body
+from httpware._internal.status import _is_streaming_body_async as _is_streaming_body
 from httpware.errors import NetworkError, RetryBudgetExhaustedError
 from httpware.middleware.resilience.budget import RetryBudget
 from httpware.middleware.resilience.retry import (
