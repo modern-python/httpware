@@ -8,7 +8,6 @@ StatusError subclass is re-raised unwrapped on exhaustion, with a PEP 678 note a
 """
 
 import asyncio
-import builtins
 import datetime
 import email.utils
 import logging
@@ -20,7 +19,7 @@ import httpx2
 from httpware._internal.observability import _emit_event
 from httpware.client import STREAMING_BODY_MARKER
 from httpware.errors import NetworkError, RetryBudgetExhaustedError, StatusError, TimeoutError  # noqa: A004
-from httpware.middleware import Next
+from httpware.middleware import AsyncNext
 from httpware.middleware.resilience._backoff import full_jitter_delay
 from httpware.middleware.resilience.budget import RetryBudget
 
@@ -68,8 +67,8 @@ def _parse_retry_after(value: str) -> float | None:
     return max(0.0, delta)
 
 
-class Retry:
-    """Retry middleware. See module docstring for default policy."""
+class AsyncRetry:
+    """Async retry middleware. See module docstring for default policy."""
 
     def __init__(  # noqa: PLR0913 — retry policy has many orthogonal knobs; a dataclass would be worse
         self,
@@ -77,7 +76,6 @@ class Retry:
         max_attempts: int = 3,
         base_delay: float = 0.1,
         max_delay: float = 5.0,
-        attempt_timeout: float | None = None,
         retry_status_codes: frozenset[int] = DEFAULT_RETRY_STATUS_CODES,
         retry_methods: frozenset[str] = DEFAULT_IDEMPOTENT_METHODS,
         respect_retry_after: bool = True,
@@ -89,14 +87,13 @@ class Retry:
         self.max_attempts = max_attempts
         self.base_delay = base_delay
         self.max_delay = max_delay
-        self.attempt_timeout = attempt_timeout
         self.retry_status_codes = retry_status_codes
         self.retry_methods = retry_methods
         self.respect_retry_after = respect_retry_after
         self.budget = budget if budget is not None else RetryBudget()
         self._sleep = _sleep
 
-    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, C901, PLR0912, PLR0915 — complexity budget: 3 error clauses + idempotency gate + streaming-body refusal + budget gate + Retry-After branch + backoff
+    async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002, C901, PLR0912, PLR0915 — complexity budget: 3 error clauses + idempotency gate + streaming-body refusal + budget gate + Retry-After branch + backoff
         """Process a request through the retry loop. See module docstring."""
         method_eligible = request.method.upper() in self.retry_methods
         last_exc: BaseException | None = None
@@ -106,11 +103,7 @@ class Retry:
             is_last = attempt + 1 >= self.max_attempts
             self.budget.deposit()
             try:
-                if self.attempt_timeout is not None:
-                    async with asyncio.timeout(self.attempt_timeout):
-                        return await next(request)
-                else:
-                    return await next(request)
+                return await next(request)
             except StatusError as exc:
                 retryable_status = exc.response.status_code in self.retry_status_codes
                 if not method_eligible or not retryable_status:
@@ -125,15 +118,6 @@ class Retry:
                         exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
-                last_response = None
-            except builtins.TimeoutError as exc:
-                wrapped = TimeoutError("attempt timed out")
-                wrapped.__cause__ = exc  # set now; the retry path (last_exc = wrapped) has no `from` clause
-                if not method_eligible:
-                    if request.extensions.get(STREAMING_BODY_MARKER):
-                        wrapped.add_note(_STREAMING_BODY_REFUSAL_NOTE)
-                    raise wrapped from exc
-                last_exc = wrapped
                 last_response = None
 
             # ---- retryable failure path
