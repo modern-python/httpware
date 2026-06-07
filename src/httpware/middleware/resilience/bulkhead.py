@@ -18,7 +18,7 @@ import httpx2
 
 from httpware._internal.observability import _emit_event
 from httpware.errors import BulkheadFullError
-from httpware.middleware import Next
+from httpware.middleware import AsyncNext
 
 
 _MAX_CONCURRENT_INVALID = "max_concurrent must be >= 1"
@@ -27,8 +27,8 @@ _ACQUIRE_TIMEOUT_INVALID = "acquire_timeout must be >= 0"
 _LOGGER = logging.getLogger("httpware.bulkhead")
 
 
-class Bulkhead:
-    """Concurrency limiter middleware backed by ``asyncio.Semaphore``.
+class AsyncBulkhead:
+    """Async concurrency limiter middleware backed by ``asyncio.Semaphore``.
 
     Parameters
     ----------
@@ -59,7 +59,7 @@ class Bulkhead:
         self._acquire_timeout = acquire_timeout
         self._sem = asyncio.Semaphore(max_concurrent)
 
-    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+    async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Acquire a slot (bounded by acquire_timeout), invoke next, release."""
         try:
             if self._acquire_timeout is None:
