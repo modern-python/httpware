@@ -135,3 +135,77 @@ Verifier consensus: 2/3 (code_reality + reproducer). Suggested direction: gate t
 
 <!-- chunk 1: concurrency + error_contract appended below by targeted run -->
 
+## Chunk 1 — Concurrency & Error Contract
+
+5 confirmed findings reviewed across the concurrency and error-contract dimensions; 5 survived verifier consensus. The dominant cluster is `AsyncBulkhead` cross-event-loop behavior (2/5 findings) and the surrounding test coverage that does not catch it (3/5). No `error_contract` defects surfaced in this chunk — all five lie in `middleware/resilience/bulkhead.py` and its tests, plus one weak post-condition in `tests/test_threading_with_shared_budget.py` that touches the RetryBudget threading harness. Triaged into 2 medium + 1 low + 2 nit. None reach blocker or high because the AsyncBulkhead defect requires the user to share a single instance across multiple event loops in different threads — a configuration the existing docs do not endorse but also do not warn against.
+
+### Medium
+
+#### AsyncBulkhead deadlocks when shared across event loops in different threads
+
+`src/httpware/middleware/resilience/bulkhead.py:61`
+
+`AsyncBulkhead` stores a single `asyncio.Semaphore` constructed at `__init__`, which binds to whichever loop is running at construction time (or the first acquirer). When loop A's `release()` calls `_wake_up_next()` and that waiter belongs to loop B in another thread, `fut.set_result()` reaches into loop B's machinery via `call_soon` — which is not thread-safe — and the wake-up is lost. With two threads each running `asyncio.run()` against one shared `AsyncBulkhead(max_concurrent=1)`, the second thread hangs indefinitely with `_sem._value == 0`.
+
+```python
+        self._sem = asyncio.Semaphore(max_concurrent)
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer). Suggested direction: either document that `AsyncBulkhead` is single-event-loop and detect the violation eagerly (capture the loop on first acquire, raise on mismatch), or replace the bare `asyncio.Semaphore` with a thread-safe primitive (e.g., guard a counter with `threading.Lock` + per-loop futures). The cheap fix is detect-and-raise; the deep fix is a cross-loop-safe primitive.
+
+#### AsyncBulkhead docstring advertises sharing without flagging the single-event-loop constraint
+
+`src/httpware/middleware/resilience/bulkhead.py:10`
+
+The module docstring tells users to share one `AsyncBulkhead` across multiple `AsyncClient(middleware=[shared])` calls "to enforce a joint cap" but says nothing about the loop boundary. The sibling sync `Bulkhead` class docstring at line 101 correctly warns that it is "per-world" and cannot be shared between `Client` and `AsyncClient`; no analogous caveat exists for `AsyncBulkhead` against sharing across multiple `asyncio.run()` calls or threads. A reader following the docs and reusing one instance across pytest async tests (each in its own loop) will hit the silent deadlock described above.
+
+```python
+AsyncBulkhead is the sharable unit — pass the same instance to multiple
+AsyncClient(middleware=[shared]) calls to enforce a joint cap across clients.
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer). Suggested direction: add a "Constraints" paragraph mirroring the sync class's "per-world" wording — explicitly state that all sharing must happen on a single event loop, and link to whatever runtime check is added for the finding above. Keep this fix and the runtime-detect fix in the same PR so the doc never drifts ahead of the code.
+
+### Low
+
+#### Sync `Bulkhead` has no Hypothesis property test for the concurrency-cap invariant
+
+`tests/test_bulkhead_props.py:1`
+
+The property suite verifies "observed in-flight count never exceeds `max_concurrent`" only for `AsyncBulkhead`, via `asyncio.gather`. The sync `Bulkhead` has a single deterministic check (`tests/test_bulkhead_sync.py::test_serializes_at_capacity` with `max_concurrent=1` and 3 threads) but no Hypothesis-driven search across the `(max_concurrent, n_requests)` space. Sync/async parity is a stated invariant for the resilience primitives, and the async side carries proportionally stronger evidence today.
+
+```python
+"""Hypothesis property tests for AsyncBulkhead.
+
+Properties verified:
+1. Observed in-flight count never exceeds max_concurrent under any interleaving.
+```
+
+Verifier consensus: 2/3 (code_reality twice). Suggested direction: add `tests/test_bulkhead_sync_props.py` that mirrors the async property suite using `threading.Thread` + a shared counter, parameterized by Hypothesis over `max_concurrent ∈ [1, 8]` and `n_requests ∈ [max_concurrent, max_concurrent * 4]`. Keep the async file unchanged; parity is the goal.
+
+### Nit
+
+#### `test_no_slot_leak_after_drain` asserts against `asyncio.Semaphore._value`
+
+`tests/test_bulkhead_props.py:113`
+
+The post-condition reads `bulkhead._sem._value`, a CPython implementation detail of `asyncio.Semaphore` (not part of the public asyncio surface). The comment acknowledges the trade-off ("implementation detail but reliable across CPython 3.11+"), but the assertion would silently change meaning on PyPy or on any CPython refactor that renames or removes the attribute. A behavioral check — submit one more request after drain and assert it completes within a small timeout — is portable and exercises the same release-correctness invariant.
+
+```python
+assert bulkhead._sem._value == max_concurrent  # noqa: SLF001
+```
+
+Verifier consensus: 2/3 (code_reality twice). Suggested direction: replace the `_value` peek with a behavioral assertion (submit `max_concurrent` more requests against the drained bulkhead under a tight `acquire_timeout` and confirm all succeed), which both removes the SLF001 suppression and survives any future asyncio internals change.
+
+#### `test_threading_with_shared_budget` only asserts the deposit deque is non-empty
+
+`tests/test_threading_with_shared_budget.py:77`
+
+After 4 sync threads run 50 ops × 2 attempts and 20 async tasks run 2 attempts against a shared `RetryBudget(min_retries_per_sec=1000, percent_can_retry=0.5)`, the post-condition is `len(budget._deposits) > 0`. That assertion would pass even if the internal lock were removed and the deque corrupted as long as one survivor remained. The exact expected count — `(4 * 50 * 2) + (20 * 2) = 440` — is computable; the sibling test `tests/test_retry_budget_threadsafety.py::test_concurrent_only_deposit_count_matches` already establishes the pattern.
+
+```python
+assert len(budget._deposits) > 0  # noqa: SLF001
+```
+
+Verifier consensus: 2/3 (code_reality twice). Suggested direction: tighten the assertion to the exact expected total (or the exact total minus any TTL-purged deposits, computed from the test clock), matching the stricter post-condition used in the existing thread-safety suite. The current weak check effectively only guards against catastrophic failure.
+
