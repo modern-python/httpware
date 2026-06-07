@@ -94,7 +94,7 @@ AsyncRetry / Bulkhead and AsyncBulkhead that isn't documented as intentional.
 
 Out of scope: pure-correctness logic errors (dimension 1), error contract (3).
 
-Schema as above. 6-12 findings target. Default to silence when uncertain.`,
+6-12 findings target. Default to silence when uncertain.`,
 
   error_contract: `You are auditing the httpware repository against the
 ERROR CONTRACT documented in CLAUDE.md:
@@ -278,8 +278,11 @@ Tasks:
      consensus (2/3 or 3/3 + which lenses confirmed), suggested direction.
 5. Do NOT rewrite the top-of-file Summary yet — that's the final merge step.
 
-Use Edit/Write tools to update the file. Commit with:
-  audit(chunk-${chunkId}): <one-line summary>
+Use Edit/Write tools to update the file. After updating, stage and commit with:
+  git add ${auditFile}
+  git commit -m "audit(chunk-${chunkId}): <one-line summary describing the ${confirmed.length} confirmed findings and dominant dimension>"
+
+Run \`git status\` after the commit to confirm a clean tree.
 
 Confirmed findings JSON:
 ${JSON.stringify(confirmed, null, 2)}
@@ -310,16 +313,32 @@ Return the structure per schema.`,
 }
 
 phase('Find')
+const unknownDims = args.dimensions.filter(d => !DIMENSION_PROMPTS[d])
+if (unknownDims.length) throw new Error(`Unknown dimensions: ${unknownDims.join(', ')}`)
 const findings = await parallel(
   args.dimensions.map(dim => () =>
     agent(
-      `${DIMENSION_PROMPTS[dim]}\n\nDiscover map: ${args.discover_file}\nReturn per schema.`,
+      `${DIMENSION_PROMPTS[dim]}
+
+Before you start, use the Read tool to load the discover map at ${args.discover_file}.
+It contains the full file inventory (with line counts and purpose strings) and the
+load-bearing invariants from CLAUDE.md. Use it to drive your search instead of
+guessing at the codebase layout.
+
+Return per schema.`,
       { model: SONNET, schema: FINDING_SCHEMA, label: `find:${dim}`, phase: 'Find' },
     )
   ),
 )
 
-const allFindings = findings.filter(Boolean).flatMap(r => r.findings)
+const FINDINGS_PER_DIM_CAP = 15
+const rawDimensionResults = findings.filter(Boolean)
+const oversizedDims = rawDimensionResults.filter(r => r.findings.length > FINDINGS_PER_DIM_CAP)
+for (const r of oversizedDims) {
+  const dimName = r.findings[0]?.dimension ?? '<unknown>'
+  log(`WARNING: dimension ${dimName} returned ${r.findings.length} findings; capping at ${FINDINGS_PER_DIM_CAP}`)
+}
+const allFindings = rawDimensionResults.flatMap(r => r.findings.slice(0, FINDINGS_PER_DIM_CAP))
 log(`Found ${allFindings.length} candidate findings across ${args.dimensions.length} dimensions`)
 
 phase('Verify')
@@ -340,6 +359,9 @@ const verified = await parallel(
       let severity = f.suspected_severity
       if (lowerCount >= 1) severity = lowerOne(severity)
       if (raiseCount >= 2) severity = raiseOne(severity)
+      if (verdicts.every(v => v === null)) {
+        log(`WARNING: all 3 verifiers failed for finding "${f.title}" (${f.file}:${f.line_hint}) — dropped`)
+      }
       return surviving ? { ...f, final_severity: severity, lensesConfirming } : null
     })
   ),
