@@ -2,7 +2,7 @@
 
 import contextlib
 import typing
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from http import HTTPStatus
 
 import httpx2
@@ -12,12 +12,13 @@ from httpware._internal.exception_mapping import map_httpx2_exception
 from httpware._internal.status import (
     STREAMING_BODY_MARKER,
     _is_streaming_body_async,
+    _is_streaming_body_sync,
     _raise_on_status_error,
 )
 from httpware.decoders import ResponseDecoder
 from httpware.errors import TransportError
-from httpware.middleware import AsyncMiddleware, AsyncNext
-from httpware.middleware.chain import compose_async
+from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
+from httpware.middleware.chain import compose, compose_async
 
 
 T = typing.TypeVar("T")
@@ -25,12 +26,12 @@ T = typing.TypeVar("T")
 
 _FORWARDED_KWARG_NAMES = ("base_url", "headers", "params", "cookies", "timeout", "limits", "auth")
 _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
-    "AsyncClient(httpx2_client=...) cannot be combined with any of "
-    f"{_FORWARDED_KWARG_NAMES}; configure the httpx2.AsyncClient you pass instead."
+    "httpx2_client=... cannot be combined with any of "
+    f"{_FORWARDED_KWARG_NAMES}; configure the httpx2 client you pass instead."
 )
 
 _DEFAULT_DECODER_MISSING_MESSAGE = (
-    "AsyncClient(decoder=None) defaults to PydanticDecoder, which requires the "
+    "decoder=None defaults to PydanticDecoder, which requires the "
     "'pydantic' extra. Either install it (`pip install httpware[pydantic]`) or "
     "pass an explicit decoder=..."
 )
@@ -47,6 +48,17 @@ def _default_pydantic_decoder() -> ResponseDecoder:
 @contextlib.asynccontextmanager
 async def _httpx2_exception_mapper() -> AsyncIterator[None]:
     """Map httpx2 exceptions to httpware exceptions. Shared by AsyncClient._terminal and stream()."""
+    try:
+        yield
+    except httpx2.HTTPError as exc:
+        raise map_httpx2_exception(exc) from exc
+    except (httpx2.InvalidURL, httpx2.CookieConflict) as exc:
+        raise map_httpx2_exception(exc) from exc
+
+
+@contextlib.contextmanager
+def _httpx2_exception_mapper_sync() -> Iterator[None]:
+    """Map httpx2 exceptions to httpware exceptions. Sync sibling of _httpx2_exception_mapper."""
     try:
         yield
     except httpx2.HTTPError as exc:
@@ -746,3 +758,99 @@ class AsyncClient:
         """
         if self._owns_client and not self._httpx2_client.is_closed:
             await self._httpx2_client.aclose()
+
+
+class Client:
+    """Sync HTTP client: thin wrapper around httpx2 with typed decoding and middleware."""
+
+    _httpx2_client: httpx2.Client
+    _owns_client: bool
+    _decoder: ResponseDecoder
+    _user_middleware: tuple[Middleware, ...]
+    _dispatch: Next
+
+    def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
+        self,
+        *,
+        base_url: str = "",
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
+        timeout: httpx2.Timeout | float | None = None,
+        limits: httpx2.Limits | None = None,
+        auth: httpx2.Auth | None = None,
+        httpx2_client: httpx2.Client | None = None,
+        decoder: ResponseDecoder | None = None,
+        middleware: Sequence[Middleware] = (),
+    ) -> None:
+        if httpx2_client is not None:
+            forwarded = {
+                "base_url": base_url,
+                "headers": headers,
+                "params": params,
+                "cookies": cookies,
+                "timeout": timeout,
+                "limits": limits,
+                "auth": auth,
+            }
+            if any(value not in (None, "") for value in forwarded.values()):
+                raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE)
+            self._httpx2_client = httpx2_client
+            self._owns_client = False
+        else:
+            kwargs: dict[str, typing.Any] = {}
+            if base_url:
+                kwargs["base_url"] = base_url
+            if headers is not None:
+                kwargs["headers"] = headers
+            if params is not None:
+                kwargs["params"] = params
+            if cookies is not None:
+                kwargs["cookies"] = cookies
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            if limits is not None:
+                kwargs["limits"] = limits
+            if auth is not None:
+                kwargs["auth"] = auth
+            self._httpx2_client = httpx2.Client(**kwargs)
+            self._owns_client = True
+
+        self._decoder = decoder if decoder is not None else _default_pydantic_decoder()
+        self._user_middleware = tuple(middleware)
+        self._dispatch = compose(self._user_middleware, self._terminal)
+
+    def _terminal(self, request: httpx2.Request) -> httpx2.Response:
+        try:
+            with _httpx2_exception_mapper_sync():
+                response = self._httpx2_client.send(request)
+        except RuntimeError as exc:
+            if "closed" in str(exc):
+                raise TransportError(str(exc)) from exc
+            raise
+        _raise_on_status_error(response)
+        return response
+
+    def __enter__(self) -> typing.Self:
+        """Enter the sync context manager; return self."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object,
+    ) -> None:
+        """Exit the sync context manager; close the underlying client only if owned."""
+        if self._owns_client and not self._httpx2_client.is_closed:
+            self._httpx2_client.close()
+
+    def close(self) -> None:
+        """Close the underlying httpx2 client if we own it.
+
+        Idempotent — safe to call after ``__exit__`` or another ``close()`` call.
+        Use this when the client is not managed by ``with`` (e.g., wired into a
+        DI container's lifecycle). Mirrors AsyncClient.aclose().
+        """
+        if self._owns_client and not self._httpx2_client.is_closed:
+            self._httpx2_client.close()
