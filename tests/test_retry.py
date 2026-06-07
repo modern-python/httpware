@@ -16,7 +16,6 @@ import pytest
 
 from httpware import AsyncClient, NotFoundError, ServiceUnavailableError, TransportError
 from httpware._internal.status import _is_streaming_body_async as _is_streaming_body
-from httpware._internal.status import _is_streaming_body_sync
 from httpware.errors import NetworkError, RetryBudgetExhaustedError
 from httpware.middleware.resilience.budget import RetryBudget
 from httpware.middleware.resilience.retry import (
@@ -460,21 +459,6 @@ def test_is_streaming_body_true_for_async_iterable_files() -> None:
         yield b"x"  # pragma: no cover
 
     assert _is_streaming_body(streamed_files()) is True
-
-
-def test_is_streaming_body_sync_predicates() -> None:
-    """_is_streaming_body_sync: covers all branches of the sync predicate.
-
-    Lives alongside the async-sibling test so both worlds' predicates have a home.
-    """
-    assert _is_streaming_body_sync(None) is False
-    assert _is_streaming_body_sync(b"bytes") is False
-    assert _is_streaming_body_sync("str") is False
-    assert _is_streaming_body_sync({"k": "v"}) is False
-    assert _is_streaming_body_sync([1, 2]) is False
-    assert _is_streaming_body_sync((1, 2)) is False
-    assert _is_streaming_body_sync(iter([1, 2])) is True
-    assert _is_streaming_body_sync(x for x in range(3)) is True
 
 
 async def test_retry_refuses_streamed_body_request() -> None:

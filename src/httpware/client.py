@@ -1,4 +1,4 @@
-"""AsyncClient — the thin httpx2 wrapper."""
+"""Client + AsyncClient — thin httpx2 wrappers with typed decoding and middleware."""
 
 import contextlib
 import typing

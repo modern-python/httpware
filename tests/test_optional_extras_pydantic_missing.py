@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from httpware import AsyncClient
+from httpware import AsyncClient, Client
 from httpware.decoders.pydantic import PydanticDecoder
 
 
@@ -28,6 +28,14 @@ def test_async_client_default_decoder_raises_when_pydantic_missing() -> None:
         pytest.raises(ImportError, match=r"httpware\[pydantic\]"),
     ):
         AsyncClient()
+
+
+def test_sync_client_default_decoder_raises_when_pydantic_missing() -> None:
+    with (
+        patch("httpware._internal.import_checker.is_pydantic_installed", False),
+        pytest.raises(ImportError, match=r"httpware\[pydantic\]"),
+    ):
+        Client()
 
 
 def test_async_client_accepts_explicit_decoder_without_pydantic() -> None:
