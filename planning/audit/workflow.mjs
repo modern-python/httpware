@@ -293,7 +293,10 @@ ${JSON.stringify(confirmed, null, 2)}
 const SONNET = 'claude-sonnet-4-6'
 const OPUS = 'claude-opus-4-7'
 
-if (args.run_discover) {
+// args may arrive as a JSON string (depending on harness) — normalize.
+const cfg = typeof args === 'string' ? JSON.parse(args) : (args ?? {})
+
+if (cfg.run_discover) {
   phase('Discover')
   log('Building module map (one-shot)')
   // The discover agent both produces structured data AND writes it to disk;
@@ -304,7 +307,7 @@ tests/, docs/, and planning/. For each entry capture: line count, a one-sentence
 purpose. Also extract the load-bearing invariants from CLAUDE.md verbatim.
 
 After building the structure, write it as pretty-printed JSON to:
-  ${args.discover_file}
+  ${cfg.discover_file}
 
 Use the Write tool to create the file. Do NOT commit it; the outer plan handles that.
 Return the structure per schema.`,
@@ -313,14 +316,14 @@ Return the structure per schema.`,
 }
 
 phase('Find')
-const unknownDims = args.dimensions.filter(d => !DIMENSION_PROMPTS[d])
+const unknownDims = cfg.dimensions.filter(d => !DIMENSION_PROMPTS[d])
 if (unknownDims.length) throw new Error(`Unknown dimensions: ${unknownDims.join(', ')}`)
 const findings = await parallel(
-  args.dimensions.map(dim => () =>
+  cfg.dimensions.map(dim => () =>
     agent(
       `${DIMENSION_PROMPTS[dim]}
 
-Before you start, use the Read tool to load the discover map at ${args.discover_file}.
+Before you start, use the Read tool to load the discover map at ${cfg.discover_file}.
 It contains the full file inventory (with line counts and purpose strings) and the
 load-bearing invariants from CLAUDE.md. Use it to drive your search instead of
 guessing at the codebase layout.
@@ -339,7 +342,7 @@ for (const r of oversizedDims) {
   log(`WARNING: dimension ${dimName} returned ${r.findings.length} findings; capping at ${FINDINGS_PER_DIM_CAP}`)
 }
 const allFindings = rawDimensionResults.flatMap(r => r.findings.slice(0, FINDINGS_PER_DIM_CAP))
-log(`Found ${allFindings.length} candidate findings across ${args.dimensions.length} dimensions`)
+log(`Found ${allFindings.length} candidate findings across ${cfg.dimensions.length} dimensions`)
 
 phase('Verify')
 const verified = await parallel(
@@ -372,12 +375,12 @@ log(`${confirmed.length}/${allFindings.length} findings confirmed by ≥2 verifi
 
 phase('Synthesize')
 await agent(
-  SYNTHESIS_PROMPT(args.chunk_id, args.dimensions, confirmed, args.audit_file),
-  { model: OPUS, label: `synthesize:chunk-${args.chunk_id}` },
+  SYNTHESIS_PROMPT(cfg.chunk_id, cfg.dimensions, confirmed, cfg.audit_file),
+  { model: OPUS, label: `synthesize:chunk-${cfg.chunk_id}` },
 )
 
 return {
-  chunk_id: args.chunk_id,
+  chunk_id: cfg.chunk_id,
   candidates: allFindings.length,
   confirmed: confirmed.length,
   by_severity: countBySeverity(confirmed),
