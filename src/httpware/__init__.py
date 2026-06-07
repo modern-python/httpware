@@ -23,28 +23,34 @@ from httpware.errors import (
     UnauthorizedError,
     UnprocessableEntityError,
 )
-from httpware.middleware import Middleware, Next, after_response, before_request, on_error
-from httpware.middleware.resilience import Bulkhead, Retry, RetryBudget
+from httpware.middleware import (
+    AsyncMiddleware,
+    AsyncNext,
+    async_after_response,
+    async_before_request,
+    async_on_error,
+)
+from httpware.middleware.resilience import AsyncBulkhead, AsyncRetry, RetryBudget
 
 
 __all__ = [
     "STATUS_TO_EXCEPTION",
+    "AsyncBulkhead",
     "AsyncClient",
+    "AsyncMiddleware",
+    "AsyncNext",
+    "AsyncRetry",
     "BadRequestError",
-    "Bulkhead",
     "BulkheadFullError",
     "ClientError",
     "ClientStatusError",
     "ConflictError",
     "ForbiddenError",
     "InternalServerError",
-    "Middleware",
     "NetworkError",
-    "Next",
     "NotFoundError",
     "RateLimitedError",
     "ResponseDecoder",
-    "Retry",
     "RetryBudget",
     "RetryBudgetExhaustedError",
     "ServerStatusError",
@@ -54,7 +60,7 @@ __all__ = [
     "TransportError",
     "UnauthorizedError",
     "UnprocessableEntityError",
-    "after_response",
-    "before_request",
-    "on_error",
+    "async_after_response",
+    "async_before_request",
+    "async_on_error",
 ]
