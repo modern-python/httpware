@@ -10,6 +10,8 @@ nav:
   - Middleware: middleware.md
   - Errors: errors.md
   - Testing: testing.md
+  - Recipes:
+      - modern-di: recipes/modern-di.md
   - Development:
       - Contributing: dev/contributing.md
 

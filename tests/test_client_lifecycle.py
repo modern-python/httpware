@@ -30,3 +30,17 @@ async def test_aexit_is_idempotent_for_owned_client() -> None:
         pass
     # Second use should not raise — the boolean prevents a double-close on httpx2 internals.
     await client.__aexit__(None, None, None)
+
+
+async def test_aclose_closes_owned_httpx2_client() -> None:
+    client = AsyncClient()
+    await client.aclose()
+    assert client._httpx2_client.is_closed  # noqa: SLF001
+
+
+async def test_aclose_is_idempotent_for_owned_client() -> None:
+    client = AsyncClient()
+    await client.aclose()
+    # Second call must not raise — the boolean prevents a double-close on httpx2 internals.
+    await client.aclose()
+    assert client._httpx2_client.is_closed  # noqa: SLF001
