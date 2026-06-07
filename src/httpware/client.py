@@ -1391,3 +1391,61 @@ class Client:
             files=files,
             response_model=response_model,
         )
+
+    @contextlib.contextmanager
+    def stream(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+    ) -> Iterator[httpx2.Response]:
+        """Stream an HTTP response. Bypasses the middleware chain.
+
+        Yields an httpx2.Response; consume the body via response.iter_bytes(),
+        response.iter_text(), response.iter_lines(), or response.iter_raw().
+        The body is NOT pre-read for 2xx/3xx (streaming preserved); the response
+        is closed when the context exits.
+
+        Bypasses the middleware chain (no Retry, no Bulkhead, no user-installed
+        middleware) — matches AsyncClient.stream() behavior.
+
+        Auto-raises StatusError subclasses on 4xx/5xx. On error the response
+        body is pre-read so exc.response.content is accessible.
+
+        Maps httpx2 exceptions raised during the request OR body consumption to
+        httpware exceptions via _httpx2_exception_mapper_sync.
+        """
+        kwargs: dict[str, typing.Any] = {}
+        if params is not None:
+            kwargs["params"] = params
+        if headers is not None:
+            kwargs["headers"] = headers
+        if cookies is not None:
+            kwargs["cookies"] = cookies
+        if timeout is not httpx2.USE_CLIENT_DEFAULT:
+            kwargs["timeout"] = timeout
+        if extensions is not None:
+            kwargs["extensions"] = extensions
+        if json is not None:
+            kwargs["json"] = json
+        if content is not None:
+            kwargs["content"] = content
+        if data is not None:
+            kwargs["data"] = data
+        if files is not None:
+            kwargs["files"] = files
+
+        with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, url, **kwargs) as response:
+            if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
+                response.read()  # pre-read body so exc.response.content works
+                _raise_on_status_error(response)
+            yield response
