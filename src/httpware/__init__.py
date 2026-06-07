@@ -1,6 +1,6 @@
-"""httpware — thin async HTTP client wrapper over httpx2."""
+"""httpware — thin async + sync HTTP client wrapper over httpx2."""
 
-from httpware.client import AsyncClient
+from httpware.client import AsyncClient, Client
 from httpware.decoders import ResponseDecoder
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
@@ -26,11 +26,16 @@ from httpware.errors import (
 from httpware.middleware import (
     AsyncMiddleware,
     AsyncNext,
+    Middleware,
+    Next,
+    after_response,
     async_after_response,
     async_before_request,
     async_on_error,
+    before_request,
+    on_error,
 )
-from httpware.middleware.resilience import AsyncBulkhead, AsyncRetry, RetryBudget
+from httpware.middleware.resilience import AsyncBulkhead, AsyncRetry, Bulkhead, Retry, RetryBudget
 
 
 __all__ = [
@@ -41,16 +46,21 @@ __all__ = [
     "AsyncNext",
     "AsyncRetry",
     "BadRequestError",
+    "Bulkhead",
     "BulkheadFullError",
+    "Client",
     "ClientError",
     "ClientStatusError",
     "ConflictError",
     "ForbiddenError",
     "InternalServerError",
+    "Middleware",
     "NetworkError",
+    "Next",
     "NotFoundError",
     "RateLimitedError",
     "ResponseDecoder",
+    "Retry",
     "RetryBudget",
     "RetryBudgetExhaustedError",
     "ServerStatusError",
@@ -60,7 +70,10 @@ __all__ = [
     "TransportError",
     "UnauthorizedError",
     "UnprocessableEntityError",
+    "after_response",
     "async_after_response",
     "async_before_request",
     "async_on_error",
+    "before_request",
+    "on_error",
 ]
