@@ -225,7 +225,7 @@ class Retry:
         self.budget = budget if budget is not None else RetryBudget()
         self._sleep = _sleep
 
-    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, C901, PLR0912 — same complexity rationale as AsyncRetry
+    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, C901, PLR0912, PLR0915 — same complexity rationale as AsyncRetry
         """Process a request through the sync retry loop. See AsyncRetry for full contract."""
         method_eligible = request.method.upper() in self.retry_methods
         last_exc: BaseException | None = None

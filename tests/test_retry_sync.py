@@ -173,9 +173,8 @@ def test_streaming_body_refusal_emits_log_event(caplog: pytest.LogCaptureFixture
     request = httpx2.Request("GET", "https://example.test/x")
     request.extensions[STREAMING_BODY_MARKER] = True
 
-    with caplog.at_level(logging.WARNING, logger="httpware.retry"):
-        with pytest.raises(ServiceUnavailableError):
-            client.send(request)
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
+        client.send(request)
     assert any("retry refused" in r.getMessage() for r in caplog.records)
 
 
@@ -455,9 +454,8 @@ def test_emits_giving_up_log_event(caplog: pytest.LogCaptureFixture) -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE] * 2)
     client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_attempts=2))
-    with caplog.at_level(logging.WARNING, logger="httpware.retry"):
-        with pytest.raises(ServiceUnavailableError):
-            client.get("https://example.test/x")
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
+        client.get("https://example.test/x")
     assert any("retry gave up" in r.getMessage() for r in caplog.records)
 
 
@@ -465,9 +463,8 @@ def test_emits_budget_refused_log_event(caplog: pytest.LogCaptureFixture) -> Non
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
     client = _client(handler, retry=Retry(_sleep=sleeper, budget=_zero_budget(), max_attempts=3))
-    with caplog.at_level(logging.WARNING, logger="httpware.retry"):
-        with pytest.raises(RetryBudgetExhaustedError):
-            client.get("https://example.test/x")
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(RetryBudgetExhaustedError):
+        client.get("https://example.test/x")
     assert any("budget refused" in r.getMessage() for r in caplog.records)
 
 
@@ -479,4 +476,4 @@ def test_is_streaming_body_sync_predicates() -> None:
     assert _is_streaming_body_sync([1, 2]) is False
     assert _is_streaming_body_sync((1, 2)) is False
     assert _is_streaming_body_sync(iter([1, 2])) is True
-    assert _is_streaming_body_sync((x for x in range(3))) is True  # generator
+    assert _is_streaming_body_sync(x for x in range(3)) is True  # generator

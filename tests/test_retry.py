@@ -474,7 +474,7 @@ def test_is_streaming_body_sync_predicates() -> None:
     assert _is_streaming_body_sync([1, 2]) is False
     assert _is_streaming_body_sync((1, 2)) is False
     assert _is_streaming_body_sync(iter([1, 2])) is True
-    assert _is_streaming_body_sync((x for x in range(3))) is True
+    assert _is_streaming_body_sync(x for x in range(3)) is True
 
 
 async def test_retry_refuses_streamed_body_request() -> None:

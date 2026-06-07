@@ -5,6 +5,7 @@ event loop can deposit/withdraw concurrently without corrupting the internal deq
 """
 
 import asyncio
+import contextlib
 import threading
 from http import HTTPStatus
 
@@ -19,58 +20,53 @@ _N_OPS_PER_THREAD = 50
 _N_ASYNC_TASKS = 20
 
 
+def _failing_handler(request: httpx2.Request) -> httpx2.Response:
+    return httpx2.Response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
+
+
+def _sync_worker(sync_client: Client) -> None:
+    for _ in range(_N_OPS_PER_THREAD):
+        with contextlib.suppress(Exception):
+            sync_client.get("https://example.test/x")
+
+
+async def _safe_get(async_client: AsyncClient) -> None:
+    with contextlib.suppress(Exception):
+        await async_client.get("https://example.test/x")
+
+
+async def _drive_async_side(budget: RetryBudget) -> None:
+    transport = httpx2.MockTransport(_failing_handler)
+    async_client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[
+            AsyncRetry(
+                budget=budget,
+                max_attempts=2,
+                base_delay=0.0001,
+                max_delay=0.001,
+                _sleep=asyncio.sleep,
+            ),
+        ],
+    )
+    async with async_client:
+        await asyncio.gather(*[_safe_get(async_client) for _ in range(_N_ASYNC_TASKS)])
+
+
 def test_shared_budget_across_sync_threads_and_async_loop() -> None:
     budget = RetryBudget(ttl=60.0, min_retries_per_sec=1000.0, percent_can_retry=0.5)
 
-    def sync_handler(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
-
-    def async_handler(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
-
-    # Sync side: ThreadPoolExecutor of Client.get() calls
-    sync_transport = httpx2.MockTransport(sync_handler)
+    sync_transport = httpx2.MockTransport(_failing_handler)
     sync_client = Client(
         httpx2_client=httpx2.Client(transport=sync_transport),
         middleware=[Retry(budget=budget, max_attempts=2, base_delay=0.0001, max_delay=0.001)],
     )
 
-    def sync_worker() -> None:
-        for _ in range(_N_OPS_PER_THREAD):
-            try:
-                sync_client.get("https://example.test/x")
-            except Exception:  # noqa: BLE001 — we expect failures; just keep deposits/withdraws flowing
-                pass
-
-    threads = [threading.Thread(target=sync_worker) for _ in range(_N_SYNC_THREADS)]
+    threads = [threading.Thread(target=_sync_worker, args=(sync_client,)) for _ in range(_N_SYNC_THREADS)]
     for t in threads:
         t.start()
 
-    # Async side: an event loop driving AsyncClient
-    async def _safe_get(c: AsyncClient) -> None:
-        try:
-            await c.get("https://example.test/x")
-        except Exception:  # noqa: BLE001
-            pass
-
-    async def async_main() -> None:
-        async_transport = httpx2.MockTransport(async_handler)
-        async_client = AsyncClient(
-            httpx2_client=httpx2.AsyncClient(transport=async_transport),
-            middleware=[
-                AsyncRetry(
-                    budget=budget,
-                    max_attempts=2,
-                    base_delay=0.0001,
-                    max_delay=0.001,
-                    _sleep=asyncio.sleep,
-                ),
-            ],
-        )
-        async with async_client:
-            await asyncio.gather(*[_safe_get(async_client) for _ in range(_N_ASYNC_TASKS)])
-
-    asyncio.run(async_main())
+    asyncio.run(_drive_async_side(budget))
 
     for t in threads:
         t.join()

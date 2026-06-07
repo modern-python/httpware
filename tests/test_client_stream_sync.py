@@ -51,9 +51,8 @@ def test_auto_raises_on_4xx_with_body_preread() -> None:
         return httpx2.Response(_NOT_FOUND, request=request, content=body)
 
     client = _client(handler)
-    with pytest.raises(NotFoundError) as info:
-        with client.stream("GET", "https://example.test/missing"):
-            pytest.fail("should have raised before reaching block body")  # pragma: no cover
+    with pytest.raises(NotFoundError) as info, client.stream("GET", "https://example.test/missing"):
+        pytest.fail("should have raised before reaching block body")  # pragma: no cover
     assert info.value.response.status_code == _NOT_FOUND
     assert info.value.response.content == body  # body was pre-read; accessible
 
@@ -65,9 +64,8 @@ def test_auto_raises_on_5xx_with_body_preread() -> None:
         return httpx2.Response(_SERVICE_UNAVAILABLE, request=request, content=body)
 
     client = _client(handler)
-    with pytest.raises(ServiceUnavailableError) as info:
-        with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+    with pytest.raises(ServiceUnavailableError) as info, client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")  # pragma: no cover
     assert info.value.response.content == body
 
 
@@ -76,9 +74,8 @@ def test_auto_raises_unknown_4xx_falls_back_to_client_status_error() -> None:
         return httpx2.Response(_UNKNOWN_4XX, request=request)
 
     client = _client(handler)
-    with pytest.raises(ClientStatusError) as info:
-        with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+    with pytest.raises(ClientStatusError) as info, client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")  # pragma: no cover
     assert type(info.value) is ClientStatusError
     assert info.value.response.status_code == _UNKNOWN_4XX
 
@@ -88,9 +85,8 @@ def test_auto_raises_unknown_5xx_falls_back_to_server_status_error() -> None:
         return httpx2.Response(_UNKNOWN_5XX, request=request)
 
     client = _client(handler)
-    with pytest.raises(ServerStatusError) as info:
-        with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+    with pytest.raises(ServerStatusError) as info, client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")  # pragma: no cover
     assert type(info.value) is ServerStatusError
     assert info.value.response.status_code == _UNKNOWN_5XX
 
@@ -110,9 +106,8 @@ def test_network_error_during_request_maps_to_network_error() -> None:
         raise httpx2.ConnectError(msg)
 
     client = _client(handler)
-    with pytest.raises(NetworkError, match="connect refused"):
-        with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+    with pytest.raises(NetworkError, match="connect refused"), client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")  # pragma: no cover
 
 
 def test_network_error_during_body_consumption_maps_to_network_error() -> None:
@@ -141,9 +136,8 @@ def test_timeout_during_stream_maps_to_httpware_timeout() -> None:
         raise httpx2.ReadTimeout(msg)
 
     client = _client(handler)
-    with pytest.raises(HttpwareTimeoutError, match="read timeout"):
-        with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+    with pytest.raises(HttpwareTimeoutError, match="read timeout"), client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")  # pragma: no cover
 
 
 def test_invalid_url_maps_to_bare_transport_error() -> None:
@@ -152,9 +146,8 @@ def test_invalid_url_maps_to_bare_transport_error() -> None:
         raise httpx2.InvalidURL(msg)
 
     client = _client(handler)
-    with pytest.raises(TransportError) as info:
-        with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+    with pytest.raises(TransportError) as info, client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")  # pragma: no cover
     assert not isinstance(info.value, NetworkError)
 
 

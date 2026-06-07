@@ -3,10 +3,12 @@
 from http import HTTPStatus
 
 import httpx2
+import pydantic
 import pytest
 
 from httpware import Client, NotFoundError
 from httpware.decoders.pydantic import PydanticDecoder
+from httpware.errors import TransportError
 
 
 # ---------- Construction ----------
@@ -257,8 +259,6 @@ def test_runtime_error_without_closed_reraises() -> None:
 
 def test_terminal_runtime_error_with_closed_maps_to_transport_error() -> None:
     """A RuntimeError mentioning 'closed' should be remapped to TransportError."""
-    from httpware.errors import TransportError
-
     transport = httpx2.MockTransport(lambda req: httpx2.Response(HTTPStatus.OK, request=req))
     underlying = httpx2.Client(transport=transport)
     client = Client(httpx2_client=underlying)
@@ -269,10 +269,9 @@ def test_terminal_runtime_error_with_closed_maps_to_transport_error() -> None:
 
 def test_send_with_response_model_decodes() -> None:
     """Exercises the response_model decode path in send()."""
-    import pydantic
 
     class _User(pydantic.BaseModel):
-        id: int  # noqa: A003
+        id: int
         name: str
 
     def handler(request: httpx2.Request) -> httpx2.Response:

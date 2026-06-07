@@ -160,9 +160,8 @@ def test_emits_rejected_event(caplog: pytest.LogCaptureFixture) -> None:
     holder.start()
     time.sleep(0.01)
     try:
-        with caplog.at_level(logging.WARNING, logger="httpware.bulkhead"):
-            with pytest.raises(BulkheadFullError):
-                client.get("https://example.test/blocked")
+        with caplog.at_level(logging.WARNING, logger="httpware.bulkhead"), pytest.raises(BulkheadFullError):
+            client.get("https://example.test/blocked")
         assert any("bulkhead rejected" in r.getMessage() for r in caplog.records)
     finally:
         holder.join()
