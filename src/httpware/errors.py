@@ -212,3 +212,45 @@ class BulkheadFullError(ClientError):
             _reconstruct_bulkhead_full,
             (type(self), self.max_concurrent, self.acquire_timeout),
         )
+
+
+def _reconstruct_decode_error(
+    cls: "type[DecodeError]",
+    response: httpx2.Response,
+    model: type,
+    original: BaseException,
+) -> "DecodeError":
+    return cls(response=response, model=model, original=original)
+
+
+class DecodeError(ClientError):
+    """Raised when the active ResponseDecoder failed to decode response.content.
+
+    The HTTP call itself succeeded — status was 2xx/3xx and the transport
+    delivered the body intact — but the body could not be parsed into the
+    requested response_model. Always chained from the underlying library
+    exception via ``raise ... from exc``; that exception is also exposed as
+    ``self.original`` for structured handling.
+    """
+
+    response: httpx2.Response
+    model: type
+    original: BaseException
+
+    def __init__(
+        self,
+        *,
+        response: httpx2.Response,
+        model: type,
+        original: BaseException,
+    ) -> None:
+        self.response = response
+        self.model = model
+        self.original = original
+        super().__init__(f"failed to decode response into {model.__name__}: {original}")
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_decode_error,
+            (type(self), self.response, self.model, self.original),
+        )
