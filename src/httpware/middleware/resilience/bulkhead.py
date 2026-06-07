@@ -1,4 +1,4 @@
-"""Bulkhead middleware — concurrency limiter via asyncio.Semaphore.
+"""AsyncBulkhead middleware — concurrency limiter via asyncio.Semaphore.
 
 See planning/specs/2026-06-05-bulkhead-design.md for the contract.
 
@@ -7,7 +7,7 @@ it acquires a slot (bounded by acquire_timeout via asyncio.timeout) and
 releases the slot in a try/finally so success, exceptions, and cancellation
 all release deterministically.
 
-Bulkhead is the sharable unit — pass the same instance to multiple
+AsyncBulkhead is the sharable unit — pass the same instance to multiple
 AsyncClient(middleware=[shared]) calls to enforce a joint cap across clients.
 """
 
@@ -33,7 +33,7 @@ class AsyncBulkhead:
     Parameters
     ----------
     max_concurrent
-        Required. Maximum number of in-flight requests this Bulkhead permits.
+        Required. Maximum number of in-flight requests this AsyncBulkhead permits.
         Must be ``>= 1``. There is no default because no value is universally
         correct — the right cap depends on downstream capacity and SLA.
     acquire_timeout

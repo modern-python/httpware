@@ -1,9 +1,9 @@
-"""Retry middleware — automatic retry of transient failures with budget control.
+"""AsyncRetry middleware — automatic retry of transient failures with budget control.
 
 See planning/specs/2026-06-05-retry-and-retry-budget-design.md for the full contract.
 
 Status-code retry: the AsyncClient terminal raises StatusError subclasses on 4xx/5xx,
-so Retry catches StatusError and inspects exc.response.status_code. The original
+so AsyncRetry catches StatusError and inspects exc.response.status_code. The original
 StatusError subclass is re-raised unwrapped on exhaustion, with a PEP 678 note added.
 """
 
@@ -123,7 +123,7 @@ class AsyncRetry:
             # ---- retryable failure path
             if request.extensions.get(STREAMING_BODY_MARKER):
                 if last_exc is None:  # pragma: no cover — invariant from except branch
-                    msg = "Retry: streaming-body refusal reached with no last_exc"
+                    msg = "AsyncRetry: streaming-body refusal reached with no last_exc"
                     raise AssertionError(msg)
                 last_exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                 _emit_event(
@@ -141,7 +141,7 @@ class AsyncRetry:
 
             if is_last:
                 if last_exc is None:  # pragma: no cover — structural invariant from except branch
-                    msg = "Retry: last_exc unset on final attempt — unreachable"
+                    msg = "AsyncRetry: last_exc unset on final attempt — unreachable"
                     raise AssertionError(msg)
                 last_exc.add_note(f"httpware: gave up after {attempt + 1} attempts")
                 _emit_event(

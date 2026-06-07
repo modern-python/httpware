@@ -74,7 +74,7 @@ def _raise_on_status_error(response: httpx2.Response) -> None:
 STREAMING_BODY_MARKER = "httpware.streaming_body"
 """Key set on ``httpx2.Request.extensions`` by ``_request_with_body`` when content/data/files is an async-iterable.
 
-``Retry.__call__`` reads this marker to refuse retrying a streamed-body request
+``AsyncRetry.__call__`` reads this marker to refuse retrying a streamed-body request
 (the consumed iterator cannot replay across attempts)."""
 
 
@@ -718,7 +718,7 @@ class AsyncClient:
         The body is NOT pre-read for 2xx/3xx (streaming preserved); the response
         is closed when the context exits.
 
-        Bypasses the middleware chain (no Retry, no Bulkhead, no user-installed
+        Bypasses the middleware chain (no AsyncRetry, no AsyncBulkhead, no user-installed
         middleware) for v1 — see planning/specs/2026-06-05-streaming-design.md.
 
         Auto-raises StatusError subclasses on 4xx/5xx (NotFoundError,

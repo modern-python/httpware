@@ -6,6 +6,8 @@ This doc is the single distilled reference for `httpware` design rationale, prot
 
 `httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request` and `httpx2.Response` as the public request/response surface and adds three things on top: typed response decoding (via a `ResponseDecoder` protocol; pydantic and msgspec are both opt-in extras as of 0.3.0), a middleware chain composed at client construction, and a status-keyed exception tree raised automatically on 4xx and 5xx. `AsyncClient(decoder=None)` defaults to constructing a `PydanticDecoder` and so requires the `pydantic` extra; callers can supply an explicit `decoder=` argument to escape the default. As of 0.4.0, the package ships a small resilience suite under `httpware.middleware.resilience` — a `Retry` middleware with a Finagle-style `RetryBudget`, plus a `Bulkhead` concurrency limiter — composed via the standard middleware chain. As of 0.5.0, `AsyncClient.stream()` provides a context-manager API for chunked response bodies; it bypasses the middleware chain by design (see planning/archive/specs/2026-06-05-streaming-design.md). As of 0.6.0, `Retry` and `Bulkhead` emit operational events via stdlib `logging` records (`httpware.retry` / `httpware.bulkhead` loggers) and — when `opentelemetry-api` is installed — OpenTelemetry span events on the active span. As of 0.7.0, the first-cut user-docs surface is live at <https://httpware.readthedocs.io/> (Middleware, Resilience, Errors, Testing guides) and Epic 3 is closed.
 
+The next release renames the async middleware surface to use the `Async*`/`async_*` prefix (aligning with httpx2's convention) and removes the seldom-used `attempt_timeout=` kwarg from `AsyncRetry` — see `planning/specs/2026-06-07-sync-client-design.md` for the rationale.
+
 The 0.1.0 release attempted to own a full abstraction over the underlying HTTP client. v0.2 walks that back: `httpx2` is part of the public surface.
 
 ## 2. Architectural invariants (CI-enforced)
@@ -26,10 +28,10 @@ A protocol seam is a documented internal boundary. AI agents and contributors mu
 
 The 0.1.0 seams numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) have collapsed into the `AsyncClient` terminal — there is no transport abstraction in v0.2.
 
-### Seam A: `AsyncClient ↔ Middleware`
+### Seam A: `AsyncClient ↔ AsyncMiddleware`
 
 - **Where:** `src/httpware/client.py` ↔ `src/httpware/middleware/`.
-- **Contract:** the middleware chain is composed once at `AsyncClient.__init__` and frozen for the client's lifetime. The chain bottom (the "terminal") is internal: it calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx.
+- **Contract:** the `AsyncMiddleware` chain is composed once via `compose_async` at `AsyncClient.__init__` and frozen for the client's lifetime. The chain bottom (the "terminal") is internal: it calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx. The continuation type passed to each middleware is `AsyncNext`.
 - **Rule:** mutating the chain after construction is not supported. Per-request behavior goes through `httpx2.Request.extensions` or through `extensions=` kwargs at call sites.
 
 ### Seam B: `AsyncClient ↔ ResponseDecoder`
@@ -72,13 +74,13 @@ src/httpware/
 ├── client.py              # AsyncClient
 ├── errors.py              # status-keyed exception tree + NetworkError + RetryBudgetExhaustedError + BulkheadFullError
 ├── middleware/
-│   ├── __init__.py        # Middleware protocol, Next type, @before_request/@after_response/@on_error
-│   ├── chain.py           # compose(middleware, terminal) -> Next
+│   ├── __init__.py        # AsyncMiddleware protocol, AsyncNext type, @async_before_request/@async_after_response/@async_on_error
+│   ├── chain.py           # compose_async(middleware, terminal) -> AsyncNext
 │   └── resilience/
-│       ├── __init__.py    # re-exports Bulkhead, Retry, RetryBudget
-│       ├── bulkhead.py    # Bulkhead middleware (concurrency limiter)
+│       ├── __init__.py    # re-exports AsyncBulkhead, AsyncRetry, RetryBudget
+│       ├── bulkhead.py    # AsyncBulkhead middleware (concurrency limiter)
 │       ├── budget.py      # RetryBudget (Finagle-style token bucket)
-│       ├── retry.py       # Retry middleware
+│       ├── retry.py       # AsyncRetry middleware
 │       └── _backoff.py    # full-jitter exponential backoff helper (private)
 ├── decoders/
 │   ├── __init__.py        # ResponseDecoder protocol

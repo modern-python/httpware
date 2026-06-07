@@ -1,6 +1,6 @@
 """AsyncMiddleware protocol, AsyncNext type, and phase-shortcut decorators.
 
-Middleware operates directly on httpx2.Request / httpx2.Response — there is
+AsyncMiddleware operates directly on httpx2.Request / httpx2.Response — there is
 no httpware-owned request type. The chain is composed at AsyncClient.__init__
 (see client.py) and frozen for the client's lifetime.
 """
