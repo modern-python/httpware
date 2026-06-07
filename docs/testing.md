@@ -51,7 +51,7 @@ async def test_retry_succeeds_after_503() -> None:
     transport = httpx2.MockTransport(handler)
     async with AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(base_delay=0.001, max_delay=0.002)],
+        middleware=[AsyncRetry(base_delay=0.001, max_delay=0.002)],
     ) as client:
         response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
@@ -84,5 +84,5 @@ For middleware with state-keeping (counters, circuit-breaker state), assert on i
 ## See also
 
 - **[Middleware guide](middleware.md)** — write the middleware you're testing.
-- **[Resilience reference](resilience.md)** — testing `Retry`/`Bulkhead` configurations.
+- **[Resilience reference](resilience.md)** — testing `AsyncRetry`/`AsyncBulkhead` configurations.
 - **`planning/engineering.md` §6** — the project's own testing patterns (Hypothesis property-based tests, `pytest-asyncio` auto-mode, the `RecordedTransport`-was-removed history).

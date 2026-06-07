@@ -9,7 +9,7 @@ For the resilience-specific errors (`RetryBudgetExhaustedError`, `BulkheadFullEr
 ```
 ClientError                          (catch-all for anything httpware raises)
 ├── TransportError                   (connection/network/protocol failure pre-response)
-│   └── NetworkError                 (transient — safe to retry; covered by Retry's defaults)
+│   └── NetworkError                 (transient — safe to retry; covered by AsyncRetry's defaults)
 ├── TimeoutError                     (also inherits builtins.TimeoutError — except OSError catches it)
 ├── StatusError                      (got a response but its status was 4xx/5xx)
 │   ├── ClientStatusError            (any 4xx — fallback for unknown 4xx codes)
@@ -72,7 +72,7 @@ async def fetch(client: AsyncClient, user_id: int) -> dict | None:
         _LOGGER.warning("upstream returned %s for %s", exc.response.status_code, exc.response.request.url)
         raise
     except NetworkError:
-        # Transient transport failure. Already retried by the default Retry middleware
+        # Transient transport failure. Already retried by the default AsyncRetry middleware
         # (if installed) when the method was idempotent. Seeing this means retries
         # exhausted or the method was non-idempotent.
         raise
@@ -128,6 +128,6 @@ except RetryBudgetExhaustedError as exc:
 
 ## See also
 
-- **[Resilience reference](resilience.md)** — `Retry`, `RetryBudget`, `Bulkhead` parameter tables.
-- **[Middleware guide](middleware.md)** — the `@on_error` decorator can translate exceptions into responses.
+- **[Resilience reference](resilience.md)** — `AsyncRetry`, `RetryBudget`, `AsyncBulkhead` parameter tables.
+- **[Middleware guide](middleware.md)** — the `@async_on_error` decorator can translate exceptions into responses.
 - **`planning/engineering.md` §4** — the formal exception contract.

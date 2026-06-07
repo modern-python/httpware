@@ -7,7 +7,7 @@
 
 **Async HTTP client framework for Python.**
 
-`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain composed at client construction, supports opt-in typed response decoding (pydantic and msgspec are both extras), and raises a status-keyed exception tree automatically on 4xx/5xx. It also ships a small resilience suite — `Retry` middleware with a Finagle-style `RetryBudget`, plus a `Bulkhead` concurrency limiter — under `httpware.middleware.resilience`.
+`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain composed at client construction, supports opt-in typed response decoding (pydantic and msgspec are both extras), and raises a status-keyed exception tree automatically on 4xx/5xx. It also ships a small resilience suite — `AsyncRetry` middleware with a Finagle-style `RetryBudget`, plus an `AsyncBulkhead` concurrency limiter — under `httpware.middleware.resilience`.
 
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
@@ -44,18 +44,18 @@ async def main() -> None:
 
 ### With resilience middleware
 
-Compose resilience middleware at construction; `Bulkhead` goes outside `Retry` so one slot covers all retry attempts.
+Compose resilience middleware at construction; `AsyncBulkhead` goes outside `AsyncRetry` so one slot covers all retry attempts.
 
 ```python
-from httpware import AsyncClient, Bulkhead, Retry
+from httpware import AsyncClient, AsyncBulkhead, AsyncRetry
 
 
 async def main() -> None:
     async with AsyncClient(
         base_url="https://api.example.com",
         middleware=[
-            Bulkhead(max_concurrent=10),  # cap total in-flight
-            Retry(),                       # default: 3 attempts, full-jitter backoff
+            AsyncBulkhead(max_concurrent=10),  # cap total in-flight
+            AsyncRetry(),                       # default: 3 attempts, full-jitter backoff
         ],
     ) as client:
         user = await client.get("/users/1", response_model=User)
@@ -80,7 +80,7 @@ async def main() -> None:
 
 `stream()` auto-raises `StatusError` subclasses on 4xx/5xx with the response body pre-read, so `exc.response.content` is accessible from the caught exception.
 
-It does NOT pass through the middleware chain: `Retry`, `Bulkhead`, and any custom middleware are bypassed. (Retry separately refuses to retry any request — stream or non-stream — whose body was an async-iterable, since streams can't replay across attempts.)
+It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, and any custom middleware are bypassed. (AsyncRetry separately refuses to retry any request — stream or non-stream — whose body was an async-iterable, since streams can't replay across attempts.)
 
 ## Errors
 
@@ -88,7 +88,7 @@ All 4xx/5xx responses raise typed exceptions automatically: `NotFoundError`, `Se
 
 ## Observability
 
-`Retry` and `Bulkhead` emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed).
+`AsyncRetry` and `AsyncBulkhead` emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed).
 
 Logger names (`httpware.retry`, `httpware.bulkhead`) and event names (`retry.giving_up`, `retry.budget_refused`, `retry.streaming_refused`, `bulkhead.rejected`) are the stable public contract.
 
