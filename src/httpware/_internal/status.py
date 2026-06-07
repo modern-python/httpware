@@ -4,7 +4,6 @@ Shared by Client and AsyncClient. The STREAMING_BODY_MARKER is the public
 extensions key both Retry and AsyncRetry read; renaming it is breaking.
 """
 
-import typing
 from http import HTTPStatus
 
 import httpx2
@@ -30,7 +29,7 @@ def _raise_on_status_error(response: httpx2.Response) -> None:
         raise exc_class(response)
 
 
-def _is_streaming_body_async(value: typing.Any) -> bool:
+def _is_streaming_body_async(value: object) -> bool:
     """Return True if value is an async-iterable that cannot be safely replayed for retry."""
     if value is None:
         return False
@@ -39,7 +38,7 @@ def _is_streaming_body_async(value: typing.Any) -> bool:
     return hasattr(value, "__aiter__")
 
 
-def _is_streaming_body_sync(value: typing.Any) -> bool:
+def _is_streaming_body_sync(value: object) -> bool:
     """Return True if value is a sync iterable body that cannot be safely replayed for retry."""
     if value is None:
         return False

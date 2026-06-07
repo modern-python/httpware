@@ -17,7 +17,7 @@ from http import HTTPStatus
 import httpx2
 
 from httpware._internal.observability import _emit_event
-from httpware.client import STREAMING_BODY_MARKER
+from httpware._internal.status import STREAMING_BODY_MARKER
 from httpware.errors import NetworkError, RetryBudgetExhaustedError, StatusError, TimeoutError  # noqa: A004
 from httpware.middleware import AsyncNext
 from httpware.middleware.resilience._backoff import full_jitter_delay

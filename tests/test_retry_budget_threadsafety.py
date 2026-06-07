@@ -25,7 +25,7 @@ def test_concurrent_deposit_withdraw_does_not_corrupt() -> None:
             for _ in range(_N_OPS_PER_THREAD):
                 budget.deposit()
                 budget.try_withdraw()
-        except BaseException as exc:  # noqa: BLE001 — collect any failure for the assert
+        except BaseException as exc:  # noqa: BLE001 — collect any failure for the assert  # pragma: no cover — defensive harness; passes mean this branch is not taken
             errors.append(exc)
 
     threads = [threading.Thread(target=worker) for _ in range(_N_THREADS)]
