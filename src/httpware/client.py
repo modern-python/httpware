@@ -16,7 +16,7 @@ from httpware._internal.status import (
     _raise_on_status_error,
 )
 from httpware.decoders import ResponseDecoder
-from httpware.errors import TransportError
+from httpware.errors import DecodeError, TransportError
 from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
 from httpware.middleware.chain import compose, compose_async
 
@@ -154,7 +154,10 @@ class AsyncClient:
         response = await self._dispatch(request)
         if response_model is None:
             return response
-        return self._decoder.decode(response.content, response_model)
+        try:
+            return self._decoder.decode(response.content, response_model)
+        except Exception as exc:
+            raise DecodeError(response=response, model=response_model, original=exc) from exc
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.AsyncClient."""
@@ -871,7 +874,10 @@ class Client:
         response = self._dispatch(request)
         if response_model is None:
             return response
-        return self._decoder.decode(response.content, response_model)
+        try:
+            return self._decoder.decode(response.content, response_model)
+        except Exception as exc:
+            raise DecodeError(response=response, model=response_model, original=exc) from exc
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.Client."""
