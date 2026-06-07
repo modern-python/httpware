@@ -47,27 +47,11 @@ from httpware.middleware import before_request, after_response, on_error
 | `@after_response` | `async (request, response) -> response` | Transform the incoming response (decode, log, attach metadata). |
 | `@on_error` | `async (request, exc) -> response \| None` | Translate or absorb a failure. Return `None` to re-raise. Catches `Exception` (not `BaseException`), so `asyncio.CancelledError` propagates. |
 
-Brief example — adding an `Authorization` header before every request:
-
-```python
-import httpx2
-
-from httpware import AsyncClient
-from httpware.middleware import before_request
-
-
-@before_request
-async def add_bearer(request: httpx2.Request) -> httpx2.Request:
-    request.headers["Authorization"] = "Bearer secret-token"
-    return request
-
-
-async def main() -> None:
-    async with AsyncClient(base_url="https://api.example.com", middleware=[add_bearer]) as client:
-        await client.get("/me")
-```
+See the **[Phase decorator recipes](recipes/phase-decorator-patterns.md)** for worked examples covering each decorator: bearer-token injection, correlation-ID propagation from `contextvars`, status-class counter, and `NetworkError` fallback.
 
 **Reach for the raw `Middleware` protocol when:** you need instance state (a counter, a CircuitBreaker's open/closed flag), you need to inspect both the request AND its response (e.g., timing), or you need to interleave behavior around the `await next(...)` call (e.g., emit one log line at the start and one at the end). The decorators are a convenience for the cases where a single function suffices.
+
+**Reach for `httpx2.event_hooks` instead when:** the transform doesn't need `httpware`'s exception mapping or chain ordering — pure request/response side effects at the lowest level. Phase decorators participate in the `httpware` middleware chain (they see `httpware` exceptions and compose with `Retry`/`Bulkhead`); `event_hooks` run a layer below, on every transport attempt including post-redirect hops. For static header injection or response logging that doesn't care about either property, a hook installed on the wrapped `httpx2_client` is the simpler tool.
 
 ## Worked example: request-ID propagation
 

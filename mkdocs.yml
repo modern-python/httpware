@@ -12,6 +12,7 @@ nav:
   - Testing: testing.md
   - Recipes:
       - modern-di: recipes/modern-di.md
+      - Phase decorator patterns: recipes/phase-decorator-patterns.md
   - Development:
       - Contributing: dev/contributing.md
 
