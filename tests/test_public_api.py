@@ -28,14 +28,14 @@ def test_no_removed_symbols_leaked() -> None:
 
 def test_expected_exports() -> None:
     expected = {
+        "AsyncBulkhead",
         "AsyncClient",
-        "Bulkhead",
+        "AsyncMiddleware",
+        "AsyncNext",
+        "AsyncRetry",
         "BulkheadFullError",
-        "Middleware",
         "NetworkError",
-        "Next",
         "ResponseDecoder",
-        "Retry",
         "RetryBudget",
         "RetryBudgetExhaustedError",
         "ClientError",
@@ -54,9 +54,9 @@ def test_expected_exports() -> None:
         "InternalServerError",
         "ServiceUnavailableError",
         "STATUS_TO_EXCEPTION",
-        "before_request",
-        "after_response",
-        "on_error",
+        "async_before_request",
+        "async_after_response",
+        "async_on_error",
     }
     missing = expected - set(httpware.__all__)
     assert not missing, f"expected exports missing from __all__: {missing}"

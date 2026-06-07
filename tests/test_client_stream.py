@@ -19,7 +19,7 @@ from httpware import (
 from httpware import (
     TimeoutError as HttpwareTimeoutError,
 )
-from httpware.middleware import Middleware, Next
+from httpware.middleware import AsyncMiddleware, AsyncNext
 
 
 _UNKNOWN_4XX = 418  # I'm a teapot
@@ -202,7 +202,7 @@ async def test_bypasses_middleware_chain() -> None:
     invocations = {"n": 0}
 
     class _RecordingMiddleware:
-        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002  # pragma: no cover
+        async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002  # pragma: no cover
             invocations["n"] += 1
             return await next(request)
 
@@ -210,7 +210,7 @@ async def test_bypasses_middleware_chain() -> None:
         return httpx2.Response(HTTPStatus.OK, request=request, content=b"x")
 
     transport = httpx2.MockTransport(handler)
-    middleware: Middleware = _RecordingMiddleware()
+    middleware: AsyncMiddleware = _RecordingMiddleware()
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
         middleware=[middleware],

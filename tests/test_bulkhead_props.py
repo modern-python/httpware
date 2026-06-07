@@ -1,4 +1,4 @@
-"""Hypothesis property tests for Bulkhead.
+"""Hypothesis property tests for AsyncBulkhead.
 
 Properties verified:
 1. Observed in-flight count never exceeds max_concurrent under any interleaving.
@@ -17,7 +17,7 @@ from hypothesis import strategies as st
 
 from httpware import AsyncClient
 from httpware.errors import BulkheadFullError
-from httpware.middleware.resilience.bulkhead import Bulkhead
+from httpware.middleware.resilience.bulkhead import AsyncBulkhead
 
 
 class _InFlightHandler:
@@ -55,7 +55,7 @@ async def test_in_flight_never_exceeds_max_concurrent(
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Bulkhead(max_concurrent=max_concurrent, acquire_timeout=None)],
+        middleware=[AsyncBulkhead(max_concurrent=max_concurrent, acquire_timeout=None)],
     )
     await asyncio.gather(*(client.get(f"https://example.test/{i}") for i in range(n_requests)))
     assert handler.calls == n_requests
@@ -75,7 +75,7 @@ async def test_fail_fast_rejects_when_at_capacity(
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Bulkhead(max_concurrent=max_concurrent, acquire_timeout=0)],
+        middleware=[AsyncBulkhead(max_concurrent=max_concurrent, acquire_timeout=0)],
     )
 
     # Fill the bulkhead with max_concurrent long-running tasks.
@@ -99,7 +99,7 @@ async def test_fail_fast_rejects_when_at_capacity(
 async def test_no_slot_leak_after_drain(max_concurrent: int, n_requests: int) -> None:
     """After all calls complete, the bulkhead has its full capacity available."""
     handler = _InFlightHandler(delay=0.001)
-    bulkhead = Bulkhead(max_concurrent=max_concurrent, acquire_timeout=None)
+    bulkhead = AsyncBulkhead(max_concurrent=max_concurrent, acquire_timeout=None)
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
@@ -108,6 +108,6 @@ async def test_no_slot_leak_after_drain(max_concurrent: int, n_requests: int) ->
 
     await asyncio.gather(*(client.get(f"https://example.test/{i}") for i in range(n_requests)))
 
-    # Bulkhead should be drained — _value equals max_concurrent again.
+    # AsyncBulkhead should be drained — _value equals max_concurrent again.
     # asyncio.Semaphore._value is implementation detail but reliable across CPython 3.11+.
     assert bulkhead._sem._value == max_concurrent  # noqa: SLF001

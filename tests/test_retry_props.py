@@ -1,4 +1,4 @@
-"""Hypothesis property tests for Retry.
+"""Hypothesis property tests for AsyncRetry.
 
 Properties verified:
 1. Total attempts never exceed max_attempts.
@@ -19,7 +19,7 @@ from httpware.middleware.resilience.budget import RetryBudget
 from httpware.middleware.resilience.retry import (
     DEFAULT_IDEMPOTENT_METHODS,
     DEFAULT_RETRY_STATUS_CODES,
-    Retry,
+    AsyncRetry,
 )
 
 
@@ -70,7 +70,7 @@ async def test_total_attempts_never_exceeds_max_attempts(
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
         middleware=[
-            Retry(
+            AsyncRetry(
                 _sleep=sleeper,
                 max_attempts=max_attempts,
                 base_delay=0.001,
@@ -102,7 +102,7 @@ async def test_total_sleep_never_exceeds_max_attempts_times_max_delay(
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
         middleware=[
-            Retry(
+            AsyncRetry(
                 _sleep=sleeper,
                 max_attempts=max_attempts,
                 base_delay=base_delay,
@@ -135,7 +135,7 @@ async def test_non_retryable_status_causes_one_attempt(status: int, method: str)
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002)],
+        middleware=[AsyncRetry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002)],
     )
     try:  # noqa: SIM105 — contextlib.suppress can't be used in async Hypothesis tests
         await client.request(method, "https://example.test/x")
@@ -161,7 +161,7 @@ async def test_non_idempotent_method_causes_one_attempt(status: int, method: str
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002)],
+        middleware=[AsyncRetry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002)],
     )
     try:  # noqa: SIM105 — contextlib.suppress can't be used in async Hypothesis tests
         await client.request(method, "https://example.test/x")

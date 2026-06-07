@@ -1,4 +1,4 @@
-"""Tests for the Bulkhead middleware.
+"""Tests for the AsyncBulkhead middleware.
 
 Mocks the transport via httpx2.MockTransport. Concurrency tests use real
 asyncio coroutines with sub-100ms timeouts so the suite stays fast.
@@ -17,8 +17,8 @@ import pytest
 
 from httpware import AsyncClient
 from httpware.errors import BulkheadFullError
-from httpware.middleware.resilience.bulkhead import Bulkhead
-from httpware.middleware.resilience.retry import Retry
+from httpware.middleware.resilience.bulkhead import AsyncBulkhead
+from httpware.middleware.resilience.retry import AsyncRetry
 
 
 _MAX_CONCURRENT_1 = 1
@@ -52,7 +52,7 @@ def _client(
     handler: Callable[[httpx2.Request], httpx2.Response]
     | Callable[[httpx2.Request], Coroutine[Any, Any, httpx2.Response]],
     *,
-    bulkhead: Bulkhead,
+    bulkhead: AsyncBulkhead,
 ) -> AsyncClient:
     transport = httpx2.MockTransport(handler)
     return AsyncClient(
@@ -63,32 +63,32 @@ def _client(
 
 def test_max_concurrent_zero_rejected() -> None:
     with pytest.raises(ValueError, match="max_concurrent must be >= 1"):
-        Bulkhead(max_concurrent=0)
+        AsyncBulkhead(max_concurrent=0)
 
 
 def test_max_concurrent_negative_rejected() -> None:
     with pytest.raises(ValueError, match="max_concurrent must be >= 1"):
-        Bulkhead(max_concurrent=-1)
+        AsyncBulkhead(max_concurrent=-1)
 
 
 def test_negative_acquire_timeout_rejected() -> None:
     with pytest.raises(ValueError, match="acquire_timeout must be >= 0"):
-        Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=-0.1)
+        AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=-0.1)
 
 
 def test_acquire_timeout_zero_accepted() -> None:
-    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
     assert bulkhead._acquire_timeout == 0  # noqa: SLF001
 
 
 def test_acquire_timeout_none_accepted() -> None:
-    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
     assert bulkhead._acquire_timeout is None  # noqa: SLF001
 
 
 async def test_succeeds_when_slot_available() -> None:
     handler = _SlowHandler(delay=0.0)
-    client = _client(handler, bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_2))
+    client = _client(handler, bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_2))
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert handler.calls == 1
@@ -99,7 +99,7 @@ async def test_serializes_at_capacity() -> None:
     handler = _SlowHandler(delay=0.02)
     client = _client(
         handler,
-        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
+        bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
     )
     await asyncio.gather(
         client.get("https://example.test/a"),
@@ -112,7 +112,7 @@ async def test_serializes_at_capacity() -> None:
 
 async def test_max_concurrent_2_observes_at_most_2_in_flight() -> None:
     handler = _SlowHandler(delay=0.02)
-    client = _client(handler, bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_2, acquire_timeout=None))
+    client = _client(handler, bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_2, acquire_timeout=None))
     await asyncio.gather(
         client.get("https://example.test/a"),
         client.get("https://example.test/b"),
@@ -126,7 +126,7 @@ async def test_max_concurrent_2_observes_at_most_2_in_flight() -> None:
 async def test_raises_bulkhead_full_error_when_acquire_timeout_exceeded() -> None:
     """Slot is held by a slow request; a second request with a tiny timeout raises BulkheadFullError."""
     handler = _SlowHandler(delay=1.0)
-    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_FAST)
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_FAST)
     client = _client(handler, bulkhead=bulkhead)
 
     async def _hold_slot() -> None:
@@ -159,7 +159,7 @@ async def test_bounded_wait_raises_bulkhead_full_error() -> None:
     handler = _SlowHandler(delay=_ACQUIRE_TIMEOUT_LONG)  # holds slot for 100ms
     client = _client(
         handler,
-        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_SHORT),
+        bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_SHORT),
     )
 
     first = asyncio.create_task(client.get("https://example.test/a"))
@@ -176,7 +176,7 @@ async def test_acquire_timeout_zero_fails_fast() -> None:
     handler = _SlowHandler(delay=_ACQUIRE_TIMEOUT_LONG)
     client = _client(
         handler,
-        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0),
+        bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0),
     )
 
     first = asyncio.create_task(client.get("https://example.test/a"))
@@ -192,7 +192,7 @@ async def test_acquire_timeout_none_waits_forever() -> None:
     handler = _SlowHandler(delay=_ACQUIRE_TIMEOUT_SHORT)
     client = _client(
         handler,
-        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
+        bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
     )
 
     first = asyncio.create_task(client.get("https://example.test/a"))
@@ -213,7 +213,7 @@ async def test_slot_released_after_exception_in_next() -> None:
             raise RuntimeError(msg)
         return httpx2.Response(HTTPStatus.OK, request=request)
 
-    client = _client(handler, bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0))
+    client = _client(handler, bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0))
 
     # First call raises; slot must release.
     with pytest.raises(RuntimeError, match="boom"):
@@ -228,7 +228,7 @@ async def test_slot_released_after_exception_in_next() -> None:
 async def test_slot_released_on_cancellation() -> None:
     """If the calling task is cancelled while next() runs, the slot is released."""
     handler = _SlowHandler(delay=0.5)  # would block indefinitely
-    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
     client = _client(handler, bulkhead=bulkhead)
 
     first = asyncio.create_task(client.get("https://example.test/a"))
@@ -252,7 +252,7 @@ async def test_cancellation_before_acquire_does_not_hold_slot() -> None:
     first releases, the fresh request must complete normally.
     """
     handler = _SlowHandler(delay=0.05)
-    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
     client = _client(handler, bulkhead=bulkhead)
 
     first = asyncio.create_task(client.get("https://example.test/a"))
@@ -273,11 +273,11 @@ async def test_cancellation_before_acquire_does_not_hold_slot() -> None:
 
 
 # Constructed at module scope on purpose — pins the construct-outside-loop behavior.
-_MODULE_SCOPE_BULKHEAD = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
+_MODULE_SCOPE_BULKHEAD = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
 
 
 async def test_construct_outside_event_loop_then_use_inside() -> None:
-    """Bulkhead constructed at module scope must work when used inside an event loop."""
+    """AsyncBulkhead constructed at module scope must work when used inside an event loop."""
     handler = _SlowHandler(delay=0.0)
     client = _client(handler, bulkhead=_MODULE_SCOPE_BULKHEAD)
     response = await client.get("https://example.test/x")
@@ -285,7 +285,7 @@ async def test_construct_outside_event_loop_then_use_inside() -> None:
 
 
 async def test_shared_bulkhead_enforces_joint_cap() -> None:
-    """One Bulkhead shared across two AsyncClients enforces the joint cap."""
+    """One AsyncBulkhead shared across two AsyncClients enforces the joint cap."""
     # Both clients use ONE handler that tracks combined in-flight across all calls.
     # asyncio is single-threaded so a plain dict counter is safe between awaits.
     state = {"in_flight": 0, "max_in_flight": 0}
@@ -299,7 +299,7 @@ async def test_shared_bulkhead_enforces_joint_cap() -> None:
         finally:
             state["in_flight"] -= 1
 
-    shared = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
+    shared = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None)
     client_a = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(shared_handler)),
         middleware=[shared],
@@ -321,16 +321,16 @@ async def test_shared_bulkhead_enforces_joint_cap() -> None:
 
 
 # ----------------------------------------------------------------------------
-# Bulkhead + Retry composition tests
+# AsyncBulkhead + AsyncRetry composition tests
 #
-# The recommended ordering is [Bulkhead, Retry] in middleware= — Bulkhead OUTSIDE
-# Retry so a retrying request holds one slot across all attempts (rather than
+# The recommended ordering is [AsyncBulkhead, AsyncRetry] in middleware= — AsyncBulkhead OUTSIDE
+# AsyncRetry so a retrying request holds one slot across all attempts (rather than
 # re-acquiring per retry). These tests pin the documented composition.
 # ----------------------------------------------------------------------------
 
 
 async def test_bulkhead_outside_retry_holds_one_slot_across_attempts() -> None:
-    """[Bulkhead, Retry]: one slot covers the whole retry sequence, not per-attempt."""
+    """[AsyncBulkhead, AsyncRetry]: one slot covers the whole retry sequence, not per-attempt."""
     state = {"in_flight": 0, "max_in_flight": 0}
     call_count = {"n": 0}
 
@@ -354,21 +354,21 @@ async def test_bulkhead_outside_retry_holds_one_slot_across_attempts() -> None:
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
         middleware=[
-            Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
-            Retry(_sleep=_sleep, base_delay=0.001, max_delay=0.002),
+            AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=None),
+            AsyncRetry(_sleep=_sleep, base_delay=0.001, max_delay=0.002),
         ],
     )
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert call_count["n"] == 2  # noqa: PLR2004 — first 503 + retry success
-    # max_in_flight stays at 1: the same Bulkhead slot covers both attempts.
+    # max_in_flight stays at 1: the same AsyncBulkhead slot covers both attempts.
     assert state["max_in_flight"] == 1
 
 
 async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
-    """Retry does NOT retry BulkheadFullError — it's neither a StatusError nor a NetworkError/TimeoutError."""
+    """AsyncRetry does NOT retry BulkheadFullError — it's neither a StatusError nor a NetworkError/TimeoutError."""
     handler = _SlowHandler(delay=0.5)  # holds the slot indefinitely
-    bulkhead = Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=0)
     transport = httpx2.MockTransport(handler)
 
     # AsyncMock so the never-called assertion is structural — no user-defined
@@ -379,7 +379,7 @@ async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
         httpx2_client=httpx2.AsyncClient(transport=transport),
         middleware=[
             bulkhead,
-            Retry(_sleep=mock_sleep, max_attempts=3, base_delay=0.001, max_delay=0.002),
+            AsyncRetry(_sleep=mock_sleep, max_attempts=3, base_delay=0.001, max_delay=0.002),
         ],
     )
 
@@ -387,10 +387,10 @@ async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
     first = asyncio.create_task(client.get("https://example.test/holder"))
     await asyncio.sleep(0.01)
 
-    # Second call hits a full Bulkhead. Retry must NOT swallow + retry it.
+    # Second call hits a full AsyncBulkhead. AsyncRetry must NOT swallow + retry it.
     with pytest.raises(BulkheadFullError):
         await client.get("https://example.test/rejected")
-    mock_sleep.assert_not_called()  # Retry never slept — it didn't try to retry
+    mock_sleep.assert_not_called()  # AsyncRetry never slept — it didn't try to retry
 
     # Cleanup.
     first.cancel()
@@ -400,7 +400,7 @@ async def test_bulkhead_full_error_is_not_retried_by_retry() -> None:
 
 async def test_bulkhead_rejected_emits_observability_event(caplog: pytest.LogCaptureFixture) -> None:
     """When the bulkhead rejects a request via acquire_timeout, emit one WARNING on httpware.bulkhead."""
-    bulkhead = Bulkhead(max_concurrent=1, acquire_timeout=0.0)
+    bulkhead = AsyncBulkhead(max_concurrent=1, acquire_timeout=0.0)
 
     async def slow_handler(request: httpx2.Request) -> httpx2.Response:
         await asyncio.sleep(0.05)
