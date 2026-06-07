@@ -168,6 +168,62 @@ Flipping the order (`[AsyncRetry, AsyncBulkhead]`) means each retry attempt grab
 
 Cross-cutting middleware that emit per-call state (e.g., the Request-ID middleware in the [Middleware guide](middleware.md)) should sit outside `AsyncRetry` for the same reason — so all attempts of one call share one ID rather than getting a fresh ID per attempt.
 
+## Sync Retry and Bulkhead
+
+The sync flavors mirror the async ones for use with `Client`. Same parameter set, same defaults, same `RetryBudget` (which is safe to share across sync and async clients in the same process).
+
+### `Retry`
+
+```python
+from httpware.middleware.resilience import Retry
+```
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `max_attempts` | `3` | Total tries (including the first). `1` disables retries entirely; `<1` raises `ValueError`. |
+| `base_delay` | `0.1` (s) | Floor for the full-jitter exponential backoff. |
+| `max_delay` | `5.0` (s) | Ceiling for backoff. |
+| `retry_status_codes` | `frozenset({408, 429, 502, 503, 504})` | Status codes considered retryable. |
+| `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only by default. POST excluded; pass an explicit frozenset including `"POST"` to retry it. |
+| `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value (clamped to `max_delay`) instead of the jittered backoff. |
+| `budget` | `RetryBudget()` (default-configured) | The token bucket. Pass a shared `RetryBudget` instance to apply one budget across multiple clients — sync, async, or both. |
+
+`Retry` uses `time.sleep` between attempts. `Retry-After`, streaming-body refusal, exhaustion behavior, and `RetryBudgetExhaustedError` semantics are identical to `AsyncRetry`.
+
+For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the wrapped client or pass `timeout=` per request. `httpware` does not own a structured-cancellation timeout knob.
+
+### `Bulkhead`
+
+```python
+from httpware.middleware.resilience import Bulkhead
+```
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `max_concurrent` | **REQUIRED** | Maximum in-flight requests. `<1` raises `ValueError`. |
+| `acquire_timeout` | `1.0` (s) | How long to wait for a slot before raising `BulkheadFullError`. `None` waits forever; `0` fails fast. `<0` raises `ValueError`. |
+
+`Bulkhead` is backed by `threading.Semaphore`. Slot release follows the same `try/finally` contract as `AsyncBulkhead` — success, exception, and (in sync land) interrupt-style exceptions all release the slot.
+
+> **Per-world Bulkhead.** A `Bulkhead` (sync) and an `AsyncBulkhead` are separate primitives backed by `threading.Semaphore` and `asyncio.Semaphore` respectively. A single Bulkhead instance cannot enforce a joint cap across sync + async clients in the same process. If you need that, create both with the same `max_concurrent`; the OS will not coordinate the two but the policy intent is documented.
+
+### Composition with sync `Client`
+
+```python
+from httpware import Client
+from httpware.middleware.resilience import Bulkhead, Retry
+
+
+with Client(
+    base_url="https://api.example.com",
+    middleware=[
+        Bulkhead(max_concurrent=10),
+        Retry(),
+    ],
+) as client:
+    client.get("/users/1")
+```
+
 ## See also
 
 - **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `AsyncRetry` and `AsyncBulkhead` use.

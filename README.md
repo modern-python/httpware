@@ -24,7 +24,32 @@ pip install httpware[all]           # everything declared above (pydantic, msgsp
 
 ## Quickstart
 
-> Requires: `pip install httpware[pydantic]`
+**Async usage:**
+
+```python
+import asyncio
+
+from httpware import AsyncClient
+
+async def main() -> None:
+    async with AsyncClient(base_url="https://example.test") as client:
+        response = await client.get("/users/42")
+        print(response.json())
+
+asyncio.run(main())
+```
+
+**Sync usage:**
+
+```python
+from httpware import Client
+
+with Client(base_url="https://example.test") as client:
+    response = client.get("/users/42")
+    print(response.json())
+```
+
+Typed decoding via `response_model=` works in both worlds — requires `pip install httpware[pydantic]`:
 
 ```python
 from httpware import AsyncClient

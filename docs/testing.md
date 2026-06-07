@@ -28,6 +28,29 @@ The handler can be sync or async; `httpx2.MockTransport` supports both. The test
 
 If you use `pytest-asyncio` in auto-mode (`asyncio_mode = "auto"` under `[tool.pytest.ini_options]`), async test functions don't need the `@pytest.mark.asyncio` decorator.
 
+### Sync `Client`
+
+The same pattern works for the sync `Client` — pass an `httpx2.Client` (not `httpx2.AsyncClient`) built on `httpx2.MockTransport`:
+
+```python
+from http import HTTPStatus
+
+import httpx2
+
+from httpware import Client
+
+
+def test_get_returns_typed_response() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(HTTPStatus.OK, request=request, json={"ok": True})
+
+    with Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler))) as client:
+        response = client.get("https://example.test/x")
+
+    assert response.status_code == HTTPStatus.OK
+    assert response.json() == {"ok": True}
+```
+
 ## Recording / stateful handlers
 
 For tests that need to vary the response by call count or assert on the requests that came in, use a handler with instance state:
