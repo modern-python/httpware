@@ -209,3 +209,127 @@ assert len(budget._deposits) > 0  # noqa: SLF001
 
 Verifier consensus: 2/3 (code_reality twice). Suggested direction: tighten the assertion to the exact expected total (or the exact total minus any TTL-purged deposits, computed from the test clock), matching the stricter post-condition used in the existing thread-safety suite. The current weak check effectively only guards against catastrophic failure.
 
+## Chunk 2 — Public API & Optional Extras
+
+8 confirmed findings reviewed across the public-api, correctness, and testing dimensions, all 8 survived verifier consensus. The dominant cluster is optional-extras isolation (3/8 findings — `pydantic.py`, `import_checker.py`, `observability.py`) where the lazy-import / fail-fast contract is brittle in ways the current tests don't exercise; the second cluster is public-API surface (3/8 — `chain.py` TYPE_CHECKING block, `compose`/`compose_async` not re-exported, README/index landing pages stale on sync `Client`). Two findings are testing gaps (one-directional `__all__` assertion, missing sync escape-hatch test). No blockers, no high; triaged into 1 medium + 5 low + 2 nit. The medium is the `compose` import path advertised in `docs/middleware.md` but absent from any `__init__.py` — every other finding lands at low because it requires either a partial-install edge or a non-default code path to observe.
+
+### Medium
+
+#### `compose` / `compose_async` documented as public imports but not re-exported
+
+`docs/middleware.md:145`
+
+The middleware guide instructs users to write `from httpware.middleware.chain import compose`, but neither `compose` nor `compose_async` appears in `httpware.middleware.__init__`, in the package-root `__all__`, or in any `__all__` anywhere — `chain.py` is a private implementation module. Either the symbols must be promoted (added to `httpware.middleware.__init__` and `__all__`) or the docs example must be removed and replaced with a note that chain composition is automatic via `AsyncClient`/`Client`. The current state breaks the project's "absolute imports through the public surface" convention from inside the docs.
+
+```python
+from httpware.middleware.chain import compose
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer — `grep -rn 'compose' src/httpware/__init__.py src/httpware/middleware/__init__.py` returns zero matches). Suggested direction: decide whether manual chain composition is a supported user workflow. If yes, re-export both functions from `httpware.middleware` (and add them to the package-root `__all__` with a public-API test peer), update `tests/test_public_api.py::test_expected_exports`, and keep the doc snippet. If no, replace the snippet with a one-sentence note that chain composition is owned by `AsyncClient`/`Client` and not part of the public API.
+
+### Low
+
+#### `chain.py` uses `if typing.TYPE_CHECKING` — `get_type_hints()` raises NameError
+
+`src/httpware/middleware/chain.py:9`
+
+`compose_async` and `compose` use forward-reference string annotations referencing `AsyncMiddleware` / `Middleware`, which are imported only under a `if typing.TYPE_CHECKING:` block. Calling `typing.get_type_hints(compose_async)` at runtime raises `NameError: name 'AsyncMiddleware' is not defined` — and this also violates the project memory rule "Drop reflexive `if TYPE_CHECKING:` blocks". The unconditional import is safe here because `httpware.middleware.__init__` does not import `chain.py` back.
+
+```python
+if typing.TYPE_CHECKING:
+    from httpware.middleware import AsyncMiddleware, Middleware
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer — `python -c "import typing; from httpware.middleware.chain import compose_async; typing.get_type_hints(compose_async)"` raises NameError). Suggested direction: hoist `from httpware.middleware import AsyncMiddleware, Middleware` to module top-level; drop the TYPE_CHECKING guard entirely.
+
+#### `docs/index.md` and `README.md` describe httpware as "async" — stale after 0.8.0 sync Client
+
+`docs/index.md:3`
+
+Both `docs/index.md` (line 3) and `README.md` (line 8) open by calling httpware an "async HTTP client framework" and the resilience teaser mentions only `AsyncRetry` + `AsyncBulkhead`. The 0.8.0 release added sync `Client`, `Retry`, and `Bulkhead` (all in `__all__` and fully tested), but a reader scanning either landing page sees no sync surface until they open `docs/resilience.md`. The README's "With resilience middleware" code block (line ~75) imports only the async primitives.
+
+```text
+A Python async HTTP client framework for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry` + `RetryBudget`, `AsyncBulkhead`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
+```
+
+Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: replace the opening sentence with something neutral (e.g., "A Python HTTP client framework with sync and async clients...") and add the sync primitives (`Client`, `Retry`, `Bulkhead`) to the resilience teaser in both files. Mirror the change in the README's code block by showing one sync and one async example, or by linking to the resilience doc for both.
+
+#### `pydantic.py` references `TypeAdapter` at runtime without binding it when the import was skipped
+
+`src/httpware/decoders/pydantic.py:27`
+
+`_get_adapter` and the `TypeError` fallback inside `decode()` both call `TypeAdapter(model)` as a bare name — it is bound only by the conditional `from pydantic import TypeAdapter` at line 16, which itself is gated on `is_pydantic_installed` evaluated at module-load time. If the module is imported when `is_pydantic_installed=False` (e.g., in a test that monkeypatches the flag and reloads the module), `TypeAdapter` is never defined and a later call raises `NameError`, not the clean `ImportError` the contract promises. The `try/except TypeError` on line 42 catches one path but leaves `NameError` unhandled.
+
+```python
+@functools.lru_cache(maxsize=1024)
+def _get_adapter(model: type[T]) -> "TypeAdapter[T]":
+    return TypeAdapter(model)
+
+    def decode(self, content: bytes, model: type[T]) -> T:
+        try:
+            adapter = _get_adapter(model)
+        except TypeError:
+            adapter = TypeAdapter(model)
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer — reload the module with `is_pydantic_installed=False`, then `_get_adapter(int)` raises `NameError`). Suggested direction: either import `TypeAdapter` unconditionally at module top (the module is already gated by the `_default_pydantic_decoder()` fail-fast in `client.py`), or wrap `_get_adapter` with an explicit guard that raises a clean `ImportError` referencing the `pydantic` extra. The current shape leaves a NameError window for anyone who reloads or imports the module outside the normal fail-fast path.
+
+#### `import_checker.find_spec('opentelemetry')` is unreliable for a namespace package
+
+`src/httpware/_internal/import_checker.py:8`
+
+`is_otel_installed = find_spec('opentelemetry') is not None` detects the `opentelemetry` namespace, not `opentelemetry-api` specifically. `opentelemetry` is a PEP 420 native namespace: any `opentelemetry-instrumentation-*` package creates the directory even when `opentelemetry-api` is absent. In that case `find_spec` returns a non-None spec and `is_otel_installed` is True, so the lazy `from opentelemetry import trace` in `observability.py` raises an uncaught `ImportError` (see the paired finding below).
+
+```python
+is_otel_installed = find_spec("opentelemetry") is not None
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer — install any `opentelemetry-instrumentation-*` package without `opentelemetry-api`; `is_otel_installed` becomes True but the lazy import fails). Suggested direction: probe a specific module that requires the api package — `find_spec("opentelemetry.trace")` is the cheapest correct check. Pair with the observability fix below so the same release closes both ends of the partial-install hole.
+
+#### `observability._emit_event` does not wrap the lazy OTel import in try/except
+
+`src/httpware/_internal/observability.py:40`
+
+`_emit_event` gates the OTel path on `if import_checker.is_otel_installed` but does not wrap the lazy `from opentelemetry import trace` in `try/except ImportError`. If `is_otel_installed` is True but the import fails (the namespace-package false-positive above, or a broken otel install), the `ImportError` escapes `_emit_event` and propagates to the Retry/Bulkhead middleware that called it — crashing a live request cycle with an unrelated infrastructure error. The "lazy by design (optional-extras isolation)" comment acknowledges the intent but not the failure mode.
+
+```python
+    if import_checker.is_otel_installed:
+        from opentelemetry import trace  # noqa: PLC0415 — lazy by design (optional-extras isolation)
+
+        trace.get_current_span().add_event(event_name, attributes=attributes)
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer). Suggested direction: wrap the lazy import (and the `add_event` call) in `try/except ImportError` and degrade to the structured-log-only path, mirroring the contract the docstring already implies. Combined with the `find_spec("opentelemetry.trace")` fix above, this turns the partial-install scenario from a crash into the documented soft fallback.
+
+### Nit
+
+#### `test_expected_exports` is one-directional — new `__all__` entries silently escape coverage
+
+`tests/test_public_api.py:69`
+
+`test_expected_exports` checks `expected - __all__` (symbols the test enumerates that are missing from `__all__`) but not the reverse — symbols added to `__all__` without a matching update to the expected set pass the test unchecked. `test_all_exports_resolve` only catches symbols that don't exist at all; a real but unintended export slips through.
+
+```python
+missing = expected - set(httpware.__all__)
+assert not missing, f"expected exports missing from __all__: {missing}"
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer — adding a bogus existing symbol to `__all__` does not trip the test). Suggested direction: use a symmetric-difference assertion (`assert expected == set(httpware.__all__)`) so both directions are guarded, and treat `__all__` and the expected set as a single declarative contract.
+
+#### `tests/test_optional_extras_pydantic_missing.py` covers `AsyncClient` only — no sync `Client` peer
+
+`tests/test_optional_extras_pydantic_missing.py:41`
+
+`test_async_client_accepts_explicit_decoder_without_pydantic` verifies that an explicit `decoder=` bypasses the pydantic fail-fast. There is no equivalent test for the sync `Client`, even though both `AsyncClient.__init__` and `Client.__init__` share the same `_default_pydantic_decoder()` logic (`client.py:126` and `client.py:819`). The bypass exists for both classes but only the async path is asserted.
+
+```python
+def test_async_client_accepts_explicit_decoder_without_pydantic() -> None:
+    """An explicit decoder= escapes the fail-fast even when pydantic is 'missing'."""
+    ...
+    with patch("httpware._internal.import_checker.is_pydantic_installed", False):
+        client = AsyncClient(decoder=_FakeDecoder())
+        assert client is not None
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer). Suggested direction: add a `test_sync_client_accepts_explicit_decoder_without_pydantic` peer in the same file, or parameterize the existing test over `(AsyncClient, Client)` so the sync/async parity invariant for the fail-fast escape hatch is asserted symmetrically.
+
