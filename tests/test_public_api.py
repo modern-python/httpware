@@ -40,6 +40,7 @@ def test_expected_exports() -> None:
         "ClientError",
         "ClientStatusError",
         "ConflictError",
+        "DecodeError",
         "ForbiddenError",
         "InternalServerError",
         "Middleware",
