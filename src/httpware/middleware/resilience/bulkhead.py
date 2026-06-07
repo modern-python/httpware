@@ -13,12 +13,13 @@ AsyncClient(middleware=[shared]) calls to enforce a joint cap across clients.
 
 import asyncio
 import logging
+import threading
 
 import httpx2
 
 from httpware._internal.observability import _emit_event
 from httpware.errors import BulkheadFullError
-from httpware.middleware import AsyncNext
+from httpware.middleware import AsyncNext, Next
 
 
 _MAX_CONCURRENT_INVALID = "max_concurrent must be >= 1"
@@ -87,5 +88,61 @@ class AsyncBulkhead:
 
         try:
             return await next(request)
+        finally:
+            self._sem.release()
+
+
+class Bulkhead:
+    """Sync concurrency limiter backed by threading.Semaphore.
+
+    Bulkhead is the sharable unit — pass the same instance to multiple
+    Client(middleware=[shared]) calls to enforce a joint cap across clients.
+
+    Bulkhead is per-world: a single instance cannot be shared between a Client
+    and an AsyncClient (the underlying semaphore primitives differ). To cap
+    a sync+async mixed workload, use a Bulkhead and an AsyncBulkhead with
+    matching max_concurrent.
+    """
+
+    def __init__(
+        self,
+        *,
+        max_concurrent: int,
+        acquire_timeout: float | None = 1.0,
+    ) -> None:
+        if max_concurrent < 1:
+            raise ValueError(_MAX_CONCURRENT_INVALID)
+        if acquire_timeout is not None and acquire_timeout < 0:
+            raise ValueError(_ACQUIRE_TIMEOUT_INVALID)
+        self._max_concurrent = max_concurrent
+        self._acquire_timeout = acquire_timeout
+        self._sem = threading.Semaphore(max_concurrent)
+
+    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+        """Acquire a slot (bounded by acquire_timeout), invoke next, release."""
+        # threading.Semaphore.acquire(timeout=None) blocks until acquired;
+        # acquire(timeout=0) returns immediately (True if a slot was available,
+        # False otherwise). Both match AsyncBulkhead's contract.
+        acquired = self._sem.acquire(timeout=self._acquire_timeout)
+        if not acquired:
+            _emit_event(
+                _LOGGER,
+                "bulkhead.rejected",
+                level=logging.WARNING,
+                message="bulkhead rejected request — acquire_timeout exceeded",
+                attributes={
+                    "max_concurrent": self._max_concurrent,
+                    "acquire_timeout": self._acquire_timeout,
+                    "method": request.method,
+                    "url": str(request.url),
+                },
+            )
+            raise BulkheadFullError(
+                max_concurrent=self._max_concurrent,
+                acquire_timeout=self._acquire_timeout,
+            )
+
+        try:
+            return next(request)
         finally:
             self._sem.release()
