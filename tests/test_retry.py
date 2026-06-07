@@ -1,10 +1,9 @@
-"""Tests for the Retry middleware.
+"""Tests for the AsyncRetry middleware.
 
 Mocks the transport via httpx2.MockTransport; injects a recording `_sleep`
 callable so the suite runs instantly without freezegun.
 """
 
-import asyncio
 import datetime
 import email.utils
 import logging
@@ -18,12 +17,11 @@ import pytest
 from httpware import AsyncClient, NotFoundError, ServiceUnavailableError, TransportError
 from httpware.client import _is_streaming_body
 from httpware.errors import NetworkError, RetryBudgetExhaustedError
-from httpware.errors import TimeoutError as HttpwareTimeoutError
 from httpware.middleware.resilience.budget import RetryBudget
 from httpware.middleware.resilience.retry import (
     DEFAULT_IDEMPOTENT_METHODS,
     DEFAULT_RETRY_STATUS_CODES,
-    Retry,
+    AsyncRetry,
 )
 
 
@@ -48,7 +46,7 @@ class _ResponseSequence:
         return httpx2.Response(status, request=request)
 
 
-def _client(handler: Callable[[httpx2.Request], httpx2.Response], *, retry: Retry) -> AsyncClient:
+def _client(handler: Callable[[httpx2.Request], httpx2.Response], *, retry: AsyncRetry) -> AsyncClient:
     transport = httpx2.MockTransport(handler)
     return AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
@@ -67,7 +65,7 @@ def test_default_idempotent_methods_match_spec() -> None:
 async def test_succeeds_first_try_no_sleep() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.OK])
-    client = _client(handler, retry=Retry(_sleep=sleeper))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper))
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert handler.calls == 1
@@ -77,7 +75,7 @@ async def test_succeeds_first_try_no_sleep() -> None:
 async def test_retries_503_then_succeeds() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert handler.calls == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
@@ -88,7 +86,7 @@ async def test_retries_503_then_succeeds() -> None:
 async def test_gives_up_after_max_attempts_and_reraises_status_error() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE] * 3)
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.02, max_attempts=3))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.02, max_attempts=3))
     with pytest.raises(ServiceUnavailableError) as info:
         await client.get("https://example.test/x")
     assert handler.calls == 3  # noqa: PLR2004 — "3" is intentional literal in test assertion
@@ -100,7 +98,7 @@ async def test_gives_up_after_max_attempts_and_reraises_status_error() -> None:
 async def test_does_not_retry_non_retryable_status() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.NOT_FOUND])
-    client = _client(handler, retry=Retry(_sleep=sleeper))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper))
     with pytest.raises(NotFoundError):
         await client.get("https://example.test/x")
     assert handler.calls == 1
@@ -110,7 +108,7 @@ async def test_does_not_retry_non_retryable_status() -> None:
 async def test_does_not_retry_non_idempotent_methods_by_default() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])
-    client = _client(handler, retry=Retry(_sleep=sleeper))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper))
     with pytest.raises(ServiceUnavailableError):
         await client.post("https://example.test/x", json={"x": 1})
     assert handler.calls == 1
@@ -123,7 +121,7 @@ async def test_retries_post_when_method_explicitly_included() -> None:
     methods = frozenset(DEFAULT_IDEMPOTENT_METHODS | {"POST"})
     client = _client(
         handler,
-        retry=Retry(_sleep=sleeper, retry_methods=methods, base_delay=0.01, max_delay=0.02),
+        retry=AsyncRetry(_sleep=sleeper, retry_methods=methods, base_delay=0.01, max_delay=0.02),
     )
     response = await client.post("https://example.test/x", json={"x": 1})
     assert response.status_code == HTTPStatus.OK
@@ -133,7 +131,7 @@ async def test_retries_post_when_method_explicitly_included() -> None:
 async def test_max_attempts_one_means_no_retries() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])
-    client = _client(handler, retry=Retry(_sleep=sleeper, max_attempts=1))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, max_attempts=1))
     with pytest.raises(ServiceUnavailableError):
         await client.get("https://example.test/x")
     assert handler.calls == 1
@@ -142,11 +140,11 @@ async def test_max_attempts_one_means_no_retries() -> None:
 
 def test_max_attempts_zero_rejected() -> None:
     with pytest.raises(ValueError, match="max_attempts must be >= 1"):
-        Retry(max_attempts=0)
+        AsyncRetry(max_attempts=0)
 
 
 async def test_budget_exhausted_raises_retry_budget_exhausted_error() -> None:
-    # NOTE: lives here for coverage of the Retry loop's budget-exhaustion branch.
+    # NOTE: lives here for coverage of the AsyncRetry loop's budget-exhaustion branch.
     # Task 11 adds the broader budget-gate + sharing tests (carry-through behavior,
     # last_response / last_exception field population). Do NOT duplicate this test.
     sleeper = _SleepRecorder()
@@ -155,7 +153,7 @@ async def test_budget_exhausted_raises_retry_budget_exhausted_error() -> None:
     stingy_budget = RetryBudget(percent_can_retry=0.0, min_retries_per_sec=0.0)
     client = _client(
         handler,
-        retry=Retry(_sleep=sleeper, budget=stingy_budget, max_attempts=3, base_delay=0.01),
+        retry=AsyncRetry(_sleep=sleeper, budget=stingy_budget, max_attempts=3, base_delay=0.01),
     )
     with pytest.raises(RetryBudgetExhaustedError) as info:
         await client.get("https://example.test/x")
@@ -175,7 +173,7 @@ async def test_retries_on_network_error() -> None:
             raise httpx2.ConnectError(msg)
         return httpx2.Response(HTTPStatus.OK, request=request)
 
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert call_count["n"] == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
@@ -193,7 +191,7 @@ async def test_retries_on_httpware_timeout_error() -> None:
             raise httpx2.ReadTimeout(msg)
         return httpx2.Response(HTTPStatus.OK, request=request)
 
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.02))
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert call_count["n"] == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
@@ -207,7 +205,7 @@ async def test_does_not_retry_on_bare_transport_error_like_invalid_url() -> None
         msg = "bad url"
         raise httpx2.InvalidURL(msg)
 
-    client = _client(handler, retry=Retry(_sleep=sleeper))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper))
     with pytest.raises(TransportError) as info:
         await client.get("https://example.test/x")
     assert not isinstance(info.value, NetworkError)
@@ -221,7 +219,7 @@ async def test_network_error_exhaustion_reraises_with_note() -> None:
         msg = "never works"
         raise httpx2.ConnectError(msg)
 
-    client = _client(handler, retry=Retry(_sleep=sleeper, max_attempts=2, base_delay=0.01, max_delay=0.02))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, max_attempts=2, base_delay=0.01, max_delay=0.02))
     with pytest.raises(NetworkError) as info:
         await client.get("https://example.test/x")
     notes = getattr(info.value, "__notes__", [])
@@ -237,71 +235,11 @@ async def test_does_not_retry_network_error_on_non_idempotent_method() -> None:
         msg = "transient"
         raise httpx2.ConnectError(msg)
 
-    client = _client(handler, retry=Retry(_sleep=sleeper))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper))
     with pytest.raises(NetworkError):
         await client.post("https://example.test/x", json={"x": 1})
     assert call_count["n"] == 1
     assert sleeper.calls == []
-
-
-async def test_attempt_timeout_fires_and_retries() -> None:
-    sleeper = _SleepRecorder()
-    call_count = {"n": 0}
-
-    async def handler_async(request: httpx2.Request) -> httpx2.Response:
-        call_count["n"] += 1
-        if call_count["n"] < 2:  # noqa: PLR2004 — "2" is intentional literal in test assertion
-            await asyncio.sleep(1.0)  # exceeds attempt_timeout
-        return httpx2.Response(HTTPStatus.OK, request=request)
-
-    transport = httpx2.MockTransport(handler_async)
-    client = AsyncClient(
-        httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, attempt_timeout=0.05, base_delay=0.01, max_delay=0.02)],
-    )
-    response = await client.get("https://example.test/x")
-    # coverage[thread] loses the coroutine frame after asyncio.timeout-induced cancellation.
-    # The assertions DO execute — verified by intentionally breaking them (test fails as
-    # expected). Pragmas mask a tooling limitation, not dead code.
-    assert response.status_code == HTTPStatus.OK  # pragma: no cover
-    assert call_count["n"] == 2  # pragma: no cover  # noqa: PLR2004 — "2" is intentional literal in test assertion
-
-
-async def test_attempt_timeout_exhaustion_raises_httpware_timeout() -> None:
-    sleeper = _SleepRecorder()
-
-    async def slow_handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
-        await asyncio.sleep(1.0)
-        msg = "should not reach"  # pragma: no cover
-        raise AssertionError(msg)  # pragma: no cover
-
-    transport = httpx2.MockTransport(slow_handler)
-    client = AsyncClient(
-        httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, attempt_timeout=0.05, max_attempts=2, base_delay=0.01, max_delay=0.02)],
-    )
-    with pytest.raises(HttpwareTimeoutError) as info:
-        await client.get("https://example.test/x")
-    notes = getattr(info.value, "__notes__", [])
-    assert any("gave up after 2 attempts" in note for note in notes)
-
-
-async def test_attempt_timeout_does_not_retry_on_non_idempotent_method() -> None:
-    sleeper = _SleepRecorder()
-
-    async def slow_handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
-        await asyncio.sleep(1.0)
-        msg = "should not reach"  # pragma: no cover
-        raise AssertionError(msg)  # pragma: no cover
-
-    transport = httpx2.MockTransport(slow_handler)
-    client = AsyncClient(
-        httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, attempt_timeout=0.05)],
-    )
-    with pytest.raises(HttpwareTimeoutError):
-        await client.post("https://example.test/x", json={"x": 1})
-    assert sleeper.calls == []  # not retried
 
 
 class _ResponseSequenceWithHeaders:
@@ -325,7 +263,7 @@ async def test_retry_after_seconds_overrides_backoff() -> None:
             (HTTPStatus.OK, {}),
         ]
     )
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=5.0))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=5.0))
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert sleeper.calls == [2.0]
@@ -341,7 +279,7 @@ async def test_retry_after_http_date_overrides_backoff() -> None:
             (HTTPStatus.OK, {}),
         ]
     )
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=10.0))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=10.0))
     response = await client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
     assert len(sleeper.calls) == 1
@@ -356,7 +294,7 @@ async def test_retry_after_capped_at_max_delay() -> None:
             (HTTPStatus.OK, {}),
         ]
     )
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
     await client.get("https://example.test/x")
     assert sleeper.calls == [2.5]
 
@@ -369,7 +307,7 @@ async def test_malformed_retry_after_falls_back_to_backoff() -> None:
             (HTTPStatus.OK, {}),
         ]
     )
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.05))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.05))
     await client.get("https://example.test/x")
     assert len(sleeper.calls) == 1
     assert 0.0 <= sleeper.calls[0] <= 0.05  # noqa: PLR2004 — 0.05 matches max_delay literal above
@@ -385,7 +323,7 @@ async def test_respect_retry_after_false_ignores_header() -> None:
     )
     client = _client(
         handler,
-        retry=Retry(_sleep=sleeper, respect_retry_after=False, base_delay=0.01, max_delay=0.02),
+        retry=AsyncRetry(_sleep=sleeper, respect_retry_after=False, base_delay=0.01, max_delay=0.02),
     )
     await client.get("https://example.test/x")
     assert len(sleeper.calls) == 1
@@ -402,7 +340,7 @@ async def test_budget_exhausted_raises_specific_exception() -> None:
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
     client = _client(
         handler,
-        retry=Retry(_sleep=sleeper, budget=_zero_budget(), base_delay=0.01, max_delay=0.02),
+        retry=AsyncRetry(_sleep=sleeper, budget=_zero_budget(), base_delay=0.01, max_delay=0.02),
     )
     with pytest.raises(RetryBudgetExhaustedError) as info:
         await client.get("https://example.test/x")
@@ -421,7 +359,7 @@ async def test_budget_exhausted_on_network_error_carries_exception_not_response(
 
     client = _client(
         handler,
-        retry=Retry(_sleep=sleeper, budget=_zero_budget(), base_delay=0.01, max_delay=0.02),
+        retry=AsyncRetry(_sleep=sleeper, budget=_zero_budget(), base_delay=0.01, max_delay=0.02),
     )
     with pytest.raises(RetryBudgetExhaustedError) as info:
         await client.get("https://example.test/x")
@@ -430,15 +368,15 @@ async def test_budget_exhausted_on_network_error_carries_exception_not_response(
 
 
 async def test_default_budget_is_fresh_per_instance() -> None:
-    r1 = Retry()
-    r2 = Retry()
+    r1 = AsyncRetry()
+    r2 = AsyncRetry()
     assert r1.budget is not r2.budget
 
 
 async def test_explicit_budget_shared_across_retry_instances() -> None:
     shared = RetryBudget(ttl=10.0, min_retries_per_sec=1.0, percent_can_retry=0.0)
-    r1 = Retry(budget=shared)
-    r2 = Retry(budget=shared)
+    r1 = AsyncRetry(budget=shared)
+    r2 = AsyncRetry(budget=shared)
     assert r1.budget is r2.budget
     # 10 retries total before exhaustion (floor=10)
     for _ in range(10):
@@ -524,7 +462,7 @@ def test_is_streaming_body_true_for_async_iterable_files() -> None:
 
 
 async def test_retry_refuses_streamed_body_request() -> None:
-    """Retry must not replay a request with a streaming body — re-raise with a PEP-678 note."""
+    """AsyncRetry must not replay a request with a streaming body — re-raise with a PEP-678 note."""
     sleeper = _SleepRecorder()
     call_count = {"n": 0}
 
@@ -538,7 +476,7 @@ async def test_retry_refuses_streamed_body_request() -> None:
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
+        middleware=[AsyncRetry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
     )
 
     with pytest.raises(ServiceUnavailableError) as info:
@@ -551,7 +489,7 @@ async def test_retry_refuses_streamed_body_request() -> None:
 
 
 async def test_retry_refuses_streamed_body_does_not_consume_budget() -> None:
-    """When Retry refuses for streaming-body reasons, no budget token is withdrawn."""
+    """When AsyncRetry refuses for streaming-body reasons, no budget token is withdrawn."""
     sleeper = _SleepRecorder()
     budget = RetryBudget(ttl=10.0, min_retries_per_sec=10.0, percent_can_retry=0.2)
 
@@ -564,7 +502,7 @@ async def test_retry_refuses_streamed_body_does_not_consume_budget() -> None:
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, budget=budget, base_delay=0.001, max_delay=0.002)],
+        middleware=[AsyncRetry(_sleep=sleeper, budget=budget, base_delay=0.001, max_delay=0.002)],
     )
 
     with pytest.raises(ServiceUnavailableError):
@@ -589,36 +527,10 @@ async def test_retry_refuses_streamed_body_network_error_non_idempotent() -> Non
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
+        middleware=[AsyncRetry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
     )
 
     with pytest.raises(NetworkError) as info:
-        await client.post("https://example.test/upload", content=streamed_body())
-
-    assert sleeper.calls == []  # no retry attempted
-    notes = getattr(info.value, "__notes__", [])
-    assert any("not retrying" in note and "stream" in note for note in notes)
-
-
-async def test_retry_refuses_streamed_body_attempt_timeout_non_idempotent() -> None:
-    """Streaming POST that times out per attempt_timeout gets the PEP-678 note."""
-    sleeper = _SleepRecorder()
-
-    async def slow_handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
-        await asyncio.sleep(1.0)
-        msg = "should not reach"  # pragma: no cover
-        raise AssertionError(msg)  # pragma: no cover
-
-    async def streamed_body() -> typing.AsyncIterator[bytes]:
-        yield b"x"
-
-    transport = httpx2.MockTransport(slow_handler)
-    client = AsyncClient(
-        httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, attempt_timeout=0.05, base_delay=0.001, max_delay=0.002)],
-    )
-
-    with pytest.raises(HttpwareTimeoutError) as info:
         await client.post("https://example.test/upload", content=streamed_body())
 
     assert sleeper.calls == []  # no retry attempted
@@ -641,7 +553,7 @@ async def test_retry_refuses_streamed_body_idempotent_method() -> None:
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        middleware=[Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
+        middleware=[AsyncRetry(_sleep=sleeper, base_delay=0.001, max_delay=0.002)],
     )
 
     with pytest.raises(ServiceUnavailableError) as info:
@@ -657,7 +569,7 @@ async def test_retry_giving_up_emits_observability_event(caplog: pytest.LogCaptu
     """When max_attempts is exhausted, emit one WARNING record on httpware.retry."""
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE] * 3)
-    client = _client(handler, retry=Retry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002))
 
     with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
         await client.get("https://example.test/x")
@@ -680,7 +592,7 @@ async def test_retry_budget_refused_emits_observability_event(caplog: pytest.Log
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.SERVICE_UNAVAILABLE])
     client = _client(
         handler,
-        retry=Retry(_sleep=sleeper, budget=stingy_budget, max_attempts=3, base_delay=0.001),
+        retry=AsyncRetry(_sleep=sleeper, budget=stingy_budget, max_attempts=3, base_delay=0.001),
     )
 
     with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(RetryBudgetExhaustedError):
@@ -703,7 +615,7 @@ async def test_retry_streaming_refused_emits_observability_event(caplog: pytest.
     """
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.SERVICE_UNAVAILABLE])
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.001, max_delay=0.002))
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.001, max_delay=0.002))
 
     async def streamed_body() -> typing.AsyncIterator[bytes]:
         yield b"x"

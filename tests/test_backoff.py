@@ -1,6 +1,6 @@
 """Unit tests for the full-jitter backoff helper.
 
-Integration coverage comes from ``tests/test_retry.py`` (Retry middleware drives
+Integration coverage comes from ``tests/test_retry.py`` (AsyncRetry middleware drives
 ``full_jitter_delay`` per attempt). The pure-function tests here pin the bound
 and the cap independently of the middleware orchestration.
 """

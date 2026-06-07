@@ -1,8 +1,8 @@
-"""Resilience primitives: Bulkhead, Retry middleware, and RetryBudget token bucket."""
+"""Resilience primitives: AsyncBulkhead, AsyncRetry middleware, and RetryBudget token bucket."""
 
 from httpware.middleware.resilience.budget import RetryBudget
-from httpware.middleware.resilience.bulkhead import Bulkhead
-from httpware.middleware.resilience.retry import Retry
+from httpware.middleware.resilience.bulkhead import AsyncBulkhead
+from httpware.middleware.resilience.retry import AsyncRetry
 
 
-__all__ = ["Bulkhead", "Retry", "RetryBudget"]
+__all__ = ["AsyncBulkhead", "AsyncRetry", "RetryBudget"]

@@ -194,7 +194,7 @@ def _reconstruct_bulkhead_full(
 
 
 class BulkheadFullError(ClientError):
-    """Raised when ``acquire_timeout`` elapses before a Bulkhead slot becomes available.
+    """Raised when ``acquire_timeout`` elapses before an AsyncBulkhead slot becomes available.
 
     Carries the configured caps for caller logging/alerting.
     """

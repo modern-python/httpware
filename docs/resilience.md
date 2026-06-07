@@ -1,17 +1,17 @@
 # Resilience reference
 
-`httpware` ships three resilience primitives under `httpware.middleware.resilience`, all composable through the standard [Middleware](middleware.md) chain:
+`httpware` ships three resilience primitives under `httpware.middleware.resilience`, all composable through the standard [AsyncMiddleware](middleware.md) chain:
 
-- **`Retry`** — automatic retry of transient failures with full-jitter exponential backoff
+- **`AsyncRetry`** — automatic retry of transient failures with full-jitter exponential backoff
 - **`RetryBudget`** — Finagle-style token bucket that bounds the global retry rate to prevent retry storms when downstreams degrade
-- **`Bulkhead`** — concurrency limiter via `asyncio.Semaphore` with bounded acquire-wait
+- **`AsyncBulkhead`** — concurrency limiter via `asyncio.Semaphore` with bounded acquire-wait
 
-The canonical composition is `middleware=[Bulkhead(...), Retry()]` — `Bulkhead` outside `Retry` so one slot covers all retry attempts of a single call. Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
+The canonical composition is `middleware=[AsyncBulkhead(...), AsyncRetry()]` — `AsyncBulkhead` outside `AsyncRetry` so one slot covers all retry attempts of a single call. Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
 
-## `Retry`
+## `AsyncRetry`
 
 ```python
-from httpware.middleware.resilience import Retry
+from httpware.middleware.resilience import AsyncRetry
 ```
 
 | Parameter | Default | Effect |
@@ -19,11 +19,14 @@ from httpware.middleware.resilience import Retry
 | `max_attempts` | `3` | Total tries (including the first). `1` disables retries entirely; `<1` raises `ValueError`. |
 | `base_delay` | `0.1` (s) | Floor for the full-jitter exponential backoff. |
 | `max_delay` | `5.0` (s) | Ceiling for backoff. |
-| `attempt_timeout` | `None` | If set, each individual attempt is wrapped in `asyncio.timeout(attempt_timeout)`. |
 | `retry_status_codes` | `frozenset({408, 429, 502, 503, 504})` | Status codes considered retryable. |
 | `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only by default. POST excluded; pass an explicit frozenset including `"POST"` to retry it. |
 | `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value (clamped to `max_delay`) instead of the jittered backoff. |
 | `budget` | `RetryBudget()` (default-configured) | The token bucket. Pass a shared `RetryBudget` instance to apply one budget across multiple clients. |
+
+For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the client or
+pass `timeout=` per request. `httpware` does not own a structured-cancellation
+timeout knob.
 
 ### Retry-After parsing
 
@@ -35,7 +38,7 @@ Negative integer values are clamped to 0. Malformed values are ignored, falling 
 
 ### Streaming-body refusal
 
-If the request body was an async-iterable, `Retry` refuses to retry — the iterator is consumed after the first attempt and can't replay. The original exception is re-raised with a PEP 678 note:
+If the request body was an async-iterable, `AsyncRetry` refuses to retry — the iterator is consumed after the first attempt and can't replay. The original exception is re-raised with a PEP 678 note:
 
 ```
 httpware: not retrying — request body is a stream that cannot replay across attempts
@@ -45,7 +48,7 @@ The same refusal note is added at the non-idempotent early-exit sites (when stre
 
 ### Exhaustion behavior
 
-On exhaustion, `Retry` re-raises the *last* exception observed (e.g., `ServiceUnavailableError`, `NetworkError`), preserving the original class so `except ServiceUnavailableError` still catches it. A PEP 678 note is added: `httpware: gave up after N attempts`.
+On exhaustion, `AsyncRetry` re-raises the *last* exception observed (e.g., `ServiceUnavailableError`, `NetworkError`), preserving the original class so `except ServiceUnavailableError` still catches it. A PEP 678 note is added: `httpware: gave up after N attempts`.
 
 If exhaustion is caused by the budget refusing a retry (not by `max_attempts`), the raised exception is `RetryBudgetExhaustedError` instead, with `last_response` / `last_exception` / `attempts` fields populated. See the [Errors reference](errors.md).
 
@@ -83,7 +86,7 @@ Pass the same `RetryBudget` instance to multiple `AsyncClient`s when they hit th
 import asyncio
 
 from httpware import AsyncClient
-from httpware.middleware.resilience import Retry, RetryBudget
+from httpware.middleware.resilience import AsyncRetry, RetryBudget
 
 
 shared = RetryBudget()
@@ -91,8 +94,8 @@ shared = RetryBudget()
 
 async def main() -> None:
     async with (
-        AsyncClient(base_url="https://api.example.com", middleware=[Retry(budget=shared)]) as users,
-        AsyncClient(base_url="https://api.example.com", middleware=[Retry(budget=shared)]) as orders,
+        AsyncClient(base_url="https://api.example.com", middleware=[AsyncRetry(budget=shared)]) as users,
+        AsyncClient(base_url="https://api.example.com", middleware=[AsyncRetry(budget=shared)]) as orders,
     ):
         await asyncio.gather(users.get("/users/1"), orders.get("/orders/1"))
 ```
@@ -101,10 +104,10 @@ async def main() -> None:
 
 `RetryBudget` is asyncio-aware — deque mutations between await points are atomic on a single event loop. Cross-thread use is out of scope; if you need that, wrap calls in a lock yourself.
 
-## `Bulkhead`
+## `AsyncBulkhead`
 
 ```python
-from httpware.middleware.resilience import Bulkhead
+from httpware.middleware.resilience import AsyncBulkhead
 ```
 
 Concurrency limiter via `asyncio.Semaphore`. Acquires a slot before each request (bounded by `acquire_timeout`); releases on success, exception, AND cancellation.
@@ -128,46 +131,46 @@ The slot cannot leak.
 Same pattern as `RetryBudget`. One instance, many clients:
 
 ```python
-shared_bulkhead = Bulkhead(max_concurrent=10)
+shared_bulkhead = AsyncBulkhead(max_concurrent=10)
 
 async with (
-    AsyncClient(base_url="https://api.example.com", middleware=[shared_bulkhead, Retry()]) as a,
-    AsyncClient(base_url="https://api.example.com", middleware=[shared_bulkhead, Retry()]) as b,
+    AsyncClient(base_url="https://api.example.com", middleware=[shared_bulkhead, AsyncRetry()]) as a,
+    AsyncClient(base_url="https://api.example.com", middleware=[shared_bulkhead, AsyncRetry()]) as b,
 ):
     ...  # combined in-flight across a + b is capped at 10
 ```
 
 ### Rejection
 
-When `acquire_timeout` elapses without a slot opening, `Bulkhead` raises `BulkheadFullError` (carries the configured `max_concurrent` and `acquire_timeout` for caller logging). See the [Errors reference](errors.md). The `httpware.bulkhead` `bulkhead.rejected` observability event fires at the same site — see [Observability](index.md#observability).
+When `acquire_timeout` elapses without a slot opening, `AsyncBulkhead` raises `BulkheadFullError` (carries the configured `max_concurrent` and `acquire_timeout` for caller logging). See the [Errors reference](errors.md). The `httpware.bulkhead` `bulkhead.rejected` observability event fires at the same site — see [Observability](index.md#observability).
 
 ## Composition
 
-The canonical ordering is `middleware=[Bulkhead, Retry]` — `Bulkhead` outermost so one slot covers all retry attempts of a single call:
+The canonical ordering is `middleware=[AsyncBulkhead, AsyncRetry]` — `AsyncBulkhead` outermost so one slot covers all retry attempts of a single call:
 
 ```python
 from httpware import AsyncClient
-from httpware.middleware.resilience import Bulkhead, Retry
+from httpware.middleware.resilience import AsyncBulkhead, AsyncRetry
 
 
 async def main() -> None:
     async with AsyncClient(
         base_url="https://api.example.com",
         middleware=[
-            Bulkhead(max_concurrent=10),
-            Retry(),
+            AsyncBulkhead(max_concurrent=10),
+            AsyncRetry(),
         ],
     ) as client:
         await client.get("/users/1")
 ```
 
-Flipping the order (`[Retry, Bulkhead]`) means each retry attempt grabs a fresh slot — defeating the bulkhead under load. Don't do that.
+Flipping the order (`[AsyncRetry, AsyncBulkhead]`) means each retry attempt grabs a fresh slot — defeating the bulkhead under load. Don't do that.
 
-Cross-cutting middleware that emit per-call state (e.g., the Request-ID middleware in the [Middleware guide](middleware.md)) should sit outside `Retry` for the same reason — so all attempts of one call share one ID rather than getting a fresh ID per attempt.
+Cross-cutting middleware that emit per-call state (e.g., the Request-ID middleware in the [Middleware guide](middleware.md)) should sit outside `AsyncRetry` for the same reason — so all attempts of one call share one ID rather than getting a fresh ID per attempt.
 
 ## See also
 
-- **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `Retry` and `Bulkhead` use.
+- **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `AsyncRetry` and `AsyncBulkhead` use.
 - **[Errors reference](errors.md)** — `RetryBudgetExhaustedError`, `BulkheadFullError`, and the broader exception tree.
 - **[Observability](index.md#observability)** — the four operational events these middleware emit.
 - **`planning/engineering.md` §3** — the formal Middleware/Seam-A contract.

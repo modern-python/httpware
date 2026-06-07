@@ -113,7 +113,7 @@ A couple of notes:
 `AsyncClient`'s middleware chain is composed once at construction and frozen for the client's lifetime. With a singleton-scoped `Factory`, "once at construction" means "once per container build." Drop the middleware list into `kwargs=`:
 
 ```python
-from httpware import AsyncClient, Bulkhead, Retry
+from httpware import AsyncClient, AsyncBulkhead, AsyncRetry
 
 
 class ServiceClients(Group):
@@ -122,17 +122,17 @@ class ServiceClients(Group):
         creator=UserApi,
         kwargs={
             "base_url": "https://users.example.com",
-            "middleware": [Bulkhead(max_concurrent=10), Retry()],
+            "middleware": [AsyncBulkhead(max_concurrent=10), AsyncRetry()],
         },
         cache_settings=providers.CacheSettings(finalizer=UserApi.aclose),
     )
 ```
 
-Each cached singleton owns its own `Bulkhead` and `Retry` state — what you want when different backends have different reliability profiles.
+Each cached singleton owns its own `AsyncBulkhead` and `AsyncRetry` state — what you want when different backends have different reliability profiles.
 
 ## See also
 
 - **[Quick-Start](../index.md)** — the base `AsyncClient` API.
-- **[Middleware guide](../middleware.md)** — what `Bulkhead` and `Retry` are doing in `kwargs[middleware]`.
-- **[Resilience reference](../resilience.md)** — every parameter on `Retry`, `RetryBudget`, `Bulkhead`.
+- **[Middleware guide](../middleware.md)** — what `AsyncBulkhead` and `AsyncRetry` are doing in `kwargs[middleware]`.
+- **[Resilience reference](../resilience.md)** — every parameter on `AsyncRetry`, `RetryBudget`, `AsyncBulkhead`.
 - **[`modern-di` factories](https://modern-di.readthedocs.io/providers/factories/)** — `CacheSettings`, scopes, the broader provider story.

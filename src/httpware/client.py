@@ -17,8 +17,8 @@ from httpware.errors import (
     TimeoutError,  # noqa: A004
     TransportError,
 )
-from httpware.middleware import Middleware, Next
-from httpware.middleware.chain import compose
+from httpware.middleware import AsyncMiddleware, AsyncNext
+from httpware.middleware.chain import compose_async
 
 
 T = typing.TypeVar("T")
@@ -74,7 +74,7 @@ def _raise_on_status_error(response: httpx2.Response) -> None:
 STREAMING_BODY_MARKER = "httpware.streaming_body"
 """Key set on ``httpx2.Request.extensions`` by ``_request_with_body`` when content/data/files is an async-iterable.
 
-``Retry.__call__`` reads this marker to refuse retrying a streamed-body request
+``AsyncRetry.__call__`` reads this marker to refuse retrying a streamed-body request
 (the consumed iterator cannot replay across attempts)."""
 
 
@@ -93,8 +93,8 @@ class AsyncClient:
     _httpx2_client: httpx2.AsyncClient
     _owns_client: bool
     _decoder: ResponseDecoder
-    _user_middleware: tuple[Middleware, ...]
-    _dispatch: Next
+    _user_middleware: tuple[AsyncMiddleware, ...]
+    _dispatch: AsyncNext
 
     def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
@@ -108,7 +108,7 @@ class AsyncClient:
         auth: httpx2.Auth | None = None,
         httpx2_client: httpx2.AsyncClient | None = None,
         decoder: ResponseDecoder | None = None,
-        middleware: Sequence[Middleware] = (),
+        middleware: Sequence[AsyncMiddleware] = (),
     ) -> None:
         if httpx2_client is not None:
             forwarded = {
@@ -145,7 +145,7 @@ class AsyncClient:
 
         self._decoder = decoder if decoder is not None else _default_pydantic_decoder()
         self._user_middleware = tuple(middleware)
-        self._dispatch = compose(self._user_middleware, self._terminal)
+        self._dispatch = compose_async(self._user_middleware, self._terminal)
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         try:
@@ -718,7 +718,7 @@ class AsyncClient:
         The body is NOT pre-read for 2xx/3xx (streaming preserved); the response
         is closed when the context exits.
 
-        Bypasses the middleware chain (no Retry, no Bulkhead, no user-installed
+        Bypasses the middleware chain (no AsyncRetry, no AsyncBulkhead, no user-installed
         middleware) for v1 — see planning/specs/2026-06-05-streaming-design.md.
 
         Auto-raises StatusError subclasses on 4xx/5xx (NotFoundError,

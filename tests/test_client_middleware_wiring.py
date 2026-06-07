@@ -5,11 +5,19 @@ from http import HTTPStatus
 import httpx2
 import pytest
 
-from httpware import AsyncClient, InternalServerError, Next, NotFoundError, after_response, before_request, on_error
+from httpware import (
+    AsyncClient,
+    AsyncNext,
+    InternalServerError,
+    NotFoundError,
+    async_after_response,
+    async_before_request,
+    async_on_error,
+)
 
 
 async def test_before_request_runs() -> None:
-    @before_request
+    @async_before_request
     async def add_header(request: httpx2.Request) -> httpx2.Request:
         return httpx2.Request(
             request.method,
@@ -33,7 +41,7 @@ async def test_before_request_runs() -> None:
 
 
 async def test_after_response_runs() -> None:
-    @after_response
+    @async_after_response
     async def tag_status(request: httpx2.Request, response: httpx2.Response) -> httpx2.Response:
         return httpx2.Response(
             HTTPStatus.IM_USED,
@@ -52,7 +60,7 @@ async def test_after_response_runs() -> None:
 
 
 async def test_on_error_catches_status_error() -> None:
-    @on_error
+    @async_on_error
     async def convert_404(request: httpx2.Request, exc: Exception) -> httpx2.Response | None:
         if isinstance(exc, NotFoundError):
             return httpx2.Response(HTTPStatus.OK, request=request, content=b"recovered")
@@ -84,7 +92,7 @@ async def test_middleware_runs_outer_to_inner_then_inner_to_outer() -> None:
         def __init__(self, name: str) -> None:
             self.name = name
 
-        async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+        async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
             order.append(f"{self.name}.in")
             response = await next(request)
             order.append(f"{self.name}.out")
