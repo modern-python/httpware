@@ -156,3 +156,46 @@ def test_on_error_repr() -> None:
 
     assert "on_error" in repr(my_handler)
     assert "my_handler" in repr(my_handler)
+
+
+def test_on_error_lets_keyboardinterrupt_propagate() -> None:
+    """on_error catches Exception, NOT BaseException — KeyboardInterrupt must escape.
+
+    Sync mirror of test_middleware.py::test_on_error_lets_cancelled_propagate. The
+    async test pins asyncio.CancelledError (a BaseException). The sync world's
+    equivalents are KeyboardInterrupt and SystemExit; they too must propagate.
+    """
+
+    @on_error
+    def swallow_all(
+        request: httpx2.Request,  # noqa: ARG001
+        exc: Exception,  # noqa: ARG001
+    ) -> httpx2.Response | None:  # pragma: no cover
+        msg = "should not catch BaseException"
+        raise AssertionError(msg)
+
+    def terminal_ki(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        raise KeyboardInterrupt
+
+    dispatch = compose((swallow_all,), terminal_ki)
+    with pytest.raises(KeyboardInterrupt):
+        dispatch(_make_request())
+
+
+def test_on_error_lets_systemexit_propagate() -> None:
+    """SystemExit (sibling of KeyboardInterrupt) must also escape on_error."""
+
+    @on_error
+    def swallow_all(
+        request: httpx2.Request,  # noqa: ARG001
+        exc: Exception,  # noqa: ARG001
+    ) -> httpx2.Response | None:  # pragma: no cover
+        msg = "should not catch BaseException"
+        raise AssertionError(msg)
+
+    def terminal_se(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        raise SystemExit
+
+    dispatch = compose((swallow_all,), terminal_se)
+    with pytest.raises(SystemExit):
+        dispatch(_make_request())

@@ -108,6 +108,9 @@ async def test_no_slot_leak_after_drain(max_concurrent: int, n_requests: int) ->
 
     await asyncio.gather(*(client.get(f"https://example.test/{i}") for i in range(n_requests)))
 
-    # AsyncBulkhead should be drained — _value equals max_concurrent again.
-    # asyncio.Semaphore._value is implementation detail but reliable across CPython 3.11+.
-    assert bulkhead._sem._value == max_concurrent  # noqa: SLF001
+    # Behavioral drain check: after gather completes, max_concurrent fresh acquires
+    # must succeed simultaneously under a tight acquire_timeout. If any slot leaked,
+    # the post-drain acquires would block past the timeout and BulkheadFullError
+    # would surface — a deterministic failure rather than an internals-peek.
+    bulkhead._acquire_timeout = 0.05  # noqa: SLF001 — test-local override of internal config
+    await asyncio.gather(*(client.get(f"https://example.test/post-drain-{i}") for i in range(max_concurrent)))
