@@ -286,17 +286,39 @@ async def test_retry_after_http_date_overrides_backoff() -> None:
     assert 2.0 <= sleeper.calls[0] <= 4.0  # noqa: PLR2004 — ~3 seconds, with clock-skew tolerance
 
 
-async def test_retry_after_capped_at_max_delay() -> None:
+async def test_retry_after_exceeding_max_delay_raises_with_note() -> None:
+    """When Retry-After > max_delay, give up — don't silently retry after a too-short delay."""
     sleeper = _SleepRecorder()
     handler = _ResponseSequenceWithHeaders(
         [
             (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9999"}),
-            (HTTPStatus.OK, {}),
+            (HTTPStatus.OK, {}),  # never reached
         ]
     )
     client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
+    with pytest.raises(ServiceUnavailableError) as exc_info:
+        await client.get("https://example.test/x")
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("Retry-After" in n and "exceeded max_delay" in n for n in notes), (
+        f"expected give-up note in __notes__; got {notes!r}"
+    )
+    assert sleeper.calls == []  # no sleep before give-up
+    assert handler.calls == 1  # initial attempt only; no retry
+
+
+async def test_retry_after_equal_to_max_delay_still_retries() -> None:
+    """Boundary: Retry-After exactly equal to max_delay sleeps and retries — does not give up."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "2"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=2.0))
     await client.get("https://example.test/x")
-    assert sleeper.calls == [2.5]
+    assert sleeper.calls == [2.0]
+    assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
 
 
 async def test_malformed_retry_after_falls_back_to_backoff() -> None:
@@ -444,7 +466,11 @@ def test_is_streaming_body_true_for_async_iterable_files() -> None:
 
 
 async def test_retry_refuses_streamed_body_request() -> None:
-    """AsyncRetry must not replay a request with a streaming body — re-raise with a PEP-678 note."""
+    """AsyncRetry must not replay a request with a streaming body — re-raise with a PEP-678 note.
+
+    Uses PUT (idempotent, in retry_methods) so that method eligibility is satisfied and the streaming
+    body is the actual blocker. The note must appear only when streaming IS the reason for refusal.
+    """
     sleeper = _SleepRecorder()
     call_count = {"n": 0}
 
@@ -462,7 +488,7 @@ async def test_retry_refuses_streamed_body_request() -> None:
     )
 
     with pytest.raises(ServiceUnavailableError) as info:
-        await client.post("https://example.test/upload", content=streamed_body())
+        await client.put("https://example.test/upload", content=streamed_body())
 
     assert call_count["n"] == 1
     assert sleeper.calls == []  # no retry attempted
@@ -471,7 +497,11 @@ async def test_retry_refuses_streamed_body_request() -> None:
 
 
 async def test_retry_refuses_streamed_body_does_not_consume_budget() -> None:
-    """When AsyncRetry refuses for streaming-body reasons, no budget token is withdrawn."""
+    """When AsyncRetry refuses for streaming-body reasons, no budget token is withdrawn.
+
+    Uses PUT (idempotent, in retry_methods) so the streaming body is the actual blocker,
+    not method ineligibility.
+    """
     sleeper = _SleepRecorder()
     budget = RetryBudget(ttl=10.0, min_retries_per_sec=10.0, percent_can_retry=0.2)
 
@@ -488,15 +518,19 @@ async def test_retry_refuses_streamed_body_does_not_consume_budget() -> None:
     )
 
     with pytest.raises(ServiceUnavailableError):
-        await client.post("https://example.test/upload", content=streamed_body())
+        await client.put("https://example.test/upload", content=streamed_body())
 
     # Budget should be untouched: deposits OK (every attempt deposits), but no withdrawals.
     # Check via _withdrawn deque emptiness.
     assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
 
 
-async def test_retry_refuses_streamed_body_network_error_non_idempotent() -> None:
-    """Streaming POST that hits a NetworkError gets the PEP-678 note."""
+async def test_retry_refuses_streamed_body_network_error_idempotent() -> None:
+    """Streaming PUT that hits a NetworkError gets the PEP-678 note.
+
+    Uses PUT (idempotent, in retry_methods) so streaming IS the actual blocker —
+    the note should appear at the dedicated retryable-failure-path site, not the early-out.
+    """
     sleeper = _SleepRecorder()
 
     def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
@@ -513,7 +547,7 @@ async def test_retry_refuses_streamed_body_network_error_non_idempotent() -> Non
     )
 
     with pytest.raises(NetworkError) as info:
-        await client.post("https://example.test/upload", content=streamed_body())
+        await client.put("https://example.test/upload", content=streamed_body())
 
     assert sleeper.calls == []  # no retry attempted
     notes = getattr(info.value, "__notes__", [])
@@ -611,3 +645,59 @@ async def test_retry_streaming_refused_emits_observability_event(caplog: pytest.
     record = streaming_records[0]
     assert record.method == "PUT"  # ty: ignore[unresolved-attribute]
     assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
+
+
+class _CountingBudget(RetryBudget):
+    """RetryBudget that counts deposit() calls."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.deposit_calls = 0
+
+    def deposit(self) -> None:
+        self.deposit_calls += 1
+        super().deposit()
+
+
+async def test_deposit_fires_once_per_call_not_per_attempt() -> None:
+    """deposit() must be called exactly once per AsyncRetry.__call__, regardless of attempts."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
+    budget = _CountingBudget()
+    client = _client(
+        handler,
+        retry=AsyncRetry(_sleep=sleeper, base_delay=0.001, max_delay=0.002, max_attempts=3, budget=budget),
+    )
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 3  # noqa: PLR2004 — "3" is intentional literal in test (max_attempts=3)
+    assert budget.deposit_calls == 1, f"expected 1 deposit per request, got {budget.deposit_calls}"
+
+
+async def test_method_ineligible_with_streaming_body_does_not_attach_streaming_note() -> None:
+    """POST with a streaming body that gets a 503 raises ServiceUnavailableError WITHOUT the streaming-note.
+
+    The blocker is method ineligibility (POST not in retry_methods by default), not the streaming body.
+    The previous code wrongly attached the streaming-note here, misleadingly suggesting the stream was
+    the blocker.
+    """
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])
+
+    async def _streaming_body() -> typing.AsyncIterator[bytes]:
+        yield b"chunk"
+
+    transport = httpx2.MockTransport(handler)
+    async with AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.02)],
+    ) as client:
+        # Use client.post() so the STREAMING_BODY_MARKER is set in request.extensions (build_request alone
+        # does not set it — the marker is set by the _request() helper that also calls send()).
+        with pytest.raises(ServiceUnavailableError) as exc_info:
+            await client.post("https://example.test/x", content=_streaming_body())
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert not any("stream that cannot replay" in n for n in notes), (
+        f"streaming-note was incorrectly attached when method ineligibility was the blocker: {notes!r}"
+    )
+    assert sleeper.calls == []

@@ -339,3 +339,26 @@ def test_close_does_not_close_borrowed_httpx2_client() -> None:
     client.close()
     assert not underlying.is_closed
     underlying.close()
+
+
+def test_runtimeerror_unrelated_to_close_propagates_unchanged() -> None:
+    """A RuntimeError NOT caused by client closure must propagate as-is (sync mirror)."""
+    msg = "downstream proxy hiccup — closed connection reset by peer"
+
+    def _handler(_request: httpx2.Request) -> httpx2.Response:
+        raise RuntimeError(msg)
+
+    transport = httpx2.MockTransport(_handler)
+    with Client(httpx2_client=httpx2.Client(transport=transport)) as client:
+        with pytest.raises(RuntimeError) as exc_info:
+            client.get("https://example.test/x")
+        assert not isinstance(exc_info.value, TransportError)
+
+
+def test_runtimeerror_after_close_maps_to_transporterror() -> None:
+    """After close(), sending raises a RuntimeError that should map to TransportError via is_closed (sync)."""
+    # Use an owned client (no httpx2_client= arg) so close() also closes the httpx2 layer.
+    client = Client()
+    client.close()
+    with pytest.raises(TransportError):
+        client.get("https://example.test/x")

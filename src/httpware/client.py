@@ -132,7 +132,7 @@ class AsyncClient:
             async with _httpx2_exception_mapper():
                 response = await self._httpx2_client.send(request)
         except RuntimeError as exc:
-            if "closed" in str(exc):
+            if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc
             raise
         _raise_on_status_error(response)
@@ -850,7 +850,7 @@ class Client:
             with _httpx2_exception_mapper_sync():
                 response = self._httpx2_client.send(request)
         except RuntimeError as exc:
-            if "closed" in str(exc):
+            if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc
             raise
         _raise_on_status_error(response)

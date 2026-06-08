@@ -47,6 +47,9 @@ DEFAULT_IDEMPOTENT_METHODS = frozenset(
 
 _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
 _STREAMING_BODY_REFUSAL_NOTE = "httpware: not retrying — request body is a stream that cannot replay across attempts"
+_RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE = (
+    "httpware: Retry-After ({retry_after}s) exceeded max_delay ({max_delay}s); giving up"
+)
 
 _LOGGER = logging.getLogger("httpware.retry")
 
@@ -100,23 +103,19 @@ class AsyncRetry:
         last_exc: BaseException | None = None
         last_response: httpx2.Response | None = None
 
+        self.budget.deposit()
         for attempt in range(self.max_attempts):
             is_last = attempt + 1 >= self.max_attempts
-            self.budget.deposit()
             try:
                 return await next(request)
             except StatusError as exc:
                 retryable_status = exc.response.status_code in self.retry_status_codes
                 if not method_eligible or not retryable_status:
-                    if retryable_status and request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = exc.response
             except (NetworkError, TimeoutError) as exc:
                 if not method_eligible:
-                    if request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = None
@@ -185,8 +184,19 @@ class AsyncRetry:
                 if header is not None:
                     retry_after = _parse_retry_after(header)
 
+            if retry_after is not None and retry_after > self.max_delay:
+                if last_exc is None:  # pragma: no cover — retry_after requires last_response which requires last_exc
+                    msg = "AsyncRetry: retry_after path reached with no last_exc"
+                    raise AssertionError(msg)
+                last_exc.add_note(
+                    _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE.format(
+                        retry_after=retry_after,
+                        max_delay=self.max_delay,
+                    ),
+                )
+                raise last_exc
             if retry_after is not None:
-                delay = min(retry_after, self.max_delay)
+                delay = retry_after
             else:
                 delay = full_jitter_delay(
                     attempt,
@@ -231,23 +241,19 @@ class Retry:
         last_exc: BaseException | None = None
         last_response: httpx2.Response | None = None
 
+        self.budget.deposit()
         for attempt in range(self.max_attempts):
             is_last = attempt + 1 >= self.max_attempts
-            self.budget.deposit()
             try:
                 return next(request)
             except StatusError as exc:
                 retryable_status = exc.response.status_code in self.retry_status_codes
                 if not method_eligible or not retryable_status:
-                    if retryable_status and request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = exc.response
             except (NetworkError, TimeoutError) as exc:
                 if not method_eligible:
-                    if request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = None
@@ -316,8 +322,19 @@ class Retry:
                 if header is not None:
                     retry_after = _parse_retry_after(header)
 
+            if retry_after is not None and retry_after > self.max_delay:
+                if last_exc is None:  # pragma: no cover — retry_after requires last_response which requires last_exc
+                    msg = "Retry: retry_after path reached with no last_exc"
+                    raise AssertionError(msg)
+                last_exc.add_note(
+                    _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE.format(
+                        retry_after=retry_after,
+                        max_delay=self.max_delay,
+                    ),
+                )
+                raise last_exc
             if retry_after is not None:
-                delay = min(retry_after, self.max_delay)
+                delay = retry_after
             else:
                 delay = full_jitter_delay(
                     attempt,
