@@ -100,9 +100,9 @@ async def main() -> None:
         await asyncio.gather(users.get("/users/1"), orders.get("/orders/1"))
 ```
 
-### Single-thread assumption
+### Thread safety
 
-`RetryBudget` is asyncio-aware — deque mutations between await points are atomic on a single event loop. Cross-thread use is out of scope; if you need that, wrap calls in a lock yourself.
+`RetryBudget` is thread-safe and asyncio-safe — all mutations go through a `threading.Lock`. A single instance is safe to share across threads, across coroutines on one event loop, and across `Client` / `AsyncClient` pairs in the same process. See [Sync Retry and Bulkhead](#sync-retry-and-bulkhead) for the cross-world sharing pattern.
 
 ## `AsyncBulkhead`
 
