@@ -81,6 +81,41 @@ async def main() -> None:
         user = await client.get("/users/1", response_model=User)
 ```
 
+### Response metadata + typed body
+
+When you need both the raw `httpx2.Response` (for headers, status, or the
+request URL) **and** a typed body, use `send_with_response`. It returns
+both atomically and routes the decode through the configured
+`ResponseDecoder`, so decoder failures surface as `DecodeError` — caught
+by `except httpware.ClientError` like every other failure mode.
+
+Canonical use case: RFC 5988 Link-header pagination.
+
+```python
+from httpware import AsyncClient
+from pydantic import BaseModel
+
+
+class Tag(BaseModel):
+    name: str
+
+
+async def main() -> None:
+    async with AsyncClient(base_url="https://gitlab.example/api/v4") as client:
+        url = "/projects/1/repository/tags"
+        params: dict[str, str] | None = {"per_page": "100", "page": "1"}
+        while url:
+            request = client.build_request("GET", url, params=params)
+            response, tags = await client.send_with_response(request, response_model=list[Tag])
+            for tag in tags:
+                process(tag)
+            url = next_link(response.headers.get("link"))   # caller's parser
+            params = None                                    # next link carries query
+```
+
+For the body-only case, prefer `client.get(..., response_model=...)`.
+`send_with_response` is not for streaming responses — use `stream()`.
+
 ### Streaming responses
 
 For large responses or server-sent events, stream the body chunk-by-chunk. `stream()` is an async context manager:
