@@ -5,9 +5,9 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/httpware.svg)](https://pypi.org/project/httpware/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Async HTTP client framework for Python.**
+**A Python HTTP client framework with sync and async clients for building resilient service clients.**
 
-`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain composed at client construction, supports opt-in typed response decoding (pydantic and msgspec are both extras), and raises a status-keyed exception tree automatically on 4xx/5xx. It also ships a small resilience suite — `AsyncRetry` middleware with a Finagle-style `RetryBudget`, plus an `AsyncBulkhead` concurrency limiter — under `httpware.middleware.resilience`.
+`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain composed at client construction, supports opt-in typed response decoding (pydantic and msgspec are both extras), and raises a status-keyed exception tree automatically on 4xx/5xx. It also ships a small resilience suite — `AsyncRetry`/`Retry` middleware with a Finagle-style `RetryBudget`, plus an `AsyncBulkhead`/`Bulkhead` concurrency limiter — under `httpware.middleware.resilience`.
 
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
@@ -71,6 +71,8 @@ async def main() -> None:
 
 Compose resilience middleware at construction; `AsyncBulkhead` goes outside `AsyncRetry` so one slot covers all retry attempts.
 
+The sync `Client` accepts identical `middleware=[...]`; swap `AsyncClient` → `Client` and `AsyncRetry` → `Retry` for the sync version.
+
 ```python
 from httpware import AsyncClient, AsyncBulkhead, AsyncRetry
 
@@ -113,7 +115,7 @@ All 4xx/5xx responses raise typed exceptions automatically: `NotFoundError`, `Se
 
 ## Observability
 
-`AsyncRetry` and `AsyncBulkhead` emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed).
+`AsyncRetry`/`Retry` and `AsyncBulkhead`/`Bulkhead` emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed). Event names and payloads are identical across sync and async; dashboards built against one class apply unchanged to the other.
 
 Logger names (`httpware.retry`, `httpware.bulkhead`) and event names (`retry.giving_up`, `retry.budget_refused`, `retry.streaming_refused`, `bulkhead.rejected`) are the stable public contract.
 
