@@ -1,10 +1,10 @@
 # Resilience reference
 
-`httpware` ships three resilience primitives under `httpware.middleware.resilience`, all composable through the standard [AsyncMiddleware](middleware.md) chain:
+`httpware` ships these resilience primitives under `httpware.middleware.resilience`, all composable through the standard [Middleware](middleware.md) / [AsyncMiddleware](middleware.md) chain:
 
-- **`AsyncRetry`** — automatic retry of transient failures with full-jitter exponential backoff
-- **`RetryBudget`** — Finagle-style token bucket that bounds the global retry rate to prevent retry storms when downstreams degrade
-- **`AsyncBulkhead`** — concurrency limiter via `asyncio.Semaphore` with bounded acquire-wait
+- **`Retry` / `AsyncRetry`** — automatic retry of transient failures with full-jitter exponential backoff
+- **`RetryBudget`** — Finagle-style token bucket; safe to share across sync `Client` and `AsyncClient` in the same process. (Finagle-style bounds the global retry rate to prevent retry storms when downstreams degrade.)
+- **`Bulkhead` / `AsyncBulkhead`** — concurrency limiter with bounded acquire-wait (`threading.Semaphore` and `asyncio.Semaphore` respectively)
 
 The canonical composition is `middleware=[AsyncBulkhead(...), AsyncRetry()]` — `AsyncBulkhead` outside `AsyncRetry` so one slot covers all retry attempts of a single call. Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
 
