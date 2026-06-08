@@ -4,7 +4,7 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 ## Project Overview
 
-`httpware` is a Python async HTTP client framework for building resilient service clients. It supersedes `community-of-python/base-client` and ships under the `modern-python` org. The framework is a thin opinionated wrapper around `httpx2`: it re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain, typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
+`httpware` is a Python HTTP client framework with sync and async clients for building resilient service clients. It supersedes `community-of-python/base-client` and ships under the `modern-python` org. The framework is a thin opinionated wrapper around `httpx2`: it re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain, typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 
 **Where to find what:**
 
@@ -68,7 +68,7 @@ These are non-negotiable. CI rejects PRs that violate them.
 ```
 src/httpware/
 ├── __init__.py                    # public exports + __all__
-├── client.py                      # AsyncClient (thin wrapper over httpx2.AsyncClient)
+├── client.py                      # AsyncClient + Client (thin wrappers over httpx2.AsyncClient / httpx2.Client)
 ├── errors.py                      # status-keyed exception hierarchy holding httpx2.Response
 ├── middleware/                    # protocol, Next type, chain composition, phase decorators
 ├── decoders/                      # ResponseDecoder protocol + Pydantic/msgspec adapters
@@ -80,15 +80,15 @@ src/httpware/
 
 Three documented internal boundaries. AI agents must respect them — never cross a seam except through its documented protocol.
 
-1. **`AsyncClient ↔ Middleware`** — middleware chain composed at `AsyncClient.__init__`, frozen for the client's lifetime. Internal terminal calls `httpx2.AsyncClient.send`, maps exceptions, raises `StatusError` on 4xx/5xx.
-2. **`AsyncClient ↔ ResponseDecoder`** — called when `response_model` is provided. Signature: `decode(content: bytes, model: type[T]) -> T`.
-3. **`httpware ↔ optional extras`** — each opt-in dependency imported only inside its dedicated module.
+1. **Seam A** — `Client`/`AsyncClient` ↔ `Middleware`/`AsyncMiddleware` — middleware chain composed at `Client.__init__` and `AsyncClient.__init__`, frozen for the client's lifetime. Internal terminal calls `httpx2.Client.send` or `httpx2.AsyncClient.send`, maps exceptions, raises `StatusError` on 4xx/5xx. Sync and async surfaces are kept at parity.
+2. **Seam B** — `Client`/`AsyncClient` ↔ `ResponseDecoder` — called when `response_model` is provided. Signature: `decode(content: bytes, model: type[T]) -> T`. Implementations of both `send` methods call the decoder identically.
+3. **Seam C** — `httpware` ↔ optional extras — each opt-in dependency imported only inside its dedicated module.
 
 ## Testing
 
 - `pytest-asyncio` auto mode — async tests do NOT need `@pytest.mark.asyncio`.
 - Property-based tests (Hypothesis) for concurrency-sensitive code: `RetryBudget`, `Bulkhead`, retry interleaving. Files named `test_*_props.py`.
-- Tests inject `httpx2.MockTransport` via `AsyncClient(httpx2_client=httpx2.AsyncClient(transport=mock))`. No `respx`, no `RecordedTransport`.
+- Tests inject `httpx2.MockTransport` via `AsyncClient(httpx2_client=httpx2.AsyncClient(transport=mock))` for async or `Client(httpx2_client=httpx2.Client(transport=mock))` for sync. No `respx`, no `RecordedTransport`.
 
 ## When in doubt
 
