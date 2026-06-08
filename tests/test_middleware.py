@@ -1,6 +1,7 @@
 """Tests for the AsyncMiddleware protocol, AsyncNext type, chain composition, and decorators."""
 
 import asyncio
+import typing
 from http import HTTPStatus
 
 import httpx2
@@ -13,7 +14,7 @@ from httpware.middleware import (
     async_before_request,
     async_on_error,
 )
-from httpware.middleware.chain import compose_async
+from httpware.middleware.chain import compose, compose_async
 
 
 def _make_request(url: str = "https://example.test/x") -> httpx2.Request:
@@ -174,3 +175,19 @@ async def test_on_error_lets_cancelled_propagate() -> None:
     dispatch = compose_async((swallow_all,), terminal)
     with pytest.raises(asyncio.CancelledError):
         await dispatch(_make_request())
+
+
+def test_compose_async_get_type_hints_resolves_without_nameerror() -> None:
+    """typing.get_type_hints(compose_async) must resolve to real classes, not raise NameError.
+
+    Pre-0.8.5: AsyncMiddleware was imported only under `if typing.TYPE_CHECKING`,
+    so get_type_hints raised NameError at runtime.
+    """
+    hints = typing.get_type_hints(compose_async)
+    assert "middleware" in hints
+
+
+def test_compose_get_type_hints_resolves_without_nameerror() -> None:
+    """Sync mirror — sync `compose` get_type_hints must also resolve."""
+    hints = typing.get_type_hints(compose)
+    assert "middleware" in hints
