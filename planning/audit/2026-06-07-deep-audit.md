@@ -1,18 +1,37 @@
 # httpware deep audit — 2026-06-07
 
-**Status:** in progress
+**Status:** complete (chunks 1, 2, 4 by Workflow; chunk 3 by hand-review)
 **Spec:** [planning/specs/2026-06-07-deep-audit-design.md](../specs/2026-06-07-deep-audit-design.md)
 **Plan:** [planning/plans/2026-06-07-deep-audit-plan.md](../plans/2026-06-07-deep-audit-plan.md)
 
 ## Summary
 
-_Counts updated after final merge._
+Final triaged counts after cross-chunk dedup. No blockers surfaced anywhere; the highest-severity finding is **`docs/resilience.md:103` — the "Single-thread assumption" section is the exact opposite of what `RetryBudget` guarantees**, telling users to wrap the budget in their own lock when the implementation already holds `threading.Lock` and explicitly advertises thread safety. The rest is a long tail of staleness from the 0.8.0 sync `Client` + `Async*` rename and a handful of optional-extras partial-install edges.
 
-- Blockers: —
-- High: —
-- Medium: —
-- Low: —
-- Nits: —
+- Blockers: 0
+- High: 1
+- Medium: 4
+- Low: 18
+- Nits: 12
+
+Rolled-up nit entries count their constituent findings, not the rolled entry — Chunk 4's "Stale-doc nits (rolled up)" header collapses 4 distinct stale-doc nits into a single entry, so it contributes 4 to the nits count above.
+
+Chunk sections present in this file (in append order):
+
+- **Chunk 1 — Correctness** (from dry-run smoke test) — 3 Low + 2 Nit.
+- **Chunk 1 — Concurrency & Error Contract** — 2 Medium + 1 Low + 2 Nit.
+- **Chunk 2 — Public API & Optional Extras** (public-api, correctness, testing dimensions) — 1 Medium + 5 Low + 2 Nit.
+- **Chunk 4 — Docs & Planning-Doc Staleness** — 1 High + 1 Medium + 6 Low + 5 Nit (1 individual + 4 rolled into the stale-doc roll-up).
+- **Chunk 3 — Test Quality (hand-review)** — 3 Low + 1 Nit.
+
+Not covered by this audit: the workflow-driven `tests` dimension stalled across two attempts (~1.5M Sonnet tokens combined returned zero findings); Chunk 3 is a targeted hand-review covering the highest-signal test-quality angles only and should be revisited as a separate pass when budget allows. No dedicated chunk covered performance, security, or supply-chain dimensions.
+
+## Cross-cutting themes
+
+- **0.8.0 sync `Client` + `Async*` rename is the dominant staleness driver.** 11 findings across chunks 2, 3, and 4 trace back to this single release. Chunk 4 alone carries 8 of them (CLAUDE.md module layout, Protocol Seams 1 and 2, the testing-pattern example, `engineering.md` §1 future tense, `engineering.md` §8 `attempt_timeout` line, `docs/resilience.md` "three primitives" intro, `docs/index.md` observability paragraph). Chunk 2 adds the `docs/index.md`/`README.md` "async HTTP client framework" opening and the missing sync-`Client` peer for the pydantic fail-fast test (`tests/test_optional_extras_pydantic_missing.py:41`). Chunk 3 adds two parity gaps (`test_on_error_lets_cancelled_propagate` has no sync `KeyboardInterrupt`/`SystemExit` peer; `tests/test_client_methods.py` has no async construction/lifecycle coverage to match `test_client_sync.py:297+`). Suggests a single doc + parity-test sweep would knock out the bulk of the audit.
+- **`RetryBudget` is the single most-flagged primitive** — 4 findings span chunks 1, 3, and 4. Chunk 1 (Correctness) calls out the per-attempt `deposit()` placement (`retry.py:105`) and the `int(...)` truncation in the ceiling (`budget.py:67`). Chunk 3 then shows the property test that should catch the truncation mirrors the same buggy arithmetic (`tests/test_budget_props.py:52`), and the retry property suite uses a `min_retries_per_sec=1000.0` budget that cannot be exhausted in the search space (`tests/test_retry_props.py:60`). Chunk 4's High — the "Single-thread assumption" section in `docs/resilience.md` — documents the opposite of what the budget actually guarantees. The code defects and the doc/test weaknesses reinforce each other.
+- **`AsyncBulkhead` carries every concurrency-dimension finding.** Both Chunk 1 (Concurrency) mediums land on `bulkhead.py` (the cross-event-loop deadlock at line 61 and the docstring at line 10 that advertises sharing without flagging the loop constraint), and the same module is referenced in Chunk 4's docs sweep (`docs/resilience.md` "three primitives" intro and `docs/index.md` observability paragraph both name only `AsyncBulkhead`). The sync `Bulkhead` is also flagged in Chunk 1 for missing Hypothesis property coverage. The pattern: the async bulkhead is the most-shared resilience object and accumulates the most footguns.
+- **Optional-extras partial-install handling clusters in Chunk 2.** Three findings (`pydantic.py:27` NameError window when the module is imported with `is_pydantic_installed=False`, `import_checker.py:8` namespace-package false-positive for `opentelemetry`, `observability.py:40` lazy import not wrapped in `try/except`) together describe a single failure mode: the `is_*_installed` flags don't survive the partial-install or test-reload edges that the lazy-import contract is supposed to handle. The three suggested fixes compose into one PR and close both ends of the partial-install hole.
 
 <!-- chunk sections appended below in order: 1, 2, 3, 4 -->
 
