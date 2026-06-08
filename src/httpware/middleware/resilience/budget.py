@@ -8,6 +8,7 @@ coroutines on one event loop, and across (sync Client, AsyncClient) pairs
 in the same process.
 """
 
+import math
 import threading
 import time
 from collections import deque
@@ -64,7 +65,7 @@ class RetryBudget:
         with self._lock:
             self._purge(now)
             floor = int(self._min_retries_per_sec * self._ttl)
-            ceiling = int(len(self._deposits) * self._percent_can_retry) + floor
+            ceiling = math.ceil(len(self._deposits) * self._percent_can_retry) + floor
             if len(self._withdrawn) >= ceiling:
                 return False
             self._withdrawn.append(now)

@@ -8,6 +8,7 @@ Properties verified:
    reduce the budget).
 """
 
+import math
 from collections.abc import Callable
 
 from hypothesis import given, settings
@@ -60,13 +61,13 @@ def test_try_withdraw_never_exceeds_theoretical_bound(
     for _ in range(deposits):
         budget.deposit()
     floor = int(min_rps * ttl)
-    ceiling = int(deposits * percent) + floor
+    expected_ceiling = math.ceil(deposits * percent) + floor
     permitted = 0
-    # Try up to ceiling + 10 times to confirm the cap holds.
-    for _ in range(ceiling + 10):
+    # Try up to expected_ceiling + 10 times to confirm the cap holds exactly.
+    for _ in range(expected_ceiling + 10):
         if budget.try_withdraw():
             permitted += 1
-    assert permitted <= ceiling
+    assert permitted == expected_ceiling
 
 
 @given(

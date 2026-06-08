@@ -69,20 +69,24 @@ def test_try_withdraw_returns_false_when_exhausted() -> None:
     assert budget.try_withdraw() is False
 
 
-def test_deposit_after_exhaustion_does_not_immediately_unblock() -> None:
-    """A single deposit at 20% percent_can_retry contributes 0.2 → int() truncates to 0 → no new retries."""
+def test_deposit_after_exhaustion_unblocks_at_ceil_boundary() -> None:
+    """With math.ceil, 1 deposit at 20% yields ceil(0.2)=1, raising the ceiling by 1."""
     clock = _Clock()
     budget = RetryBudget(ttl=10.0, min_retries_per_sec=1.0, percent_can_retry=0.2, _now=clock.now)
     # exhaust the floor (10)
     for _ in range(10):
         budget.try_withdraw()
     assert budget.try_withdraw() is False
-    # one deposit: 1 * 0.2 = 0.2 → int() → 0
+    # one deposit: ceil(1 * 0.2) = ceil(0.2) = 1 → ceiling becomes 11, one new retry permitted
     budget.deposit()
+    assert budget.try_withdraw() is True
     assert budget.try_withdraw() is False
-    # 5 more deposits: 6 * 0.2 = 1.2 → int() → 1 new retry permitted
-    for _ in range(5):
+    # 4 more deposits (5 total): ceil(5 * 0.2) = ceil(1.0) = 1 → same ceiling, no additional retries
+    for _ in range(4):
         budget.deposit()
+    assert budget.try_withdraw() is False
+    # 1 more deposit (6 total): ceil(6 * 0.2) = ceil(1.2) = 2 → ceiling becomes 12, one more retry
+    budget.deposit()
     assert budget.try_withdraw() is True
     assert budget.try_withdraw() is False
 
