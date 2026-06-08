@@ -206,7 +206,7 @@ Prose anchors the existing "chain is frozen at construction" invariant — middl
 - httpware **Quick-Start** — base `AsyncClient` API.
 - httpware **Middleware guide** — what `Bulkhead` and `Retry` are doing in `kwargs[middleware]`.
 - httpware **Resilience reference** — every parameter on `Retry`, `RetryBudget`, `Bulkhead`.
-- `modern-di` **Factories** docs (https://modern-di.readthedocs.io/providers/factories/) — `CacheSettings`, scopes, the broader provider story.
+- `modern-di` **Factories** docs (https://modern-di.modern-python.org/providers/factories/) — `CacheSettings`, scopes, the broader provider story.
 
 ## mkdocs.yml change
 

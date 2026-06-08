@@ -39,7 +39,7 @@ all = ["httpware[pydantic,msgspec,otel]"]
 
 [project.urls]
 repository = "https://github.com/modern-python/httpware"
-docs = "https://httpware.readthedocs.io"
+docs = "https://httpware.modern-python.org"
 
 [build-system]
 requires = ["uv_build>=0.11,<1.0"]
