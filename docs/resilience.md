@@ -21,7 +21,7 @@ from httpware.middleware.resilience import AsyncRetry
 | `max_delay` | `5.0` (s) | Ceiling for backoff. |
 | `retry_status_codes` | `frozenset({408, 429, 502, 503, 504})` | Status codes considered retryable. |
 | `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only by default. POST excluded; pass an explicit frozenset including `"POST"` to retry it. |
-| `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value (clamped to `max_delay`) instead of the jittered backoff. |
+| `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value instead of the jittered backoff. If the header value exceeds `max_delay`, AsyncRetry gives up and re-raises the underlying `StatusError` with a PEP 678 note `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. Set `max_delay` higher (or `respect_retry_after=False`) to opt out. |
 | `budget` | `RetryBudget()` (default-configured) | The token bucket. Pass a shared `RetryBudget` instance to apply one budget across multiple clients. |
 
 For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the client or
@@ -185,7 +185,7 @@ from httpware.middleware.resilience import Retry
 | `max_delay` | `5.0` (s) | Ceiling for backoff. |
 | `retry_status_codes` | `frozenset({408, 429, 502, 503, 504})` | Status codes considered retryable. |
 | `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only by default. POST excluded; pass an explicit frozenset including `"POST"` to retry it. |
-| `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value (clamped to `max_delay`) instead of the jittered backoff. |
+| `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value instead of the jittered backoff. If the header value exceeds `max_delay`, Retry gives up and re-raises the underlying `StatusError` with a PEP 678 note `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. Set `max_delay` higher (or `respect_retry_after=False`) to opt out. |
 | `budget` | `RetryBudget()` (default-configured) | The token bucket. Pass a shared `RetryBudget` instance to apply one budget across multiple clients — sync, async, or both. |
 
 `Retry` uses `time.sleep` between attempts. `Retry-After`, streaming-body refusal, exhaustion behavior, and `RetryBudgetExhaustedError` semantics are identical to `AsyncRetry`.

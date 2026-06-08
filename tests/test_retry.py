@@ -286,17 +286,39 @@ async def test_retry_after_http_date_overrides_backoff() -> None:
     assert 2.0 <= sleeper.calls[0] <= 4.0  # noqa: PLR2004 — ~3 seconds, with clock-skew tolerance
 
 
-async def test_retry_after_capped_at_max_delay() -> None:
+async def test_retry_after_exceeding_max_delay_raises_with_note() -> None:
+    """When Retry-After > max_delay, give up — don't silently retry after a too-short delay."""
     sleeper = _SleepRecorder()
     handler = _ResponseSequenceWithHeaders(
         [
             (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9999"}),
-            (HTTPStatus.OK, {}),
+            (HTTPStatus.OK, {}),  # never reached
         ]
     )
     client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
+    with pytest.raises(ServiceUnavailableError) as exc_info:
+        await client.get("https://example.test/x")
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("Retry-After" in n and "exceeded max_delay" in n for n in notes), (
+        f"expected give-up note in __notes__; got {notes!r}"
+    )
+    assert sleeper.calls == []  # no sleep before give-up
+    assert handler.calls == 1  # initial attempt only; no retry
+
+
+async def test_retry_after_equal_to_max_delay_still_retries() -> None:
+    """Boundary: Retry-After exactly equal to max_delay sleeps and retries — does not give up."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "2"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=2.0))
     await client.get("https://example.test/x")
-    assert sleeper.calls == [2.5]
+    assert sleeper.calls == [2.0]
+    assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
 
 
 async def test_malformed_retry_after_falls_back_to_backoff() -> None:

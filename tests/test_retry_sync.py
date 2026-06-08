@@ -16,7 +16,7 @@ import pytest
 
 from httpware import Client, NotFoundError, ServiceUnavailableError
 from httpware._internal.status import STREAMING_BODY_MARKER, _is_streaming_body_sync
-from httpware.errors import NetworkError, RetryBudgetExhaustedError, StatusError, TransportError
+from httpware.errors import NetworkError, RetryBudgetExhaustedError, TransportError
 from httpware.errors import TimeoutError as HttpwareTimeoutError
 from httpware.middleware.resilience.budget import RetryBudget
 from httpware.middleware.resilience.retry import (
@@ -275,20 +275,18 @@ def test_budget_exhausted_on_network_error_carries_exception_not_response() -> N
 
 
 def test_retry_after_seconds_honored() -> None:
+    """When Retry-After fits within max_delay, it overrides the jittered backoff."""
     sleeper = _SleepRecorder()
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        return httpx2.Response(
-            HTTPStatus.TOO_MANY_REQUESTS,
-            request=request,
-            headers={"Retry-After": "1"},
-        )
-
-    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.5, max_attempts=2))
-    with pytest.raises(StatusError):
-        client.get("https://example.test/x")
-    # Retry-After=1 clamped to max_delay=0.5
-    assert sleeper.calls == [0.5]
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.TOO_MANY_REQUESTS, {"Retry-After": "1"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=5.0, max_attempts=2))
+    response = client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert sleeper.calls == [1.0]
 
 
 def test_retry_after_http_date_overrides_backoff() -> None:
@@ -504,3 +502,35 @@ def test_deposit_fires_once_per_call_not_per_attempt() -> None:
     assert response.status_code == HTTPStatus.OK
     assert handler.calls == 3  # noqa: PLR2004 — "3" is intentional literal in test (max_attempts=3)
     assert budget.deposit_calls == 1, f"expected 1 deposit per request, got {budget.deposit_calls}"
+
+
+def test_retry_after_exceeding_max_delay_raises_with_note() -> None:
+    """When Retry-After > max_delay, give up — don't silently retry after a too-short delay."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9999"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
+    with pytest.raises(ServiceUnavailableError) as exc_info:
+        client.get("https://example.test/x")
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert any("Retry-After" in n and "exceeded max_delay" in n for n in notes)
+    assert sleeper.calls == []
+    assert handler.calls == 1
+
+
+def test_retry_after_equal_to_max_delay_still_retries() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "2"}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=2.0))
+    client.get("https://example.test/x")
+    assert sleeper.calls == [2.0]
+    assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
