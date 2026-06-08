@@ -147,17 +147,22 @@ from httpware import Middleware, Next, before_request, after_response, on_error
 A sync `Middleware` is a structural protocol — any callable with the right signature satisfies it:
 
 ```python
+import logging
+
 import httpx2
 
 from httpware import Client
 from httpware.middleware import Next
 
 
+_LOGGER = logging.getLogger("myapp.logging_middleware")
+
+
 class LoggingMiddleware:
     def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
-        print(f"-> {request.method} {request.url}")
+        _LOGGER.info("-> %s %s", request.method, request.url)
         response = next(request)
-        print(f"<- {response.status_code}")
+        _LOGGER.info("<- %s", response.status_code)
         return response
 
 
