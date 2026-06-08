@@ -67,5 +67,7 @@ def test_expected_exports() -> None:
         "before_request",
         "on_error",
     }
-    missing = expected - set(httpware.__all__)
-    assert not missing, f"expected exports missing from __all__: {missing}"
+    actual = set(httpware.__all__)
+    assert expected == actual, (
+        f"__all__ mismatch:\n  missing from __all__: {expected - actual}\n  unexpected in __all__: {actual - expected}"
+    )
