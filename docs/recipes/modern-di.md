@@ -1,6 +1,6 @@
 # Wiring `AsyncClient` into `modern-di`
 
-If you wire your app's dependencies with [`modern-di`](https://modern-di.readthedocs.io/) and want connection-pool teardown and middleware composition to flow through the container's lifecycle, this is the bridge. Both libraries ship under the [`modern-python`](https://github.com/modern-python) org.
+If you wire your app's dependencies with [`modern-di`](https://modern-di.modern-python.org/) and want connection-pool teardown and middleware composition to flow through the container's lifecycle, this is the bridge. Both libraries ship under the [`modern-python`](https://github.com/modern-python) org.
 
 ## The minimal wire-up
 
@@ -34,7 +34,7 @@ Breaking that down:
 
 A common first instinct here is `finalizer=lambda c: c.aclose()`. **That does not work** — the lambda itself is sync, so `modern-di` calls it synchronously and discards the returned coroutine unawaited. The underlying connection pool leaks. Pass the unbound async method directly, or wrap in `async def`.
 
-See the [`modern-di` factories docs](https://modern-di.readthedocs.io/providers/factories/) for the broader `CacheSettings` story (scopes, `clear_cache`, sync vs async finalizers).
+See the [`modern-di` factories docs](https://modern-di.modern-python.org/providers/factories/) for the broader `CacheSettings` story (scopes, `clear_cache`, sync vs async finalizers).
 
 ## Adding a second backend hits a type collision
 
@@ -135,4 +135,4 @@ Each cached singleton owns its own `AsyncBulkhead` and `AsyncRetry` state — wh
 - **[Quick-Start](../index.md)** — the base `AsyncClient` API.
 - **[Middleware guide](../middleware.md)** — what `AsyncBulkhead` and `AsyncRetry` are doing in `kwargs[middleware]`.
 - **[Resilience reference](../resilience.md)** — every parameter on `AsyncRetry`, `RetryBudget`, `AsyncBulkhead`.
-- **[`modern-di` factories](https://modern-di.readthedocs.io/providers/factories/)** — `CacheSettings`, scopes, the broader provider story.
+- **[`modern-di` factories](https://modern-di.modern-python.org/providers/factories/)** — `CacheSettings`, scopes, the broader provider story.
