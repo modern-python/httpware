@@ -1,5 +1,5 @@
 site_name: httpware
-site_url: https://httpware.readthedocs.io/
+site_url: https://httpware.modern-python.org
 repo_url: https://github.com/modern-python/httpware
 docs_dir: docs
 edit_uri: edit/main/docs/
