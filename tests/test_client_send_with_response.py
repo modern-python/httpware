@@ -20,15 +20,12 @@ def _client_with_payload(
     *,
     status: int = HTTPStatus.OK,
     headers: dict[str, str] | None = None,
-    record: list[httpx2.Request] | None = None,
 ) -> AsyncClient:
     response_headers = {"content-type": "application/json"}
     if headers is not None:
         response_headers.update(headers)
 
     def handler(request: httpx2.Request) -> httpx2.Response:
-        if record is not None:
-            record.append(request)
         return httpx2.Response(status, content=payload, headers=response_headers, request=request)
 
     transport = httpx2.MockTransport(handler)
@@ -80,8 +77,12 @@ async def test_send_with_response_decode_failure_raises_decode_error() -> None:
 async def test_send_with_response_malformed_json_raises_decode_error() -> None:
     client = _client_with_payload(b"{not json")
     request = client.build_request("GET", "https://example.test/u")
-    with pytest.raises(DecodeError):
+    with pytest.raises(DecodeError) as exc_info:
         await client.send_with_response(request, response_model=_User)
+    exc = exc_info.value
+    assert exc.response.status_code == HTTPStatus.OK
+    assert exc.model is _User
+    assert isinstance(exc.original, pydantic.ValidationError)
 
 
 async def test_send_with_response_decode_error_caught_by_client_error() -> None:
