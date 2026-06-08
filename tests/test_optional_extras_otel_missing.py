@@ -12,7 +12,7 @@ silently skipped when the flag is False.
 
 import logging
 import sys
-from importlib.metadata import distribution
+from importlib.metadata import PackageNotFoundError, distribution
 from unittest.mock import patch
 
 import pytest
@@ -22,6 +22,7 @@ from httpware._internal.observability import _emit_event
 
 
 _TEST_LOGGER = logging.getLogger("httpware.test.otel_missing")
+_NOT_FOUND_MSG = "simulated absent package"
 
 
 def test_emit_event_logs_record_without_otel(caplog: pytest.LogCaptureFixture) -> None:
@@ -80,17 +81,23 @@ def test_is_otel_installed_uses_opentelemetry_trace_probe() -> None:
     assert distribution("opentelemetry-api") is not None
     assert import_checker.is_otel_installed is True
 
-    # The structural assertion: the constant must be derived from the metadata probe.
-    # This ensures a future revert to find_spec trips the regression guard.
+    # The structural assertions: the module must probe via the metadata distribution
+    # call, keyed on "opentelemetry-api". Ensures a future revert to find_spec on the
+    # namespace package trips the regression guard.
     source = __import__("inspect").getsource(import_checker)
-    assert 'distribution("opentelemetry-api")' in source, (
+    fail_msg = (
         "import_checker must probe via importlib.metadata.distribution('opentelemetry-api') "
         "(PEP 420 namespace hazard + sys.modules side-effect); "
         "see planning/audit/2026-06-07-deep-audit.md (Low finding on import_checker.py:8)."
     )
+    assert "distribution" in source, fail_msg
+    assert '"opentelemetry-api"' in source, fail_msg
 
 
-def test_emit_event_survives_lazy_import_failure(caplog: pytest.LogCaptureFixture) -> None:
+def test_emit_event_survives_lazy_import_failure(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_emit_event degrades to log-only when the lazy OTel import fails.
 
     When is_otel_installed=True but ``from opentelemetry import trace`` raises
@@ -109,26 +116,41 @@ def test_emit_event_survives_lazy_import_failure(caplog: pytest.LogCaptureFixtur
             msg = f"cannot import name {name!r} from 'opentelemetry'"
             raise ImportError(msg)
 
-    # Save and replace the real opentelemetry module for the duration of the test.
-    saved = sys.modules.pop("opentelemetry", None)
-    sys.modules["opentelemetry"] = _BrokenOpenTelemetry()  # ty: ignore[invalid-assignment]
-    try:
-        with (
-            patch("httpware._internal.import_checker.is_otel_installed", True),
-            caplog.at_level(logging.WARNING, logger="httpware.test.otel_missing"),
-        ):
-            _emit_event(
-                _TEST_LOGGER,
-                "test.event",
-                level=logging.WARNING,
-                message="survives broken otel",
-                attributes={"k": "v"},
-            )
-    finally:
-        if saved is not None:
-            sys.modules["opentelemetry"] = saved
-        else:
-            sys.modules.pop("opentelemetry", None)
+    # monkeypatch.setitem handles save/restore automatically — no manual finally.
+    monkeypatch.setitem(sys.modules, "opentelemetry", _BrokenOpenTelemetry())
+    with (
+        patch("httpware._internal.import_checker.is_otel_installed", True),
+        caplog.at_level(logging.WARNING, logger="httpware.test.otel_missing"),
+    ):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="survives broken otel",
+            attributes={"k": "v"},
+        )
 
     # The structured log record still fired despite the OTel branch failing.
     assert any(r.message == "survives broken otel" for r in caplog.records)
+
+
+def test_is_distribution_installed_returns_false_on_package_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probe helper returns False when distribution() raises PackageNotFoundError.
+
+    Covers the partial-install detection path: opentelemetry-api absent → False.
+    Under --all-extras CI, opentelemetry-api IS installed, so the False branch is
+    only reachable by patching the underlying distribution() call.
+    """
+
+    def _raise_not_found(_name: str) -> None:
+        raise PackageNotFoundError(_NOT_FOUND_MSG)
+
+    monkeypatch.setattr(import_checker, "distribution", _raise_not_found)
+    assert import_checker._is_distribution_installed("anything") is False  # noqa: SLF001
+
+
+def test_is_distribution_installed_returns_true_for_known_installed_package() -> None:
+    """The probe helper returns True for a package that IS installed (opentelemetry-api in CI)."""
+    assert import_checker._is_distribution_installed("opentelemetry-api") is True  # noqa: SLF001

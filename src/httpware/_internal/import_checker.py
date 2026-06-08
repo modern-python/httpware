@@ -4,6 +4,15 @@ from importlib.metadata import PackageNotFoundError, distribution
 from importlib.util import find_spec
 
 
+def _is_distribution_installed(name: str) -> bool:
+    """Probe the package registry for a distribution by name. No sys.modules side effects."""
+    try:
+        distribution(name)
+    except PackageNotFoundError:
+        return False
+    return True
+
+
 is_msgspec_installed = find_spec("msgspec") is not None
 is_pydantic_installed = find_spec("pydantic") is not None
 # opentelemetry/ is a PEP 420 namespace package — instrumentation packages create the
@@ -14,8 +23,4 @@ is_pydantic_installed = find_spec("pydantic") is not None
 # importlib.metadata.distribution probes the package registry instead: it returns the
 # distribution when opentelemetry-api is installed and raises PackageNotFoundError when
 # it is absent, with no sys.modules side effects.
-try:
-    distribution("opentelemetry-api")
-    is_otel_installed = True
-except PackageNotFoundError:
-    is_otel_installed = False
+is_otel_installed = _is_distribution_installed("opentelemetry-api")
