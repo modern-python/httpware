@@ -89,7 +89,9 @@ both atomically and routes the decode through the configured
 `ResponseDecoder`, so decoder failures surface as `DecodeError` — caught
 by `except httpware.ClientError` like every other failure mode.
 
-Canonical use case: RFC 5988 Link-header pagination.
+Canonical use case: RFC 5988 Link header pagination.
+
+Assume `process` and `next_link` are caller-defined — pick a Link header parser that fits.
 
 ```python
 from httpware import AsyncClient
@@ -113,7 +115,8 @@ async def main() -> None:
             params = None                                    # next link carries query
 ```
 
-For the body-only case, prefer `client.get(..., response_model=...)`.
+For body-only with a high-level verb, prefer `client.get(..., response_model=...)`.
+For body-only with a custom `Request`, prefer `client.send(request, response_model=...)`.
 `send_with_response` is not for streaming responses — use `stream()`.
 
 ### Streaming responses
