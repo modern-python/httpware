@@ -111,15 +111,11 @@ class AsyncRetry:
             except StatusError as exc:
                 retryable_status = exc.response.status_code in self.retry_status_codes
                 if not method_eligible or not retryable_status:
-                    if retryable_status and request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = exc.response
             except (NetworkError, TimeoutError) as exc:
                 if not method_eligible:
-                    if request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = None
@@ -253,15 +249,11 @@ class Retry:
             except StatusError as exc:
                 retryable_status = exc.response.status_code in self.retry_status_codes
                 if not method_eligible or not retryable_status:
-                    if retryable_status and request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = exc.response
             except (NetworkError, TimeoutError) as exc:
                 if not method_eligible:
-                    if request.extensions.get(STREAMING_BODY_MARKER):
-                        exc.add_note(_STREAMING_BODY_REFUSAL_NOTE)
                     raise
                 last_exc = exc
                 last_response = None

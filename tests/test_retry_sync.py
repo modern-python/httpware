@@ -178,8 +178,12 @@ def test_streaming_body_refusal_emits_log_event(caplog: pytest.LogCaptureFixture
     assert any("retry refused" in r.getMessage() for r in caplog.records)
 
 
-def test_streaming_body_refusal_on_non_idempotent_method() -> None:
-    """Streaming-body marker added to exception even when method isn't idempotent."""
+def test_streaming_body_refusal_on_non_idempotent_method_does_not_attach_note() -> None:
+    """Method-ineligible POST + NetworkError + streaming marker does NOT get the streaming note.
+
+    The reason for not retrying is method ineligibility, not the streaming body.
+    The streaming note must not be attached in the early-out branch.
+    """
     sleeper = _SleepRecorder()
 
     def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
@@ -192,11 +196,17 @@ def test_streaming_body_refusal_on_non_idempotent_method() -> None:
     with pytest.raises(NetworkError) as info:
         client.send(request)
     notes = getattr(info.value, "__notes__", [])
-    assert any("stream that cannot replay" in note for note in notes)
+    assert not any("stream that cannot replay" in note for note in notes), (
+        f"streaming-note was incorrectly attached when method ineligibility was the blocker: {notes!r}"
+    )
 
 
-def test_streaming_body_refusal_status_error_on_non_idempotent_method() -> None:
-    """Status-error path: non-idempotent + retryable status + streaming marker -> note added."""
+def test_streaming_body_refusal_status_error_on_non_idempotent_method_does_not_attach_note() -> None:
+    """Method-ineligible POST + retryable status + streaming marker does NOT get the streaming note.
+
+    The reason for not retrying is method ineligibility, not the streaming body.
+    The streaming note must not be attached in the early-out branch.
+    """
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])
     client = _client(handler, retry=Retry(_sleep=sleeper))
@@ -205,7 +215,9 @@ def test_streaming_body_refusal_status_error_on_non_idempotent_method() -> None:
     with pytest.raises(ServiceUnavailableError) as info:
         client.send(request)
     notes = getattr(info.value, "__notes__", [])
-    assert any("stream that cannot replay" in note for note in notes)
+    assert not any("stream that cannot replay" in note for note in notes), (
+        f"streaming-note was incorrectly attached when method ineligibility was the blocker: {notes!r}"
+    )
 
 
 def test_client_post_with_sync_generator_content_marks_extensions() -> None:
@@ -534,3 +546,30 @@ def test_retry_after_equal_to_max_delay_still_retries() -> None:
     client.get("https://example.test/x")
     assert sleeper.calls == [2.0]
     assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
+
+
+def test_method_ineligible_with_streaming_body_does_not_attach_streaming_note() -> None:
+    """POST with a streaming body that gets a 503 raises WITHOUT the streaming-note (sync).
+
+    The blocker is method ineligibility, not streaming. Mirror of the async test.
+    """
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])
+
+    def _streaming_body() -> typing.Iterator[bytes]:
+        yield b"chunk"
+
+    transport = httpx2.MockTransport(handler)
+    with (
+        Client(
+            httpx2_client=httpx2.Client(transport=transport),
+            middleware=[Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.02)],
+        ) as client,
+        pytest.raises(ServiceUnavailableError) as exc_info,
+    ):
+        client.post("https://example.test/x", content=_streaming_body())
+    notes = getattr(exc_info.value, "__notes__", [])
+    assert not any("stream that cannot replay" in n for n in notes), (
+        f"streaming-note was incorrectly attached when method ineligibility was the blocker: {notes!r}"
+    )
+    assert sleeper.calls == []
