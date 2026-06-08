@@ -142,7 +142,6 @@ The same protocol shape, sync flavor. Use these when wiring middleware into a sy
 
 ```python
 from httpware import Middleware, Next, before_request, after_response, on_error
-from httpware.middleware.chain import compose
 ```
 
 A sync `Middleware` is a structural protocol — any callable with the right signature satisfies it:
