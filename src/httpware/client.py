@@ -159,6 +159,28 @@ class AsyncClient:
         except Exception as exc:
             raise DecodeError(response=response, model=response_model, original=exc) from exc
 
+    async def send_with_response(
+        self,
+        request: httpx2.Request,
+        *,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send `request` through the middleware chain; return (response, decoded).
+
+        Use this when you need response metadata (headers, status, request URL)
+        AND a typed body — most commonly for Link-header pagination. For the
+        body-only case, prefer ``send(request, response_model=...)``.
+
+        Not for streaming responses — decodes ``response.content``, which
+        requires the body to be fully read. Use ``stream()`` for streaming.
+        """
+        response = await self._dispatch(request)
+        try:
+            decoded = self._decoder.decode(response.content, response_model)
+        except Exception as exc:
+            raise DecodeError(response=response, model=response_model, original=exc) from exc
+        return response, decoded
+
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.AsyncClient."""
         return self._httpx2_client.build_request(method, url, **kwargs)
@@ -878,6 +900,28 @@ class Client:
             return self._decoder.decode(response.content, response_model)
         except Exception as exc:
             raise DecodeError(response=response, model=response_model, original=exc) from exc
+
+    def send_with_response(
+        self,
+        request: httpx2.Request,
+        *,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send `request` through the middleware chain; return (response, decoded).
+
+        Use this when you need response metadata (headers, status, request URL)
+        AND a typed body — most commonly for Link-header pagination. For the
+        body-only case, prefer ``send(request, response_model=...)``.
+
+        Not for streaming responses — decodes ``response.content``, which
+        requires the body to be fully read. Use ``stream()`` for streaming.
+        """
+        response = self._dispatch(request)
+        try:
+            decoded = self._decoder.decode(response.content, response_model)
+        except Exception as exc:
+            raise DecodeError(response=response, model=response_model, original=exc) from exc
+        return response, decoded
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.Client."""

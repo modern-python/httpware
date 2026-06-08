@@ -39,7 +39,7 @@ The 0.1.0 seams numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) h
 ### Seam B: `Client`/`AsyncClient` ↔ `ResponseDecoder`
 
 - **Where:** `src/httpware/client.py` ↔ `src/httpware/decoders/`.
-- **Contract:** the decoder is invoked when the caller passes `response_model=`. The protocol is `decode(content: bytes, model: type[T]) -> T`. Any exception raised by `decode` is wrapped by `Client.send` / `AsyncClient.send` into `httpware.DecodeError` (a `ClientError` subclass carrying `response`, `model`, `original`). Decoder implementers do not need to raise `DecodeError` directly.
+- **Contract:** the decoder is invoked when the caller passes `response_model=`. The protocol is `decode(content: bytes, model: type[T]) -> T`. Any exception raised by `decode` is wrapped by the call sites in `client.py` — `Client.send` / `AsyncClient.send` (when `response_model=` is set) and `Client.send_with_response` / `AsyncClient.send_with_response` — into `httpware.DecodeError` (a `ClientError` subclass carrying `response`, `model`, `original`). Decoder implementers do not need to raise `DecodeError` directly.
 - **Rule:** the decoder must operate on raw bytes in a single parse pass. Two-pass decoding (`json.loads` then `validate_python`) is rejected: a single bytes-in / typed-object-out pass avoids the redundant intermediate `dict` allocation and parses faster. The Pydantic adapter implements this as `TypeAdapter(model).validate_json(content)`, with the `TypeAdapter` itself memoized via `@functools.lru_cache(maxsize=1024)` on a module-level `_get_adapter(model)` factory (the adapter is the expensive part to build). The msgspec adapter implements it as `msgspec.json.decode(content, type=model)`.
 
 ### Seam C: `httpware ↔ optional extras`

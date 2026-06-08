@@ -87,7 +87,10 @@ class AsyncBulkhead:
         with self._loop_lock:
             if self._loop is None:
                 self._loop = current
-            elif self._loop is not current:
+            # pragma below: inner double-check-with-lock race arm; only
+            # reachable when two threads simultaneously pass the outer
+            # cached-loop check, which single-threaded tests can't trigger.
+            elif self._loop is not current:  # pragma: no cover
                 raise RuntimeError(
                     _ASYNCBULKHEAD_CROSS_LOOP_MSG.format(first=self._loop, current=current),
                 )
