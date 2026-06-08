@@ -46,14 +46,16 @@ def test_sync_client_default_decoder_raises_when_pydantic_missing() -> None:
 
 
 def test_async_client_accepts_explicit_decoder_without_pydantic() -> None:
-    """An explicit decoder= escapes the fail-fast even when pydantic is 'missing'."""
+    """An explicit decoder= escapes the fail-fast AND is actually wired to the client."""
+    fake = _FakeDecoder()
     with patch("httpware._internal.import_checker.is_pydantic_installed", False):
-        client = AsyncClient(decoder=_FakeDecoder())
-        assert client is not None
+        client = AsyncClient(decoder=fake)
+    assert client._decoder is fake  # noqa: SLF001 — wired the explicit decoder, not a default
 
 
 def test_sync_client_accepts_explicit_decoder_without_pydantic() -> None:
-    """Sync mirror: explicit decoder= escapes the fail-fast for sync Client too."""
+    """Sync mirror: explicit decoder= escapes the fail-fast AND is wired for sync Client too."""
+    fake = _FakeDecoder()
     with patch("httpware._internal.import_checker.is_pydantic_installed", False):
-        client = Client(decoder=_FakeDecoder())
-        assert client is not None
+        client = Client(decoder=fake)
+    assert client._decoder is fake  # noqa: SLF001 — wired the explicit decoder, not a default
