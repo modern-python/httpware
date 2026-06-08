@@ -29,7 +29,9 @@ def _emit_event(
        ``trace.get_current_span().add_event(event_name, attributes=attributes)``.
        When no tracer is active, ``get_current_span()`` returns a ``NonRecordingSpan``
        whose ``add_event`` is a documented no-op — so the call is unconditional
-       behind the install gate.
+       behind the install gate. If the install gate is wrong (the namespace exists
+       but the api package is missing or broken), the lazy import raises
+       ``ImportError``; we degrade silently to log-only emission.
 
     The lazy ``from opentelemetry import trace`` inside the if-block preserves
     the optional-extras isolation invariant: ``import httpware`` must not pull
@@ -37,6 +39,10 @@ def _emit_event(
     """
     logger.log(level, message, extra=attributes)
     if import_checker.is_otel_installed:
-        from opentelemetry import trace  # noqa: PLC0415 — lazy by design (optional-extras isolation)
-
+        try:
+            from opentelemetry import trace  # noqa: PLC0415 — lazy by design (optional-extras isolation)
+        except ImportError:
+            # opentelemetry namespace exists but the api package is broken or missing —
+            # degrade to log-only emission. The structured log record above has already fired.
+            return
         trace.get_current_span().add_event(event_name, attributes=attributes)

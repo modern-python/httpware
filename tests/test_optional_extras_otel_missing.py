@@ -11,6 +11,7 @@ silently skipped when the flag is False.
 """
 
 import logging
+import sys
 from importlib.metadata import distribution
 from unittest.mock import patch
 
@@ -87,3 +88,47 @@ def test_is_otel_installed_uses_opentelemetry_trace_probe() -> None:
         "(PEP 420 namespace hazard + sys.modules side-effect); "
         "see planning/audit/2026-06-07-deep-audit.md (Low finding on import_checker.py:8)."
     )
+
+
+def test_emit_event_survives_lazy_import_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """_emit_event degrades to log-only when the lazy OTel import fails.
+
+    When is_otel_installed=True but ``from opentelemetry import trace`` raises
+    ImportError, _emit_event must not crash — it emits the structured log record
+    and returns.
+
+    Simulates the partial-install case: opentelemetry/ namespace directory exists
+    (created by some instrumentation package) but opentelemetry-api is missing or
+    broken, so importing ``trace`` from it fails.
+    """
+
+    class _BrokenOpenTelemetry:
+        """Stand-in for opentelemetry/ namespace directory without working api."""
+
+        def __getattr__(self, name: str) -> object:
+            msg = f"cannot import name {name!r} from 'opentelemetry'"
+            raise ImportError(msg)
+
+    # Save and replace the real opentelemetry module for the duration of the test.
+    saved = sys.modules.pop("opentelemetry", None)
+    sys.modules["opentelemetry"] = _BrokenOpenTelemetry()  # ty: ignore[invalid-assignment]
+    try:
+        with (
+            patch("httpware._internal.import_checker.is_otel_installed", True),
+            caplog.at_level(logging.WARNING, logger="httpware.test.otel_missing"),
+        ):
+            _emit_event(
+                _TEST_LOGGER,
+                "test.event",
+                level=logging.WARNING,
+                message="survives broken otel",
+                attributes={"k": "v"},
+            )
+    finally:
+        if saved is not None:
+            sys.modules["opentelemetry"] = saved
+        else:
+            sys.modules.pop("opentelemetry", None)
+
+    # The structured log record still fired despite the OTel branch failing.
+    assert any(r.message == "survives broken otel" for r in caplog.records)
