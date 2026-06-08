@@ -1,19 +1,20 @@
 """PydanticDecoder — module-level cached TypeAdapter adapter for ResponseDecoder.
 
-Requires the `pydantic` extra: `pip install httpware[pydantic]`. Importing this
-module without the extra works (the `pydantic` import is guarded by a
-`find_spec` check), but instantiating the decoder raises `ImportError` with the
+Requires the `pydantic` extra: `pip install httpware[pydantic]`. The optional-extras
+gate is enforced upstream — `client.py:_default_pydantic_decoder()` raises
+ImportError when pydantic is absent, so this module is never imported in that
+path. Tests simulating "pydantic not installed" patch
+`import_checker.is_pydantic_installed=False` at runtime, after this module is
+already loaded; `PydanticDecoder.__init__` then raises ImportError with the
 install hint.
 """
 
 import functools
 from typing import TypeVar
 
+from pydantic import TypeAdapter
+
 from httpware._internal import import_checker
-
-
-if import_checker.is_pydantic_installed:
-    from pydantic import TypeAdapter
 
 
 MISSING_DEPENDENCY_MESSAGE = (
