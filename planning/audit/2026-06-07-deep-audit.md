@@ -482,3 +482,85 @@ Rolling four `stale_doc` nits into one entry per the spec's nits-collapse rule. 
 - **`src/httpware/decoders/__init__.py:1`** — Module docstring references "Seam 3"; `planning/engineering.md` §3 now labels the seams A/B/C and the decoder seam is Seam B. Suggested direction: change "Seam 3" to "Seam B" (and audit `chain.py` / `client.py` for any peer references using the old numbering).
 
 Verifier consensus: 2/3 each (code_reality + spec_grounded for the first three; code_reality + reproducer for the decoders docstring label). Combined suggested direction: knock out all four in a single doc-sweep PR after the Seam 1/Seam 2 wording is settled, so the rename style is consistent across `CLAUDE.md`, `engineering.md`, and the module docstrings.
+
+## Chunk 3 — Test Quality (hand-review)
+
+> _Method note: the workflow-driven tests dimension stalled across two attempts (single broad finder, then split into props / parity / mocks sub-finders). Both runs returned 0 findings after a combined ~1.5M Sonnet tokens. This section is a targeted hand-review covering the highest-signal angles only — it is not a substitute for an exhaustive test-suite audit and should be revisited as a separate pass when budget allows._
+
+4 hand-picked findings, all in test files. Severity-bound between low and nit because none reflect production-code bugs — they're test-design issues that weaken the safety net around primitives the rest of the audit already flagged. Two are sync/async parity gaps the 0.8.0 rename left open; the other two are weakness patterns in the Hypothesis suites for the resilience primitives.
+
+### Low
+
+#### `test_try_withdraw_never_exceeds_theoretical_bound` reproduces the production formula it should audit
+
+`tests/test_budget_props.py:52`
+
+The property test computes its expected ceiling with `ceiling = int(deposits * percent) + floor` — the *exact same `int(...)` truncation* used by `RetryBudget.try_withdraw` at `src/httpware/middleware/resilience/budget.py:67`. The Chunk 1 finding "RetryBudget ceiling truncates rather than rounds" identifies this truncation as an off-by-one against the configured percentage; this test cannot find that bug because it asserts against the same buggy formula. A test that derives its expected bound from the same broken arithmetic as the code under test will pass under any consistent error.
+
+```python
+floor = int(min_rps * ttl)
+ceiling = int(deposits * percent) + floor
+permitted = 0
+for _ in range(ceiling + 10):
+    if budget.try_withdraw():
+        permitted += 1
+assert permitted <= ceiling
+```
+
+Suggested direction: pair this assertion with an independent check — e.g., compute the expected ceiling using `math.ceil(deposits * percent)` (the intended semantics) and assert `permitted` lies within `[ceiling_ceil - 1, ceiling_truncated]`. That makes the test discriminate between the two roundings and turns it into a regression guard for the Chunk 1 fix.
+
+#### `test_on_error_lets_cancelled_propagate` is async-only — no sync peer for `KeyboardInterrupt` / `SystemExit`
+
+`tests/test_middleware.py:162` vs `tests/test_middleware_sync.py`
+
+The async middleware suite verifies that an `async_on_error` handler cannot suppress `asyncio.CancelledError` — the system-exit class of exception that must always escape user code. The sync middleware suite has no equivalent test for `KeyboardInterrupt` or `SystemExit`, which are the corresponding "must propagate" exceptions in synchronous code. The sync `on_error` decorator (`src/httpware/middleware/__init__.py`) accepts a handler signature that could in principle swallow `BaseException`, and there is no test pinning that behavior. Sync/async parity is a stated invariant for the resilience surface.
+
+```python
+async def test_on_error_lets_cancelled_propagate() -> None:
+    @async_on_error
+    async def swallow_all(request, exc) -> httpx2.Response | None:
+        raise AssertionError("should not catch CancelledError")
+    async def terminal(request):
+        raise asyncio.CancelledError
+    dispatch = compose_async((swallow_all,), terminal)
+    with pytest.raises(asyncio.CancelledError):
+        await dispatch(_make_request())
+```
+
+Suggested direction: add `test_on_error_lets_keyboardinterrupt_propagate` (and optionally `_systemexit_`) to `tests/test_middleware_sync.py`, mirroring the async shape with the sync `on_error` decorator and `compose` instead of `compose_async`. Keep the test names and structure aligned so the parity reads at a glance.
+
+#### `tests/test_client_methods.py` has no construction / lifecycle tests for `AsyncClient`
+
+`tests/test_client_methods.py:1`
+
+`test_client_sync.py:297+` carries thorough construction and lifecycle coverage for the sync `Client`: no-args construction, forwarded kwargs, owned-vs-borrowed `httpx2` clients, `close()` idempotency, context-manager enter/exit. The async equivalent — `test_client_methods.py` — opens at line 29 with `test_get_returns_httpx2_response` and contains only per-method HTTP tests. `AsyncClient.__init__`, `aclose()`, `__aenter__`, and `__aexit__` would all regress silently against this file. The async-specific lifecycle file `test_client_lifecycle.py` (43 lines) covers a narrow slice — close idempotency — but not construction-arg validation or borrowed-client semantics.
+
+```python
+"""Tests for the per-method API surface of AsyncClient."""
+from httpware import AsyncClient, NotFoundError
+def _client_with_handler(handler, **kwargs) -> AsyncClient: ...
+async def test_get_returns_httpx2_response() -> None: ...
+```
+
+Suggested direction: rename `tests/test_client_methods.py` to `tests/test_client_methods_async.py` for symmetry, add a dedicated `tests/test_client_construction_async.py` mirroring the sync construction section of `test_client_sync.py` (or expand `test_client_lifecycle.py` to cover construction). The fix tracks the same naming polish suggested for the `test_client_sync.py` consolidation.
+
+### Nit
+
+#### Retry property tests use a budget configuration that the budget cannot exhaust
+
+`tests/test_retry_props.py:60` (per the file's `_make_async_retry` helper, exact line varies)
+
+Every `AsyncRetry` instance the retry property suite constructs is given `RetryBudget(ttl=60.0, min_retries_per_sec=1000.0)`. The budget's `try_withdraw` floor is `int(min_retries_per_sec * ttl) = 60_000`, which means up to 60k retries are unconditionally permitted before the percent-based ceiling matters. With Hypothesis's `max_attempts ∈ [1, 5]` and `max_examples=50`, the budget is mathematically incapable of being exhausted by the property tests. The "total attempts never exceeds max_attempts" property is verified; the orthogonal property "when the budget is exhausted, the next attempt raises `RetryBudgetExhaustedError`" has no property-test coverage at all, only a handful of `test_retry.py` deterministic examples.
+
+```python
+AsyncRetry(
+    _sleep=sleeper,
+    max_attempts=max_attempts,
+    base_delay=0.001,
+    max_delay=0.002,
+    budget=RetryBudget(ttl=60.0, min_retries_per_sec=1000.0),
+)
+```
+
+Suggested direction: add a second property test (or parameterize the existing one) over a budget configured with `min_retries_per_sec=0.0` and `percent_can_retry ∈ [0.0, 0.5]`, then assert that `RetryBudgetExhaustedError` is raised within the first `ceil(attempts * percent) + 1` calls. Pair this with the Chunk 1 budget-rounding fix so the new property is well-defined.
+
