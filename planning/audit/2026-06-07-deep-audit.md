@@ -582,4 +582,3 @@ AsyncRetry(
 ```
 
 Suggested direction: add a second property test (or parameterize the existing one) over a budget configured with `min_retries_per_sec=0.0` and `percent_can_retry ∈ [0.0, 0.5]`, then assert that `RetryBudgetExhaustedError` is raised within the first `ceil(attempts * percent) + 1` calls. Pair this with the Chunk 1 budget-rounding fix so the new property is well-defined.
-
