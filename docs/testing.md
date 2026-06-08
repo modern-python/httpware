@@ -56,6 +56,9 @@ def test_get_returns_typed_response() -> None:
 For tests that need to vary the response by call count or assert on the requests that came in, use a handler with instance state:
 
 ```python
+from httpware import AsyncRetry
+
+
 class _ResponseSequence:
     """Returns each status in order; records every request received."""
 
