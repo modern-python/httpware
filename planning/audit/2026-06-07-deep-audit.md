@@ -252,7 +252,7 @@ Both `docs/index.md` (line 3) and `README.md` (line 8) open by calling httpware 
 A Python async HTTP client framework for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry` + `RetryBudget`, `AsyncBulkhead`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 ```
 
-Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: replace the opening sentence with something neutral (e.g., "A Python HTTP client framework with sync and async clients...") and add the sync primitives (`Client`, `Retry`, `Bulkhead`) to the resilience teaser in both files. Mirror the change in the README's code block by showing one sync and one async example, or by linking to the resilience doc for both.
+Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: replace the opening sentence with something neutral (e.g., "A Python HTTP client framework with sync and async clients...") and add the sync primitives (`Client`, `Retry`, `Bulkhead`) to the resilience teaser in both files. Mirror the change in the README's code block by showing one sync and one async example, or by linking to the resilience doc for both. Additional evidence (chunk 4): `README.md:10` ("resilience suite — `AsyncRetry` … plus an `AsyncBulkhead`") is the same async-only framing and should be revised in the same pass.
 
 #### `pydantic.py` references `TypeAdapter` at runtime without binding it when the import was skipped
 
@@ -333,3 +333,152 @@ def test_async_client_accepts_explicit_decoder_without_pydantic() -> None:
 
 Verifier consensus: 2/3 (code_reality + reproducer). Suggested direction: add a `test_sync_client_accepts_explicit_decoder_without_pydantic` peer in the same file, or parameterize the existing test over `(AsyncClient, Client)` so the sync/async parity invariant for the fail-fast escape hatch is asserted symmetrically.
 
+## Chunk 4 — Docs & Planning-Doc Staleness
+
+14 confirmed findings reviewed across `docs/` and `planning/` plus a few cross-file echoes; 13 surfaced as net-new (one — README's async-only resilience framing — folded into the existing Chunk 2 finding for `docs/index.md:3` / `README.md:8`). The dominant cluster is post-0.8.0 staleness: 8 of the 13 net-new findings are the Async\* rename and the sync `Client`/`Retry`/`Bulkhead` additions not yet propagated through the doc surface (CLAUDE.md module layout, two of three Protocol Seams, the testing-pattern example, `engineering.md` §1 future tense, `engineering.md` §8 `attempt_timeout` and closing paragraph, `docs/resilience.md` "three primitives" intro, `docs/index.md` observability paragraph naming only async middlewares). The remaining 5 split into one factual reversal (`docs/resilience.md` "Single-thread assumption" section claiming the budget is *not* thread-safe when it is), one broken doc reproducer (`docs/testing.md` code block missing the `AsyncRetry` import), one cross-convention example (`LoggingMiddleware` taught with `print()`), and two stale internal cross-references (`decoders/__init__.py` "Seam 3" label, `engineering.md` §8 epic-closure paragraph). Triaged into 1 high + 1 medium + 6 low + 2 nit (5 stale-doc nits collapsed into one rolled-up entry per the spec). No blockers — the high item is wrong-direction documentation, not broken code; the medium is a non-runnable example, not an API defect.
+
+### High
+
+#### `docs/resilience.md` "Single-thread assumption" section is the exact opposite of what RetryBudget guarantees
+
+`docs/resilience.md:103`
+
+The "Single-thread assumption" header and its body tell users `RetryBudget` is asyncio-only and that cross-thread use is out of scope, but `RetryBudget` is implemented with a `threading.Lock` and the module docstring explicitly advertises "Thread-safe and asyncio-safe: all mutations go through a threading.Lock." The same `docs/resilience.md` file even contradicts itself at line 173, where it correctly describes `RetryBudget` as "safe to share across sync and async clients in the same process". A reader of the "Sharing across clients" guidance who hits the earlier "wrap calls in a lock yourself" instruction will either add a redundant lock or back away from a fully supported pattern.
+
+```text
+### Single-thread assumption
+
+`RetryBudget` is asyncio-aware — deque mutations between await points are atomic on a single event loop. Cross-thread use is out of scope; if you need that, wrap calls in a lock yourself.
+```
+
+Verifier consensus: 2/3 (code_reality + spec_grounded — `src/httpware/middleware/resilience/budget.py` module docstring, the `self._lock = threading.Lock()` in `__init__`, and the existing `tests/test_retry_budget_threadsafety.py` / `tests/test_threading_with_shared_budget.py` all confirm the budget is thread-safe). Suggested direction: delete the "Single-thread assumption" section in `docs/resilience.md` outright and replace it with a one-paragraph "Thread safety" note that mirrors the budget module docstring (`threading.Lock` guards all mutations; safe to share across `Client` and `AsyncClient` in the same process). Cross-link this to the existing line-173 paragraph so the file no longer contradicts itself.
+
+### Medium
+
+#### `docs/testing.md` "Recording / stateful handlers" code block uses `AsyncRetry` without importing it
+
+`docs/testing.md:77`
+
+The example asynchronous test at lines 58–94 instantiates `AsyncRetry(base_delay=0.001, max_delay=0.002)` but the file's import section only pulls in `from httpware import AsyncClient` (line 12) and `from httpware import Client` (line 40). Copying the code block into a fresh file as the testing doc invites the reader to do raises `NameError: name 'AsyncRetry' is not defined`. The lower-status nature (medium not high) reflects that the fix is a one-line import addition, but it's a paste-and-it-fails example in the doc that exists specifically to teach a paste-and-run pattern.
+
+```python
+async def test_retry_succeeds_after_503() -> None:
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
+    transport = httpx2.MockTransport(handler)
+    async with AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        middleware=[AsyncRetry(base_delay=0.001, max_delay=0.002)],
+    ) as client:
+```
+
+Verifier consensus: 2/3 (code_reality + reproducer). Suggested direction: add `from httpware import AsyncRetry` to the imports block of the snippet (next to the existing `from httpware import AsyncClient`). If the file already has other "Recording" examples that share imports, hoist a single combined imports block to the top of the section and reference it from each example.
+
+### Low
+
+#### `docs/resilience.md` intro lists "three resilience primitives" — five ship as of 0.8.0
+
+`docs/resilience.md:3`
+
+The opening paragraph names `AsyncRetry`, `RetryBudget`, and `AsyncBulkhead` as "three resilience primitives", omitting the sync `Retry` and `Bulkhead` added in 0.8.0. `src/httpware/middleware/resilience/__init__.py` exports all five (`__all__ = ['AsyncBulkhead', 'AsyncRetry', 'Bulkhead', 'Retry', 'RetryBudget']`), and the rest of the file does cover the sync variants further down — only the headline count is stale.
+
+```text
+`httpware` ships three resilience primitives under `httpware.middleware.resilience`, all composable through the standard [AsyncMiddleware](middleware.md) chain:
+
+- **`AsyncRetry`** — automatic retry of transient failures with full-jitter exponential backoff
+- **`RetryBudget`** — Finagle-style token bucket...
+- **`AsyncBulkhead`** — concurrency limiter via `asyncio.Semaphore` with bounded acquire-wait
+```
+
+Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: update the count to "five" (or just say "the resilience primitives"), add `Retry` and `Bulkhead` as bullets, and consider grouping the bullets into sync/async pairs to mirror the layout already used for the client classes.
+
+#### `docs/index.md` observability paragraph names only `AsyncRetry`/`AsyncBulkhead`; sync `Retry`/`Bulkhead` also emit events
+
+`docs/index.md:109`
+
+The observability paragraph reads "`AsyncRetry` and `AsyncBulkhead` emit operational events via two channels". The sync `Retry` class calls `_emit_event` at lines 261/279/295 of `src/httpware/middleware/resilience/retry.py` (events `retry.streaming_refused`, `retry.giving_up`, `retry.budget_refused`) and the sync `Bulkhead` calls `_emit_event` at line 128 of `bulkhead.py` (event `bulkhead.rejected`) — identical event names, identical logger names, identical OTel-span-event payloads. A reader who runs the sync clients in production sees the same telemetry but the docs imply otherwise. The exact same wording is duplicated in `README.md` at line 116.
+
+```text
+`AsyncRetry` and `AsyncBulkhead` emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed).
+```
+
+Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: change the subject to "`AsyncRetry`/`Retry` and `AsyncBulkhead`/`Bulkhead`" in both `docs/index.md:109` and `README.md:116`, and add a one-line note that event names and payloads are identical across the sync and async variants (i.e., dashboards built against one class apply unchanged to the other).
+
+#### `CLAUDE.md` module layout annotates `client.py` as AsyncClient-only
+
+`CLAUDE.md:71`
+
+The Module layout diagram describes `client.py` as `# AsyncClient (thin wrapper over httpx2.AsyncClient)`, but the same file defines the sync `Client` at line 763 of `src/httpware/client.py` (its constructor accepts `httpx2_client: httpx2.Client`, the matching sync mirror). The diagram is the first thing an AI agent reads when locating the public surface; the omission silently steers extensions toward the async path only.
+
+```text
+├── client.py                      # AsyncClient (thin wrapper over httpx2.AsyncClient)
+```
+
+Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: amend the comment to `# AsyncClient + Client (thin wrappers over httpx2.AsyncClient / httpx2.Client)` so the layout reflects the 0.8.0 reality.
+
+#### `CLAUDE.md` Protocol Seam 1 omits sync `Client`
+
+`CLAUDE.md:83`
+
+Seam 1 still reads "`AsyncClient ↔ Middleware`" and describes chain composition only at `AsyncClient.__init__`. After 0.8.0 the seam covers `Client ↔ Middleware` symmetrically (sync `compose` / `Next` mirror the async pair). `planning/engineering.md:33` already updated the canonical heading to "Seam A: `Client`/`AsyncClient` ↔ `Middleware`/`AsyncMiddleware`"; `CLAUDE.md` is the operative AI-agent reference and is now out of step with the engineering doc.
+
+```text
+1. **`AsyncClient ↔ Middleware`** — middleware chain composed at `AsyncClient.__init__`, frozen for the client's lifetime. Internal terminal calls `httpx2.AsyncClient.send`, maps exceptions, raises `StatusError` on 4xx/5xx.
+```
+
+Verifier consensus: 2/3 (spec_grounded twice). Suggested direction: replicate the engineering.md wording — heading "`Client`/`AsyncClient` ↔ `Middleware`/`AsyncMiddleware`", body describing composition at both `__init__`s and noting the parity guarantee. Update Seam labelling style at the same time if the broader Seam 1/2/3 → A/B/C rename below is adopted.
+
+#### `planning/engineering.md` §1 uses future tense for 0.8.0 changes that already shipped
+
+`planning/engineering.md:9`
+
+§1 paragraphs 2 and 3 read "The next release renames the async middleware surface to use the `Async*`/`async_*` prefix" and "The same release also adds a sync `Client` with full feature parity". Both shipped on 2026-06-07 (PRs #30 + #31 to main; tracked in MEMORY.md as "Sync Client + Async\* rename merged"). Leaving the prose in future tense suggests to a reader that these are upcoming, planned changes still in design.
+
+```text
+The next release renames the async middleware surface to use the `Async*`/`async_*` prefix (aligning with httpx2's convention) and removes the seldom-used `attempt_timeout=` kwarg from `AsyncRetry` — see `planning/specs/2026-06-07-sync-client-design.md` for the rationale.
+
+The same release also adds a sync `Client` with full feature parity
+```
+
+Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: rewrite both paragraphs in past tense ("As of 0.8.0 the async middleware surface uses the `Async*`/`async_*` prefix…"). Either fold them into the existing as-of narrative or move them to §8 (Shipped work) and leave §1 with the present-tense invariants only.
+
+#### `planning/engineering.md` §8 credits `attempt_timeout=` as a shipped v0.4 feature; 0.8.0 removed it
+
+`planning/engineering.md:136`
+
+The v0.4 slice 1 line lists "`Retry` middleware + Finagle-style `RetryBudget` token bucket + `attempt_timeout=` parameter (folded-in 3-1)". 0.8.0 removed `attempt_timeout=` as a breaking change (confirmed by `grep -n attempt_timeout src/httpware/middleware/resilience/retry.py` returning zero matches; the parameter is gone from both the async and sync retry classes). The historical log is the canonical reference for "what currently ships" — a stale entry there directly misleads agents reasoning about the public API.
+
+```text
+**v0.4 slice 1:** `Retry` middleware + Finagle-style `RetryBudget` token bucket + `attempt_timeout=` parameter (folded-in 3-1).
+```
+
+Verifier consensus: 2/3 (code_reality + spec_grounded). Suggested direction: append a parenthetical to the v0.4 entry — `(attempt_timeout= removed in 0.8.0; see release notes)` — and add a v0.8.0 entry to the shipped-work log capturing the Async\* rename, sync `Client`, and `attempt_timeout=` removal in one place.
+
+### Nit
+
+#### `docs/middleware.md` LoggingMiddleware example calls `print()` — contradicts the no-print invariant
+
+`docs/middleware.md:159`
+
+The sync `LoggingMiddleware` class in the middleware guide uses `print()` for both the outgoing and incoming log lines. CLAUDE.md "Architecture invariants" lists "No `print()`: enforced by ruff" as non-negotiable. The doc example teaches a pattern that would fail CI in a user's own project if they follow the project's conventions, and contradicts the neighboring `RequestIdMiddleware` example in the same file which correctly uses `logging`.
+
+```python
+class LoggingMiddleware:
+    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+        print(f"-> {request.method} {request.url}")
+        response = next(request)
+        print(f"<- {response.status_code}")
+        return response
+```
+
+Verifier consensus: 3/3 (code_reality + reproducer + spec_grounded). Suggested direction: rewrite the example with module-level `_LOGGER = logging.getLogger("myapp.logging_middleware")` and `_LOGGER.info(...)` calls. Match the style of the existing `RequestIdMiddleware` snippet so the two examples reinforce one convention.
+
+#### Stale-doc nits (rolled up — 4 entries across CLAUDE.md, engineering.md, decoders/__init__.py)
+
+Rolling four `stale_doc` nits into one entry per the spec's nits-collapse rule. All four are leftover 0.7.0-era phrasings that survived the 0.8.0 rename and sync-Client merge; none change runtime behavior, but together they form a small drift surface across the operative AI-agent reference (`CLAUDE.md`) and the canonical engineering doc (`planning/engineering.md`).
+
+- **`CLAUDE.md:84`** — Protocol Seam 2 still reads "`AsyncClient ↔ ResponseDecoder`"; sync `Client.__init__` accepts the same `decoder=` argument and calls `self._decoder.decode()` identically. The same omission exists in `planning/engineering.md` Seam B. Suggested direction: rename both to "`Client`/`AsyncClient` ↔ `ResponseDecoder`" in the same pass that fixes Seam 1 above.
+- **`CLAUDE.md:91`** — Testing section only shows the `AsyncClient(httpx2_client=httpx2.AsyncClient(transport=mock))` injection pattern; the sync mirror `Client(httpx2_client=httpx2.Client(transport=mock))` is exercised throughout `tests/test_client_sync.py` but never named. Suggested direction: add the sync line beside the async one so agents writing test scaffolding see both shapes.
+- **`planning/engineering.md:146`** — §8 closing paragraph says "All planned epics are closed as of v0.7.0. The next semver bump is a judgment call…". 0.8.0 has since merged to main as a breaking release (sync `Client` + Async\* rename), so the paragraph is stale. Suggested direction: update the version to v0.8.0 and re-evaluate the "judgment call" sentence in light of the now-shipped 0.8 work.
+- **`src/httpware/decoders/__init__.py:1`** — Module docstring references "Seam 3"; `planning/engineering.md` §3 now labels the seams A/B/C and the decoder seam is Seam B. Suggested direction: change "Seam 3" to "Seam B" (and audit `chain.py` / `client.py` for any peer references using the old numbering).
+
+Verifier consensus: 2/3 each (code_reality + spec_grounded for the first three; code_reality + reproducer for the decoders docstring label). Combined suggested direction: knock out all four in a single doc-sweep PR after the Seam 1/Seam 2 wording is settled, so the rename style is consistent across `CLAUDE.md`, `engineering.md`, and the module docstrings.
