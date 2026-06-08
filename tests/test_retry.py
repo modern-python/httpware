@@ -611,3 +611,30 @@ async def test_retry_streaming_refused_emits_observability_event(caplog: pytest.
     record = streaming_records[0]
     assert record.method == "PUT"  # ty: ignore[unresolved-attribute]
     assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
+
+
+class _CountingBudget(RetryBudget):
+    """RetryBudget that counts deposit() calls."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.deposit_calls = 0
+
+    def deposit(self) -> None:
+        self.deposit_calls += 1
+        super().deposit()
+
+
+async def test_deposit_fires_once_per_call_not_per_attempt() -> None:
+    """deposit() must be called exactly once per AsyncRetry.__call__, regardless of attempts."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
+    budget = _CountingBudget()
+    client = _client(
+        handler,
+        retry=AsyncRetry(_sleep=sleeper, base_delay=0.001, max_delay=0.002, max_attempts=3, budget=budget),
+    )
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 3  # noqa: PLR2004 — "3" is intentional literal in test (max_attempts=3)
+    assert budget.deposit_calls == 1, f"expected 1 deposit per request, got {budget.deposit_calls}"

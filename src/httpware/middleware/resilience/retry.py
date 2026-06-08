@@ -100,9 +100,9 @@ class AsyncRetry:
         last_exc: BaseException | None = None
         last_response: httpx2.Response | None = None
 
+        self.budget.deposit()
         for attempt in range(self.max_attempts):
             is_last = attempt + 1 >= self.max_attempts
-            self.budget.deposit()
             try:
                 return await next(request)
             except StatusError as exc:
@@ -231,9 +231,9 @@ class Retry:
         last_exc: BaseException | None = None
         last_response: httpx2.Response | None = None
 
+        self.budget.deposit()
         for attempt in range(self.max_attempts):
             is_last = attempt + 1 >= self.max_attempts
-            self.budget.deposit()
             try:
                 return next(request)
             except StatusError as exc:
