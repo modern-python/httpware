@@ -11,10 +11,12 @@ silently skipped when the flag is False.
 """
 
 import logging
+from importlib.metadata import distribution
 from unittest.mock import patch
 
 import pytest
 
+from httpware._internal import import_checker
 from httpware._internal.observability import _emit_event
 
 
@@ -56,3 +58,32 @@ def test_emit_event_does_not_call_opentelemetry_apis_when_flag_false() -> None:
         )
 
     mock_get_span.assert_not_called()
+
+
+def test_is_otel_installed_uses_opentelemetry_trace_probe() -> None:
+    """The install probe must use the package registry, not find_spec on the namespace.
+
+    `opentelemetry` is a PEP 420 namespace — instrumentation packages create the
+    directory even when `opentelemetry-api` is absent. find_spec("opentelemetry")
+    returns non-None regardless, giving a false positive.
+
+    find_spec("opentelemetry.trace") would fix the false-positive but causes CPython
+    to load the opentelemetry namespace package into sys.modules as a side-effect,
+    breaking the transitive-import isolation guarantee.
+
+    importlib.metadata.distribution("opentelemetry-api") probes the package registry
+    directly: no sys.modules side-effects, and it raises PackageNotFoundError when
+    opentelemetry-api is absent. This test pins that contract.
+    """
+    # In CI (opentelemetry-api IS installed), distribution succeeds.
+    assert distribution("opentelemetry-api") is not None
+    assert import_checker.is_otel_installed is True
+
+    # The structural assertion: the constant must be derived from the metadata probe.
+    # This ensures a future revert to find_spec trips the regression guard.
+    source = __import__("inspect").getsource(import_checker)
+    assert 'distribution("opentelemetry-api")' in source, (
+        "import_checker must probe via importlib.metadata.distribution('opentelemetry-api') "
+        "(PEP 420 namespace hazard + sys.modules side-effect); "
+        "see planning/audit/2026-06-07-deep-audit.md (Low finding on import_checker.py:8)."
+    )
