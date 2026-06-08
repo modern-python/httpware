@@ -135,6 +135,8 @@ pip install httpware[otel]
 
 When installed, `_emit_event` calls `trace.get_current_span().add_event(name, attributes=...)` automatically. We never create our own spans; for HTTP-level tracing install `opentelemetry-instrumentation-httpx` separately.
 
+## 📚 [Documentation](https://httpware.modern-python.org)
+
 ## 🗒️ [Release notes](https://github.com/modern-python/httpware/releases)
 
 ## 📦 [PyPI](https://pypi.org/project/httpware)
