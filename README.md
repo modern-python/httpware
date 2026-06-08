@@ -139,7 +139,7 @@ When installed, `_emit_event` calls `trace.get_current_span().add_event(name, at
 
 ## 📦 [PyPI](https://pypi.org/project/httpware)
 
-## 📝 [License](./LICENSE)
+## 📝 [License](https://github.com/modern-python/httpware/blob/main/LICENSE)
 
 ## Part of `modern-python`
 
