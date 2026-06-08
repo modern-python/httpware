@@ -8,6 +8,7 @@ Properties verified:
    regardless of response status.
 """
 
+import math
 from http import HTTPStatus
 
 import httpx2
@@ -169,3 +170,28 @@ async def test_non_idempotent_method_causes_one_attempt(status: int, method: str
         pass
     assert call_count["n"] == 1
     assert sleeper.calls == []
+
+
+@given(
+    deposits=st.integers(min_value=1, max_value=20),
+    percent=st.floats(
+        min_value=0.0,
+        max_value=0.5,
+        allow_nan=False,
+        allow_infinity=False,
+    ),
+)
+@settings(max_examples=50, deadline=None)
+def test_budget_exhaustion_is_reachable_and_deterministic(
+    deposits: int,
+    percent: float,
+) -> None:
+    """When floor=0 and a finite percent is set, the budget MUST refuse withdrawals after exactly ceiling permits."""
+    budget = RetryBudget(ttl=60.0, min_retries_per_sec=0.0, percent_can_retry=percent)
+    for _ in range(deposits):
+        budget.deposit()
+    expected_ceiling = math.ceil(deposits * percent)
+    for permit in range(expected_ceiling):
+        assert budget.try_withdraw(), f"budget refused early at permit {permit}/{expected_ceiling}"
+    # The (ceiling + 1)-th withdrawal MUST fail.
+    assert not budget.try_withdraw()
