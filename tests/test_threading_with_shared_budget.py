@@ -72,8 +72,12 @@ def test_shared_budget_across_sync_threads_and_async_loop() -> None:
         t.join()
 
     # The lock kept the budget's internal deques consistent — no IndexError, no corruption.
-    # No specific count assertion: the test passes if it completes without an exception
-    # from the budget itself. Add a smoke check that the budget recorded SOME activity:
-    assert len(budget._deposits) > 0  # noqa: SLF001
+    # 0.8.3 deposit-hoist: deposits count requests, not attempts (one per __call__,
+    # regardless of max_attempts). Budget TTL is 60.0 so no purge fires during the
+    # sub-second runtime; the count is exact.
+    expected_deposits = (_N_SYNC_THREADS * _N_OPS_PER_THREAD) + _N_ASYNC_TASKS
+    assert len(budget._deposits) == expected_deposits, (  # noqa: SLF001
+        f"expected {expected_deposits} deposits, got {len(budget._deposits)}"  # noqa: SLF001
+    )
 
     sync_client.close()
