@@ -1,4 +1,4 @@
-"""ResponseDecoder protocol — the AsyncClient ↔ ResponseDecoder seam (Seam 3)."""
+"""ResponseDecoder protocol — the Client/AsyncClient ↔ ResponseDecoder seam (Seam B)."""
 
 from typing import Protocol, TypeVar, runtime_checkable
 
