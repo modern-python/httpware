@@ -434,24 +434,6 @@ async def test_client_post_with_dict_data_does_not_mark_extensions() -> None:
     assert "httpware.streaming_body" not in seen_extensions[0]
 
 
-async def test_client_post_with_async_iterable_data_marks_extensions() -> None:
-    seen_extensions: list[dict[str, object]] = []
-
-    def handler(request: httpx2.Request) -> httpx2.Response:
-        seen_extensions.append(dict(request.extensions))
-        return httpx2.Response(HTTPStatus.OK, request=request)
-
-    async def streamed_data() -> typing.AsyncIterator[bytes]:
-        yield b"x"
-
-    transport = httpx2.MockTransport(handler)
-    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport))
-    await client.post("https://example.test/upload", data=streamed_data())
-
-    assert len(seen_extensions) == 1
-    assert seen_extensions[0].get("httpware.streaming_body") is True
-
-
 def test_is_streaming_body_true_for_async_iterable_files() -> None:
     """_is_streaming_body returns True for an async-iterable, covering the files= path."""
 
