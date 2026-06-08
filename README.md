@@ -88,7 +88,7 @@ async def main() -> None:
         user = await client.get("/users/1", response_model=User)
 ```
 
-Need a custom middleware (auth, tracing, request-ID propagation, etc.)? See the [Middleware guide](docs/middleware.md).
+Need a custom middleware (auth, tracing, request-ID propagation, etc.)? See the [Middleware guide](https://httpware.modern-python.org/middleware/).
 
 ### Streaming responses
 
@@ -135,11 +135,13 @@ pip install httpware[otel]
 
 When installed, `_emit_event` calls `trace.get_current_span().add_event(name, attributes=...)` automatically. We never create our own spans; for HTTP-level tracing install `opentelemetry-instrumentation-httpx` separately.
 
+## 📚 [Documentation](https://httpware.modern-python.org)
+
 ## 🗒️ [Release notes](https://github.com/modern-python/httpware/releases)
 
 ## 📦 [PyPI](https://pypi.org/project/httpware)
 
-## 📝 [License](./LICENSE)
+## 📝 [License](https://github.com/modern-python/httpware/blob/main/LICENSE)
 
 ## Part of `modern-python`
 
