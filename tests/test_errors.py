@@ -2,8 +2,10 @@
 
 import builtins
 import pickle
+from http import HTTPStatus
 
 import httpx2
+import pydantic
 import pytest
 
 from httpware.errors import (
@@ -13,6 +15,7 @@ from httpware.errors import (
     ClientError,
     ClientStatusError,
     ConflictError,
+    DecodeError,
     ForbiddenError,
     InternalServerError,
     NetworkError,
@@ -34,6 +37,10 @@ def _make_response(status: int, *, url: str = "https://example.test/x", method: 
     return httpx2.Response(status, request=request)
 
 
+class _DecodeErrorModel(pydantic.BaseModel):
+    id: int
+
+
 def test_inheritance_tree() -> None:
     assert issubclass(StatusError, ClientError)
     assert issubclass(TransportError, ClientError)
@@ -41,6 +48,7 @@ def test_inheritance_tree() -> None:
     assert issubclass(TimeoutError, builtins.TimeoutError)
     assert issubclass(ClientStatusError, StatusError)
     assert issubclass(ServerStatusError, StatusError)
+    assert issubclass(DecodeError, ClientError)
     for exc in (
         BadRequestError,
         UnauthorizedError,
@@ -236,3 +244,64 @@ def test_bulkhead_full_error_pickleable() -> None:
     assert isinstance(restored, BulkheadFullError)
     assert restored.max_concurrent == _MAX_CONCURRENT_5
     assert restored.acquire_timeout == _ACQUIRE_TIMEOUT_1_0
+
+
+def test_decode_error_is_client_error() -> None:
+    response = _make_response(200)
+    inner = ValueError("bad payload")
+    exc = DecodeError(response=response, model=_DecodeErrorModel, original=inner)
+    assert isinstance(exc, ClientError)
+
+
+def test_decode_error_stores_fields() -> None:
+    response = _make_response(200)
+    inner = ValueError("bad payload")
+    exc = DecodeError(response=response, model=_DecodeErrorModel, original=inner)
+    assert exc.response is response
+    assert exc.model is _DecodeErrorModel
+    assert exc.original is inner
+
+
+def test_decode_error_summary_includes_model_and_original() -> None:
+    response = _make_response(200)
+    inner = ValueError("bad payload")
+    exc = DecodeError(response=response, model=_DecodeErrorModel, original=inner)
+    summary = str(exc)
+    assert "_DecodeErrorModel" in summary
+    assert "bad payload" in summary
+    assert summary.startswith("failed to decode response into ")
+
+
+def test_decode_error_rejects_positional_args() -> None:
+    response = _make_response(200)
+    inner = ValueError("bad payload")
+    with pytest.raises(TypeError):
+        DecodeError(response, _DecodeErrorModel, inner)  # ty: ignore[missing-argument, too-many-positional-arguments]
+
+
+def test_decode_error_chaining_via_raise_from() -> None:
+    response = _make_response(200)
+    inner = ValueError("bad payload")
+    raised: DecodeError | None = None
+    try:
+        try:
+            raise inner
+        except ValueError as caught:
+            raise DecodeError(response=response, model=_DecodeErrorModel, original=caught) from caught
+    except DecodeError as exc:
+        raised = exc
+    assert raised is not None
+    assert raised.__cause__ is inner
+    assert raised.original is inner
+
+
+def test_decode_error_pickleable() -> None:
+    response = _make_response(200, url="https://example.test/p")
+    inner = ValueError("bad payload")
+    exc = DecodeError(response=response, model=_DecodeErrorModel, original=inner)
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(restored, DecodeError)
+    assert restored.model is _DecodeErrorModel
+    assert isinstance(restored.original, ValueError)
+    assert str(restored.original) == "bad payload"
+    assert restored.response.status_code == HTTPStatus.OK

@@ -11,7 +11,12 @@ class ResponseDecoder(Protocol):
     """Structural protocol every response-body decoder satisfies."""
 
     def decode(self, content: bytes, model: type[T]) -> T:
-        """Decode `content` (raw response bytes) into an instance of `model`."""
+        """Decode `content` (raw response bytes) into an instance of `model`.
+
+        Any exception raised by `decode` is wrapped by `Client.send` /
+        `AsyncClient.send` into `httpware.DecodeError`; implementers do not
+        need to raise `DecodeError` directly.
+        """
         ...
 
 

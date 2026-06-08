@@ -26,7 +26,8 @@ ClientError                          (catch-all for anything httpware raises)
 │       ├── InternalServerError     (500)
 │       └── ServiceUnavailableError (503)
 ├── RetryBudgetExhaustedError       (a retry was needed but the budget refused)
-└── BulkheadFullError                (acquire_timeout elapsed before a slot opened)
+├── BulkheadFullError                (acquire_timeout elapsed before a slot opened)
+└── DecodeError                      (response_model= decoder failed; HTTP call itself succeeded)
 ```
 
 ## Status-to-exception mapping
@@ -126,6 +127,32 @@ except RetryBudgetExhaustedError as exc:
         exc.attempts,
         exc.last_response.status_code if exc.last_response is not None else None,
     )
+```
+
+## `DecodeError`
+
+`DecodeError` is raised when `response_model=` is set on a request and the active `ResponseDecoder` failed to parse the response body. The HTTP call itself succeeded — status was 2xx/3xx and the transport delivered the body intact — but the body could not be coerced into the requested model. The exception is raised independently of which decoder is in use (`PydanticDecoder`, `MsgspecDecoder`, or a third-party adapter), so `except httpware.ClientError` is sufficient to cover the response-model decode path.
+
+Fields:
+
+- `response: httpx2.Response` — the response whose body failed to decode. Status, headers, and the originating `request` are all available via `exc.response.*`.
+- `model: type` — the type that was passed as `response_model=`.
+- `original: BaseException` — the underlying library exception (e.g., `pydantic.ValidationError`, `msgspec.ValidationError`, `msgspec.DecodeError`). Also available via `exc.__cause__`.
+
+```python
+from httpware import AsyncClient, DecodeError
+
+
+try:
+    user = await client.get("/users/1", response_model=User)
+except DecodeError as exc:
+    _LOGGER.error(
+        "decode failed for %s into %s: %s",
+        exc.response.request.url,
+        exc.model.__name__,
+        exc.original,
+    )
+    raise
 ```
 
 ## See also

@@ -36,10 +36,10 @@ The 0.1.0 seams numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) h
 - **Contract:** the middleware chain is composed once at client construction and frozen for the client's lifetime. Both worlds follow the same contract; the only difference is the per-world type: `AsyncClient` composes `AsyncMiddleware` via `compose_async` (the continuation type is `AsyncNext`), and `Client` composes `Middleware` via `compose` (the continuation type is `Next`). Both `compose` and `compose_async` live in `src/httpware/middleware/chain.py`. The chain bottom (the "terminal") is internal: it calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx. Same lifecycle rules in both worlds.
 - **Rule:** mutating the chain after construction is not supported. Per-request behavior goes through `httpx2.Request.extensions` or through `extensions=` kwargs at call sites.
 
-### Seam B: `AsyncClient ↔ ResponseDecoder`
+### Seam B: `Client`/`AsyncClient` ↔ `ResponseDecoder`
 
 - **Where:** `src/httpware/client.py` ↔ `src/httpware/decoders/`.
-- **Contract:** the decoder is invoked when the caller passes `response_model=`. The protocol is `decode(content: bytes, model: type[T]) -> T`. Decoder errors (`pydantic.ValidationError`, `msgspec.ValidationError`) propagate unwrapped.
+- **Contract:** the decoder is invoked when the caller passes `response_model=`. The protocol is `decode(content: bytes, model: type[T]) -> T`. Any exception raised by `decode` is wrapped by `Client.send` / `AsyncClient.send` into `httpware.DecodeError` (a `ClientError` subclass carrying `response`, `model`, `original`). Decoder implementers do not need to raise `DecodeError` directly.
 - **Rule:** the decoder must operate on raw bytes in a single parse pass. Two-pass decoding (`json.loads` then `validate_python`) is rejected: a single bytes-in / typed-object-out pass avoids the redundant intermediate `dict` allocation and parses faster. The Pydantic adapter implements this as `TypeAdapter(model).validate_json(content)`, with the `TypeAdapter` itself memoized via `@functools.lru_cache(maxsize=1024)` on a module-level `_get_adapter(model)` factory (the adapter is the expensive part to build). The msgspec adapter implements it as `msgspec.json.decode(content, type=model)`.
 
 ### Seam C: `httpware ↔ optional extras`
@@ -64,6 +64,8 @@ exc.response.request.url               # URL of the failed request
 The error-mapping table (what `httpx2` exception maps to which `httpware` exception) lives at the `AsyncClient` terminal in `src/httpware/client.py`. Status-keyed exceptions are looked up via the `STATUS_TO_EXCEPTION` table in `src/httpware/errors.py`. Unknown 4xx falls back to `ClientStatusError`; unknown 5xx falls back to `ServerStatusError`.
 
 `TimeoutError` inherits from both `httpware.ClientError` and `builtins.TimeoutError` so `except builtins.TimeoutError` (the form `asyncio.wait_for` uses) also catches httpware-raised timeouts.
+
+`DecodeError` covers the case where `response_model=` is set, the HTTP call itself succeeded, but the active `ResponseDecoder` raised. The wrap happens at the seam in `Client.send` / `AsyncClient.send` — `except Exception` translates any decoder-side failure into `DecodeError(response=..., model=..., original=...)` with `raise ... from exc` chaining. The `original` attribute exposes the underlying library exception (e.g., `pydantic.ValidationError`, `msgspec.ValidationError`); `__cause__` carries the same reference.
 
 ## 5. Module layout
 
