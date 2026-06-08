@@ -431,3 +431,45 @@ async def test_bulkhead_rejected_emits_observability_event(caplog: pytest.LogCap
     assert record.acquire_timeout == 0.0  # ty: ignore[unresolved-attribute]
     assert record.method == "GET"  # ty: ignore[unresolved-attribute]
     assert "example.test/y" in record.url  # ty: ignore[unresolved-attribute]
+
+
+# ───── Single-event-loop guard ──────────────────────────────────────────────
+
+
+async def test_first_acquire_captures_running_loop() -> None:
+    """AsyncBulkhead binds to whichever loop first acquires a slot."""
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1)
+    assert bulkhead._loop is None  # noqa: SLF001
+    handler = _SlowHandler(delay=0.0)
+    async with _client(handler, bulkhead=bulkhead) as client:
+        await client.get("https://example.test/x")
+    assert bulkhead._loop is asyncio.get_running_loop()  # noqa: SLF001
+
+
+async def test_same_loop_succeeds_across_multiple_acquires() -> None:
+    """Repeated acquires on the same loop never trigger the cross-loop guard."""
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_2)
+    handler = _SlowHandler(delay=0.0)
+    async with _client(handler, bulkhead=bulkhead) as client:
+        for _ in range(5):
+            response = await client.get("https://example.test/x")
+            assert response.status_code == HTTPStatus.OK
+
+
+def test_cross_loop_acquire_raises_runtimeerror() -> None:
+    """A bulkhead first used on one loop, then reused on another, raises RuntimeError.
+
+    Each asyncio.run() call creates a fresh event loop and tears it down on
+    exit. Sharing one AsyncBulkhead instance across two asyncio.run() calls
+    is the cross-loop case the guard prevents.
+    """
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1)
+    handler = _SlowHandler(delay=0.0)
+
+    async def _run_once() -> None:
+        async with _client(handler, bulkhead=bulkhead) as client:
+            await client.get("https://example.test/x")
+
+    asyncio.run(_run_once())  # captures loop L1, then L1 closes
+    with pytest.raises(RuntimeError, match="AsyncBulkhead is bound to a single event loop"):
+        asyncio.run(_run_once())

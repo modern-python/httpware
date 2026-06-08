@@ -9,6 +9,13 @@ all release deterministically.
 
 AsyncBulkhead is the sharable unit — pass the same instance to multiple
 AsyncClient(middleware=[shared]) calls to enforce a joint cap across clients.
+
+AsyncBulkhead is single-event-loop: the underlying asyncio.Semaphore binds
+to whichever loop first awaits it, and cross-loop wake-ups are not thread
+safe. A single instance acquired from a second event loop (e.g. another
+thread running asyncio.run) raises RuntimeError on entry rather than
+deadlocking silently. To cap a sync+async or cross-thread workload, use
+a Bulkhead and an AsyncBulkhead with matching max_concurrent.
 """
 
 import asyncio
@@ -24,6 +31,11 @@ from httpware.middleware import AsyncNext, Next
 
 _MAX_CONCURRENT_INVALID = "max_concurrent must be >= 1"
 _ACQUIRE_TIMEOUT_INVALID = "acquire_timeout must be >= 0"
+_ASYNCBULKHEAD_CROSS_LOOP_MSG = (
+    "AsyncBulkhead is bound to a single event loop. First seen on {first!r}; "
+    "current request is on {current!r}. Use one AsyncBulkhead per loop; "
+    "cross-thread sharing requires the sync Bulkhead primitive."
+)
 
 _LOGGER = logging.getLogger("httpware.bulkhead")
 
@@ -42,7 +54,8 @@ class AsyncBulkhead:
         Defaults to ``1.0``. ``None`` waits forever; ``0`` fails fast. Must be
         ``>= 0`` (or ``None``).
 
-    See the module docstring for the algorithm and middleware-ordering guidance.
+    See the module docstring for the algorithm, middleware-ordering guidance,
+    and the single-event-loop constraint.
 
     """
 
@@ -59,9 +72,29 @@ class AsyncBulkhead:
         self._max_concurrent = max_concurrent
         self._acquire_timeout = acquire_timeout
         self._sem = asyncio.Semaphore(max_concurrent)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_lock = threading.Lock()
+
+    def _check_loop(self) -> None:
+        current = asyncio.get_running_loop()
+        cached = self._loop
+        if cached is current:
+            return
+        if cached is not None:
+            raise RuntimeError(
+                _ASYNCBULKHEAD_CROSS_LOOP_MSG.format(first=cached, current=current),
+            )
+        with self._loop_lock:
+            if self._loop is None:
+                self._loop = current
+            elif self._loop is not current:
+                raise RuntimeError(
+                    _ASYNCBULKHEAD_CROSS_LOOP_MSG.format(first=self._loop, current=current),
+                )
 
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Acquire a slot (bounded by acquire_timeout), invoke next, release."""
+        self._check_loop()
         try:
             if self._acquire_timeout is None:
                 await self._sem.acquire()
