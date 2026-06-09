@@ -5,6 +5,7 @@ import concurrent.futures
 import dataclasses
 from unittest.mock import patch
 
+import msgspec
 import pydantic
 import pytest
 
@@ -176,3 +177,46 @@ def test_malformed_payload_raises_validation_error(payload: bytes, model: type) 
     """
     with pytest.raises(pydantic.ValidationError):
         PydanticDecoder().decode(payload, model)
+
+
+class _Struct(msgspec.Struct):
+    id: int
+    name: str
+
+
+def test_pydantic_can_decode_basemodel() -> None:
+    assert PydanticDecoder().can_decode(User) is True
+
+
+def test_pydantic_can_decode_dataclass() -> None:
+    assert PydanticDecoder().can_decode(UserDC) is True
+
+
+def test_pydantic_can_decode_dict() -> None:
+    assert PydanticDecoder().can_decode(dict) is True
+
+
+def test_pydantic_can_decode_list_of_models() -> None:
+    assert PydanticDecoder().can_decode(list[User]) is True
+
+
+def test_pydantic_can_decode_primitive_int() -> None:
+    assert PydanticDecoder().can_decode(int) is True
+
+
+def test_pydantic_can_decode_optional_int() -> None:
+    assert PydanticDecoder().can_decode(int | None) is True  # ty: ignore[invalid-argument-type]
+
+
+def test_pydantic_rejects_msgspec_struct() -> None:
+    assert PydanticDecoder().can_decode(_Struct) is False
+
+
+def test_pydantic_can_decode_uses_cache() -> None:
+    _get_adapter.cache_clear()
+    decoder = PydanticDecoder()
+    decoder.can_decode(User)
+    decoder.can_decode(User)
+    info = _get_adapter.cache_info()
+    assert info.hits >= 1
+    assert info.misses == 1

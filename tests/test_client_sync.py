@@ -67,6 +67,9 @@ def test_default_decoder_is_pydantic_decoder() -> None:
 
 def test_explicit_decoder_is_honored() -> None:
     class _Stub:
+        def can_decode(self, model: type) -> bool:  # noqa: ARG002  # pragma: no cover
+            return True
+
         def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover
             return None
 

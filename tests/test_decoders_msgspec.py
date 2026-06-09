@@ -1,15 +1,18 @@
 """Unit tests for httpware.decoders.msgspec.MsgspecDecoder."""
 
+import dataclasses
 from http import HTTPStatus
+from unittest.mock import patch
 
 import httpx2
 import msgspec
+import pydantic
 import pytest
 
 from httpware import AsyncClient, DecodeError
 from httpware._internal import import_checker
 from httpware.decoders import ResponseDecoder
-from httpware.decoders.msgspec import MsgspecDecoder
+from httpware.decoders.msgspec import MsgspecDecoder, _get_msgspec_decoder
 
 
 class _Item(msgspec.Struct):
@@ -70,3 +73,88 @@ async def test_msgspec_decoder_failures_wrap_as_decode_error_at_seam() -> None:
     exc = exc_info.value
     assert exc.model is _Item
     assert isinstance(exc.original, (msgspec.DecodeError, msgspec.ValidationError))
+
+
+class _PydanticUser(pydantic.BaseModel):
+    id: int
+    name: str
+
+
+@dataclasses.dataclass
+class _DC:
+    id: int
+    name: str
+
+
+@pytest.fixture(autouse=True)
+def _clear_msgspec_cache() -> None:
+    _get_msgspec_decoder.cache_clear()
+
+
+def test_msgspec_can_decode_struct() -> None:
+    assert MsgspecDecoder().can_decode(_Item) is True
+
+
+def test_msgspec_can_decode_dataclass() -> None:
+    assert MsgspecDecoder().can_decode(_DC) is True
+
+
+def test_msgspec_can_decode_dict() -> None:
+    assert MsgspecDecoder().can_decode(dict) is True
+
+
+def test_msgspec_can_decode_list_of_structs() -> None:
+    assert MsgspecDecoder().can_decode(list[_Item]) is True
+
+
+def test_msgspec_can_decode_primitive_int() -> None:
+    assert MsgspecDecoder().can_decode(int) is True
+
+
+def test_msgspec_rejects_pydantic_basemodel() -> None:
+    assert MsgspecDecoder().can_decode(_PydanticUser) is False
+
+
+def test_msgspec_can_decode_uses_cache() -> None:
+    _get_msgspec_decoder.cache_clear()
+    decoder = MsgspecDecoder()
+    decoder.can_decode(_Item)
+    decoder.can_decode(_Item)
+    info = _get_msgspec_decoder.cache_info()
+    assert info.hits >= 1
+    assert info.misses == 1
+
+
+def test_can_decode_returns_false_when_type_info_raises() -> None:
+    """`type_info` failures (unrecognized type) are treated as a soft 'no'."""
+    with patch(
+        "httpware.decoders.msgspec.msgspec.inspect.type_info",
+        side_effect=TypeError("unknown"),
+    ):
+        assert MsgspecDecoder().can_decode(_Item) is False
+
+
+def test_can_decode_returns_false_when_decoder_build_raises() -> None:
+    """A `_get_msgspec_decoder` failure after type_info-classification is a soft 'no'."""
+    _get_msgspec_decoder.cache_clear()
+    with patch(
+        "httpware.decoders.msgspec._get_msgspec_decoder",
+        side_effect=TypeError("cannot build decoder"),
+    ):
+        assert MsgspecDecoder().can_decode(_Item) is False
+
+
+def test_unhashable_model_falls_back_to_uncached_decoder() -> None:
+    """Unhashable `model` falls back to a direct uncached `msgspec.json.Decoder`.
+
+    Mirrors `PydanticDecoder`'s unhashable-fallback test: when `_get_msgspec_decoder`
+    raises `TypeError` (e.g., an unhashable parameterized type), `decode` bypasses
+    the cache so the user-visible error is `msgspec`'s own decode error, not a
+    `functools`-internal `TypeError`.
+    """
+    with patch(
+        "httpware.decoders.msgspec._get_msgspec_decoder",
+        side_effect=TypeError("unhashable type"),
+    ):
+        result = MsgspecDecoder().decode(b"42", int)
+        assert result == 42  # noqa: PLR2004

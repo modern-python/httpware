@@ -36,6 +36,20 @@ class PydanticDecoder:
         if not import_checker.is_pydantic_installed:
             raise ImportError(MISSING_DEPENDENCY_MESSAGE)
 
+    def can_decode(self, model: type) -> bool:
+        """Return True iff pydantic can build a schema for `model`.
+
+        Cached via `_get_adapter`; subsequent calls (including `decode`) reuse
+        the same `TypeAdapter` instance. Rejects `msgspec.Struct` subclasses —
+        pydantic raises `PydanticSchemaGenerationError` (a `TypeError`) when
+        building a schema for them.
+        """
+        try:
+            _get_adapter(model)
+        except Exception:  # noqa: BLE001 — can_decode is a probe; any failure means no
+            return False
+        return True
+
     def decode(self, content: bytes, model: type[T]) -> T:
         """Validate `content` as JSON against `model` in a single parse pass."""
         try:

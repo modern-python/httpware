@@ -17,6 +17,9 @@ from httpware.decoders.pydantic import PydanticDecoder
 class _FakeDecoder:
     """Test stand-in for ResponseDecoder; never called at runtime."""
 
+    def can_decode(self, model: type) -> bool:  # noqa: ARG002 — name pinned by ResponseDecoder protocol
+        return True  # pragma: no cover
+
     def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002 — name pinned by ResponseDecoder protocol
         return model()  # pragma: no cover
 
