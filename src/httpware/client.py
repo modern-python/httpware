@@ -45,6 +45,27 @@ def _default_pydantic_decoder() -> ResponseDecoder:
     return PydanticDecoder()
 
 
+def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
+    """Construct the default decoder tuple based on installed extras.
+
+    Pydantic-first when both extras are present; either-only when only one is
+    installed; empty tuple when neither is installed. Imports the concrete
+    decoder modules lazily so missing extras never trip `find_spec`-guarded
+    import paths. Called by `AsyncClient.__init__` and `Client.__init__` when
+    `decoders=None` (the default).
+    """
+    decoders: list[ResponseDecoder] = []
+    if import_checker.is_pydantic_installed:
+        from httpware.decoders.pydantic import PydanticDecoder  # noqa: PLC0415 — lazy by design (Seam C)
+
+        decoders.append(PydanticDecoder())
+    if import_checker.is_msgspec_installed:
+        from httpware.decoders.msgspec import MsgspecDecoder  # noqa: PLC0415 — lazy by design (Seam C)
+
+        decoders.append(MsgspecDecoder())
+    return tuple(decoders)
+
+
 @contextlib.asynccontextmanager
 async def _httpx2_exception_mapper() -> AsyncIterator[None]:
     """Map httpx2 exceptions to httpware exceptions. Shared by AsyncClient._terminal and stream()."""

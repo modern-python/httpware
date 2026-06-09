@@ -1,9 +1,13 @@
 """Tests for AsyncClient construction and ownership semantics."""
 
+from unittest.mock import patch
+
 import httpx2
 import pytest
 
 from httpware import AsyncClient
+from httpware.client import _build_default_decoders
+from httpware.decoders.msgspec import MsgspecDecoder
 from httpware.decoders.pydantic import PydanticDecoder
 
 
@@ -90,3 +94,38 @@ def test_explicit_middleware_is_honored() -> None:
     client = AsyncClient(middleware=(_Tag(),))
     assert client._user_middleware == (client._user_middleware[0],)  # noqa: SLF001
     assert len(client._user_middleware) == 1  # noqa: SLF001
+
+
+def test_build_default_decoders_both_extras_installed() -> None:
+    result = _build_default_decoders()
+    assert len(result) == 2  # noqa: PLR2004
+    assert isinstance(result[0], PydanticDecoder)
+    assert isinstance(result[1], MsgspecDecoder)
+
+
+def test_build_default_decoders_pydantic_only() -> None:
+    with patch("httpware._internal.import_checker.is_msgspec_installed", False):
+        result = _build_default_decoders()
+    assert len(result) == 1
+    assert isinstance(result[0], PydanticDecoder)
+
+
+def test_build_default_decoders_msgspec_only() -> None:
+    with patch("httpware._internal.import_checker.is_pydantic_installed", False):
+        result = _build_default_decoders()
+    assert len(result) == 1
+    assert isinstance(result[0], MsgspecDecoder)
+
+
+def test_build_default_decoders_neither_installed() -> None:
+    with (
+        patch("httpware._internal.import_checker.is_pydantic_installed", False),
+        patch("httpware._internal.import_checker.is_msgspec_installed", False),
+    ):
+        result = _build_default_decoders()
+    assert result == ()
+
+
+def test_build_default_decoders_returns_tuple() -> None:
+    result = _build_default_decoders()
+    assert isinstance(result, tuple)
