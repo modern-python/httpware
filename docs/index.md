@@ -62,6 +62,8 @@ async def main() -> None:
         print(user.name)
 ```
 
+Need the raw response **and** a decoded body from the same call (e.g., for header-based pagination)? See [Link header pagination](recipes/link-header-pagination.md) — it uses `send_with_response`.
+
 ### With resilience middleware
 
 Compose resilience middleware at construction; `AsyncBulkhead` goes outside `AsyncRetry` so one slot covers all retry attempts.
@@ -80,44 +82,6 @@ async def main() -> None:
     ) as client:
         user = await client.get("/users/1", response_model=User)
 ```
-
-### Response metadata + typed body
-
-When you need both the raw `httpx2.Response` (for headers, status, or the
-request URL) **and** a typed body, use `send_with_response`. It returns
-both atomically and routes the decode through the configured
-`ResponseDecoder`, so decoder failures surface as `DecodeError` — caught
-by `except httpware.ClientError` like every other failure mode.
-
-Canonical use case: RFC 5988 Link header pagination.
-
-Assume `process` and `next_link` are caller-defined — pick a Link header parser that fits.
-
-```python
-from httpware import AsyncClient
-from pydantic import BaseModel
-
-
-class Tag(BaseModel):
-    name: str
-
-
-async def main() -> None:
-    async with AsyncClient(base_url="https://gitlab.example/api/v4") as client:
-        url = "/projects/1/repository/tags"
-        params: dict[str, str] | None = {"per_page": "100", "page": "1"}
-        while url:
-            request = client.build_request("GET", url, params=params)
-            response, tags = await client.send_with_response(request, response_model=list[Tag])
-            for tag in tags:
-                process(tag)
-            url = next_link(response.headers.get("link"))   # caller's parser
-            params = None                                    # next link carries query
-```
-
-For body-only with a high-level verb, prefer `client.get(..., response_model=...)`.
-For body-only with a custom `Request`, prefer `client.send(request, response_model=...)`.
-`send_with_response` is not for streaming responses — use `stream()`.
 
 ### Streaming responses
 
@@ -140,7 +104,14 @@ It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, an
 
 ## Errors
 
-All 4xx/5xx responses raise typed exceptions automatically: `NotFoundError`, `ServiceUnavailableError`, `RateLimitedError`, etc. — all subclasses of `httpware.StatusError`. Transport-layer transient failures raise `NetworkError`; the resilience middleware raise `RetryBudgetExhaustedError` and `BulkheadFullError`. Everything inherits `httpware.ClientError`.
+All errors inherit `httpware.ClientError`. The categories:
+
+- **Status errors** (4xx/5xx responses) — raised automatically, no `raise_for_status()` needed: `NotFoundError`, `RateLimitedError`, `ServiceUnavailableError`, and the rest. All subclass `StatusError`.
+- **Transport errors** — connection / network / protocol failures before a response arrived. `NetworkError` (transient) subclasses `TransportError`.
+- **Resilience refusals** — `RetryBudgetExhaustedError` and `BulkheadFullError`, raised by the resilience middleware.
+- **Decode errors** — `DecodeError`, raised when `response_model=` decoding fails (HTTP call itself succeeded).
+
+See the [Errors reference](errors.md) for the full tree and catching strategies.
 
 ## Observability
 

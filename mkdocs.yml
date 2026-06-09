@@ -13,6 +13,7 @@ nav:
   - Recipes:
       - modern-di: recipes/modern-di.md
       - Phase decorator patterns: recipes/phase-decorator-patterns.md
+      - Link header pagination: recipes/link-header-pagination.md
   - Development:
       - Contributing: dev/contributing.md
 
