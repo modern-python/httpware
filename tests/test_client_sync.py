@@ -8,7 +8,7 @@ import pytest
 
 from httpware import Client, NotFoundError
 from httpware.decoders.pydantic import PydanticDecoder
-from httpware.errors import TransportError
+from httpware.errors import MissingDecoderError, TransportError
 
 
 # ---------- Construction ----------
@@ -59,13 +59,13 @@ def test_caller_owned_client_with_forwarded_kwargs_is_typeerror(kwargs: dict) ->
     caller.close()
 
 
-def test_default_decoder_is_pydantic_decoder() -> None:
+def test_default_decoders_includes_pydantic_when_installed() -> None:
     client = Client()
-    assert isinstance(client._decoder, PydanticDecoder)  # noqa: SLF001
+    assert any(isinstance(d, PydanticDecoder) for d in client._decoders)  # noqa: SLF001
     client.close()
 
 
-def test_explicit_decoder_is_honored() -> None:
+def test_explicit_decoders_is_honored() -> None:
     class _Stub:
         def can_decode(self, model: type) -> bool:  # noqa: ARG002  # pragma: no cover
             return True
@@ -73,8 +73,35 @@ def test_explicit_decoder_is_honored() -> None:
         def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover
             return None
 
-    client = Client(decoder=_Stub())
-    assert isinstance(client._decoder, _Stub)  # noqa: SLF001
+    stub = _Stub()
+    client = Client(decoders=[stub])
+    assert client._decoders == (stub,)  # noqa: SLF001
+    client.close()
+
+
+def test_empty_decoders_is_honored() -> None:
+    client = Client(decoders=[])
+    assert client._decoders == ()  # noqa: SLF001
+    client.close()
+
+
+def test_sync_missing_decoder_raised_before_http_call() -> None:
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+        pytest.fail("transport should not be invoked when MissingDecoderError fires")
+
+    transport = httpx2.MockTransport(handler)
+    client = Client(
+        httpx2_client=httpx2.Client(transport=transport),
+        decoders=[],
+    )
+
+    class _Foo:
+        pass
+
+    with pytest.raises(MissingDecoderError) as exc_info:
+        client.get("https://example.test/x", response_model=_Foo)
+    assert exc_info.value.model is _Foo
+    assert exc_info.value.registered_names == ()
     client.close()
 
 

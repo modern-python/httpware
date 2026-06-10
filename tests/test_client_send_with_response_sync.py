@@ -6,7 +6,7 @@ import httpx2
 import pydantic
 import pytest
 
-from httpware import Client, ClientError, DecodeError, NotFoundError
+from httpware import Client, ClientError, DecodeError, MissingDecoderError, NotFoundError
 from httpware.middleware import before_request
 
 
@@ -128,3 +128,22 @@ def test_send_with_response_runs_middleware_chain() -> None:
     response, _ = client.send_with_response(request, response_model=_User)
     assert recorded[0].headers.get("x-test") == "ok"
     assert response.request.headers.get("x-test") == "ok"
+
+
+def test_sync_send_with_response_raises_missing_decoder_before_http_call() -> None:
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+        pytest.fail("transport should not be invoked when MissingDecoderError fires")
+
+    transport = httpx2.MockTransport(handler)
+    client = Client(
+        httpx2_client=httpx2.Client(transport=transport),
+        decoders=[],
+    )
+
+    class _Foo:
+        pass
+
+    request = client.build_request("GET", "https://example.test/x")
+    with pytest.raises(MissingDecoderError):
+        client.send_with_response(request, response_model=_Foo)
+    client.close()

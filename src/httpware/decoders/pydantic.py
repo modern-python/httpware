@@ -1,12 +1,10 @@
 """PydanticDecoder — module-level cached TypeAdapter adapter for ResponseDecoder.
 
-Requires the `pydantic` extra: `pip install httpware[pydantic]`. The optional-extras
-gate is enforced upstream — `client.py:_default_pydantic_decoder()` raises
-ImportError when pydantic is absent, so this module is never imported in that
-path. Tests simulating "pydantic not installed" patch
-`import_checker.is_pydantic_installed=False` at runtime, after this module is
-already loaded; `PydanticDecoder.__init__` then raises ImportError with the
-install hint.
+Requires the `pydantic` extra: `pip install httpware[pydantic]`. Constructing
+`PydanticDecoder()` directly when pydantic is not installed raises ImportError.
+The default-decoder path in `client.py:_build_default_decoders()` skips this
+class entirely when `is_pydantic_installed` is False, so `AsyncClient()` does
+not trip the ImportError when the user is not using `response_model=`.
 """
 
 import functools

@@ -30,20 +30,6 @@ _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
     f"{_FORWARDED_KWARG_NAMES}; configure the httpx2 client you pass instead."
 )
 
-_DEFAULT_DECODER_MISSING_MESSAGE = (
-    "decoder=None defaults to PydanticDecoder, which requires the "
-    "'pydantic' extra. Either install it (`pip install httpware[pydantic]`) or "
-    "pass an explicit decoder=..."
-)
-
-
-def _default_pydantic_decoder() -> ResponseDecoder:
-    if not import_checker.is_pydantic_installed:
-        raise ImportError(_DEFAULT_DECODER_MISSING_MESSAGE)
-    from httpware.decoders.pydantic import PydanticDecoder  # noqa: PLC0415 — lazy by design
-
-    return PydanticDecoder()
-
 
 def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
     """Construct the default decoder tuple based on installed extras.
@@ -833,7 +819,7 @@ class Client:
 
     _httpx2_client: httpx2.Client
     _owns_client: bool
-    _decoder: ResponseDecoder
+    _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[Middleware, ...]
     _dispatch: Next
 
@@ -848,7 +834,7 @@ class Client:
         limits: httpx2.Limits | None = None,
         auth: httpx2.Auth | None = None,
         httpx2_client: httpx2.Client | None = None,
-        decoder: ResponseDecoder | None = None,
+        decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[Middleware] = (),
     ) -> None:
         if httpx2_client is not None:
@@ -884,9 +870,16 @@ class Client:
             self._httpx2_client = httpx2.Client(**kwargs)
             self._owns_client = True
 
-        self._decoder = decoder if decoder is not None else _default_pydantic_decoder()
+        self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()
         self._user_middleware = tuple(middleware)
         self._dispatch = compose(self._user_middleware, self._terminal)
+
+    def _dispatch_decoder(self, model: type) -> ResponseDecoder | None:
+        """Walk `_decoders` and return the first decoder claiming `model`, or None."""
+        for decoder in self._decoders:
+            if decoder.can_decode(model):
+                return decoder
+        return None
 
     def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         try:
@@ -936,11 +929,19 @@ class Client:
         response_model: type[T] | None = None,
     ) -> httpx2.Response | T:
         """Send `request` through the middleware chain. Decode if `response_model` is set."""
-        response = self._dispatch(request)
         if response_model is None:
-            return response
+            return self._dispatch(request)
+
+        decoder = self._dispatch_decoder(response_model)
+        if decoder is None:
+            raise MissingDecoderError(
+                model=response_model,
+                registered_names=tuple(type(d).__name__ for d in self._decoders),
+            )
+
+        response = self._dispatch(request)
         try:
-            return self._decoder.decode(response.content, response_model)
+            return decoder.decode(response.content, response_model)
         except Exception as exc:
             raise DecodeError(response=response, model=response_model, original=exc) from exc
 
@@ -959,9 +960,16 @@ class Client:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
+        decoder = self._dispatch_decoder(response_model)
+        if decoder is None:
+            raise MissingDecoderError(
+                model=response_model,
+                registered_names=tuple(type(d).__name__ for d in self._decoders),
+            )
+
         response = self._dispatch(request)
         try:
-            decoded = self._decoder.decode(response.content, response_model)
+            decoded = decoder.decode(response.content, response_model)
         except Exception as exc:
             raise DecodeError(response=response, model=response_model, original=exc) from exc
         return response, decoded
