@@ -10,7 +10,7 @@ import pydantic
 import pytest
 
 from httpware import ResponseDecoder
-from httpware.decoders.pydantic import PydanticDecoder, _get_adapter
+from httpware.decoders.pydantic import PydanticDecoder
 
 
 class User(pydantic.BaseModel):
@@ -26,11 +26,6 @@ class UserDC:
 
     id: int
     name: str
-
-
-@pytest.fixture(autouse=True)
-def _clear_adapter_cache() -> None:
-    _get_adapter.cache_clear()
 
 
 def test_pydantic_decoder_satisfies_response_decoder_protocol() -> None:
@@ -90,7 +85,6 @@ def test_validation_error_surfaces_unchanged() -> None:
 
 
 def test_cache_invariance_single_model() -> None:
-    _get_adapter.cache_clear()
     with patch("httpware.decoders.pydantic.TypeAdapter", wraps=pydantic.TypeAdapter) as spy:
         decoder = PydanticDecoder()
         for _ in range(1000):
@@ -99,7 +93,6 @@ def test_cache_invariance_single_model() -> None:
 
 
 def test_cache_invariance_two_distinct_models() -> None:
-    _get_adapter.cache_clear()
     with patch("httpware.decoders.pydantic.TypeAdapter", wraps=pydantic.TypeAdapter) as spy:
         decoder = PydanticDecoder()
         for _ in range(500):
@@ -109,7 +102,6 @@ def test_cache_invariance_two_distinct_models() -> None:
 
 
 async def test_cache_invariance_concurrent_first_calls() -> None:
-    _get_adapter.cache_clear()
     with patch("httpware.decoders.pydantic.TypeAdapter", wraps=pydantic.TypeAdapter) as spy:
         decoder = PydanticDecoder()
 
@@ -121,7 +113,6 @@ async def test_cache_invariance_concurrent_first_calls() -> None:
 
 
 def test_cache_invariance_concurrent_first_calls_threadpool() -> None:
-    _get_adapter.cache_clear()
     n_workers = 20
     with patch("httpware.decoders.pydantic.TypeAdapter", wraps=pydantic.TypeAdapter) as spy:
         decoder = PydanticDecoder()
@@ -133,9 +124,10 @@ def test_cache_invariance_concurrent_first_calls_threadpool() -> None:
             results = list(pool.map(one_decode, range(50)))
 
         assert all(type(r) is User and r.id == 1 for r in results)
-        # functools.lru_cache serializes the cache slot but the user function runs
-        # outside the lock — concurrent first-callers may both build a TypeAdapter
-        # before one wins (idempotent; loser is GC'd). Bounded by worker count.
+        # `dict` reads/writes are atomic in CPython but the get→set sequence in
+        # `_get_adapter` is not — concurrent first-callers may both build a
+        # TypeAdapter before one wins (idempotent; loser is GC'd). Bounded by
+        # worker count.
         assert 1 <= spy.call_count <= n_workers
 
 
@@ -144,10 +136,11 @@ def test_unhashable_model_falls_back_to_uncached_adapter() -> None:
 
     When `_get_adapter` raises `TypeError` (e.g., `Annotated[int, unhashable_metadata]`),
     `decode` bypasses the cache so `pydantic.ValidationError` surfaces cleanly instead
-    of leaking a `functools`-internal `TypeError` to the caller.
+    of leaking a `TypeError` to the caller.
     """
-    with patch(
-        "httpware.decoders.pydantic._get_adapter",
+    with patch.object(
+        PydanticDecoder,
+        "_get_adapter",
         side_effect=TypeError("unhashable type"),
     ):
         result = PydanticDecoder().decode(b"42", int)
@@ -213,10 +206,8 @@ def test_pydantic_rejects_msgspec_struct() -> None:
 
 
 def test_pydantic_can_decode_uses_cache() -> None:
-    _get_adapter.cache_clear()
     decoder = PydanticDecoder()
     decoder.can_decode(User)
     decoder.can_decode(User)
-    info = _get_adapter.cache_info()
-    assert info.hits >= 1
-    assert info.misses == 1
+    assert len(decoder._adapters) == 1  # noqa: SLF001
+    assert User in decoder._adapters  # noqa: SLF001
