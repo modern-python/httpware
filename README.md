@@ -15,12 +15,13 @@
 
 ```bash
 pip install httpware                # core only — no decoder
-pip install httpware[pydantic]      # + PydanticDecoder (the default-decoder path)
-pip install httpware[msgspec]       # + MsgspecDecoder
+pip install httpware[pydantic]      # + PydanticDecoder — handles BaseModel + dataclasses + primitives + generics
+pip install httpware[msgspec]       # + MsgspecDecoder — handles Struct + dataclasses + primitives + generics
+pip install httpware[pydantic,msgspec]   # both extras — both decoders register; BaseModel routes to pydantic, Struct to msgspec
 pip install httpware[all]           # everything declared above (pydantic, msgspec, otel)
 ```
 
-`AsyncClient()` with no `decoder=` argument defaults to constructing a `PydanticDecoder`; that path requires the `pydantic` extra and raises `ImportError` at `AsyncClient.__init__` if it is missing.
+`AsyncClient()` resolves `decoders=None` against installed extras: pydantic if installed (first), msgspec if installed (second), or an empty tuple if neither. `AsyncClient()` never raises on missing extras — failure is deferred to the first `response_model=` call, where `MissingDecoderError` fires *before* the HTTP request if no registered decoder claims the model.
 
 ## Quickstart
 

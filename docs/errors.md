@@ -27,7 +27,8 @@ ClientError                          (catch-all for anything httpware raises)
 │       └── ServiceUnavailableError (503)
 ├── RetryBudgetExhaustedError       (a retry was needed but the budget refused)
 ├── BulkheadFullError                (acquire_timeout elapsed before a slot opened)
-└── DecodeError                      (response_model= decoder failed; HTTP call itself succeeded)
+├── DecodeError                      (response_model= decoder failed; HTTP call itself succeeded)
+└── MissingDecoderError              (no registered decoder claims response_model=; fires before the HTTP call)
 ```
 
 ## Status-to-exception mapping
@@ -154,6 +155,20 @@ except DecodeError as exc:
     )
     raise
 ```
+
+## `MissingDecoderError`
+
+Raised by `send()` / `send_with_response()` / verb methods when `response_model=` is set but no registered decoder claims the model. Carries:
+
+- `model: type` — the `response_model=` value that wasn't claimed.
+- `registered_names: tuple[str, ...]` — class names of the registered decoders that all rejected the model. Empty tuple means no decoders were registered.
+
+Corrective action depends on the message hint:
+
+- `no decoders registered. Install pip install httpware[pydantic] or pip install httpware[msgspec], or pass decoders=[...] explicitly.` — install an extra or pass an explicit decoder list.
+- `registered decoders (PydanticDecoder + MsgspecDecoder) all rejected it.` — your `response_model` type is exotic enough that neither built-in claims it. Pass a custom `ResponseDecoder` via `decoders=[...]`.
+
+Unlike `DecodeError`, this error fires *before* the HTTP request — no traffic is sent.
 
 ## See also
 
