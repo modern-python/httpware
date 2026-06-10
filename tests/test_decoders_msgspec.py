@@ -12,7 +12,7 @@ import pytest
 from httpware import AsyncClient, DecodeError
 from httpware._internal import import_checker
 from httpware.decoders import ResponseDecoder
-from httpware.decoders.msgspec import MsgspecDecoder, _get_msgspec_decoder
+from httpware.decoders.msgspec import MsgspecDecoder
 
 
 class _Item(msgspec.Struct):
@@ -86,11 +86,6 @@ class _DC:
     name: str
 
 
-@pytest.fixture(autouse=True)
-def _clear_msgspec_cache() -> None:
-    _get_msgspec_decoder.cache_clear()
-
-
 def test_msgspec_can_decode_struct() -> None:
     assert MsgspecDecoder().can_decode(_Item) is True
 
@@ -116,13 +111,11 @@ def test_msgspec_rejects_pydantic_basemodel() -> None:
 
 
 def test_msgspec_can_decode_uses_cache() -> None:
-    _get_msgspec_decoder.cache_clear()
     decoder = MsgspecDecoder()
     decoder.can_decode(_Item)
     decoder.can_decode(_Item)
-    info = _get_msgspec_decoder.cache_info()
-    assert info.hits >= 1
-    assert info.misses == 1
+    assert len(decoder._msgspec_decoders) == 1  # noqa: SLF001
+    assert _Item in decoder._msgspec_decoders  # noqa: SLF001
 
 
 def test_can_decode_returns_false_when_type_info_raises() -> None:
@@ -136,9 +129,9 @@ def test_can_decode_returns_false_when_type_info_raises() -> None:
 
 def test_can_decode_returns_false_when_decoder_build_raises() -> None:
     """A `_get_msgspec_decoder` failure after type_info-classification is a soft 'no'."""
-    _get_msgspec_decoder.cache_clear()
-    with patch(
-        "httpware.decoders.msgspec._get_msgspec_decoder",
+    with patch.object(
+        MsgspecDecoder,
+        "_get_msgspec_decoder",
         side_effect=TypeError("cannot build decoder"),
     ):
         assert MsgspecDecoder().can_decode(_Item) is False
@@ -150,10 +143,11 @@ def test_unhashable_model_falls_back_to_uncached_decoder() -> None:
     Mirrors `PydanticDecoder`'s unhashable-fallback test: when `_get_msgspec_decoder`
     raises `TypeError` (e.g., an unhashable parameterized type), `decode` bypasses
     the cache so the user-visible error is `msgspec`'s own decode error, not a
-    `functools`-internal `TypeError`.
+    `TypeError` from the cache lookup.
     """
-    with patch(
-        "httpware.decoders.msgspec._get_msgspec_decoder",
+    with patch.object(
+        MsgspecDecoder,
+        "_get_msgspec_decoder",
         side_effect=TypeError("unhashable type"),
     ):
         result = MsgspecDecoder().decode(b"42", int)
