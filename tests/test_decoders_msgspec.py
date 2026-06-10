@@ -66,7 +66,7 @@ async def test_msgspec_decoder_failures_wrap_as_decode_error_at_seam() -> None:
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
-        decoder=MsgspecDecoder(),
+        decoders=[MsgspecDecoder()],
     )
     with pytest.raises(DecodeError) as exc_info:
         await client.get("https://example.test/x", response_model=_Item)

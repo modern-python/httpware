@@ -16,7 +16,7 @@ from httpware._internal.status import (
     _raise_on_status_error,
 )
 from httpware.decoders import ResponseDecoder
-from httpware.errors import DecodeError, TransportError
+from httpware.errors import DecodeError, MissingDecoderError, TransportError
 from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
 from httpware.middleware.chain import compose, compose_async
 
@@ -93,7 +93,7 @@ class AsyncClient:
 
     _httpx2_client: httpx2.AsyncClient
     _owns_client: bool
-    _decoder: ResponseDecoder
+    _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[AsyncMiddleware, ...]
     _dispatch: AsyncNext
 
@@ -108,7 +108,7 @@ class AsyncClient:
         limits: httpx2.Limits | None = None,
         auth: httpx2.Auth | None = None,
         httpx2_client: httpx2.AsyncClient | None = None,
-        decoder: ResponseDecoder | None = None,
+        decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[AsyncMiddleware] = (),
     ) -> None:
         if httpx2_client is not None:
@@ -144,9 +144,16 @@ class AsyncClient:
             self._httpx2_client = httpx2.AsyncClient(**kwargs)
             self._owns_client = True
 
-        self._decoder = decoder if decoder is not None else _default_pydantic_decoder()
+        self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()
         self._user_middleware = tuple(middleware)
         self._dispatch = compose_async(self._user_middleware, self._terminal)
+
+    def _dispatch_decoder(self, model: type) -> ResponseDecoder | None:
+        """Walk `_decoders` and return the first decoder claiming `model`, or None."""
+        for decoder in self._decoders:
+            if decoder.can_decode(model):
+                return decoder
+        return None
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         try:
@@ -172,11 +179,19 @@ class AsyncClient:
         response_model: type[T] | None = None,
     ) -> httpx2.Response | T:
         """Send `request` through the middleware chain. Decode if `response_model` is set."""
-        response = await self._dispatch(request)
         if response_model is None:
-            return response
+            return await self._dispatch(request)
+
+        decoder = self._dispatch_decoder(response_model)
+        if decoder is None:
+            raise MissingDecoderError(
+                model=response_model,
+                registered_names=tuple(type(d).__name__ for d in self._decoders),
+            )
+
+        response = await self._dispatch(request)
         try:
-            return self._decoder.decode(response.content, response_model)
+            return decoder.decode(response.content, response_model)
         except Exception as exc:
             raise DecodeError(response=response, model=response_model, original=exc) from exc
 
@@ -195,9 +210,16 @@ class AsyncClient:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
+        decoder = self._dispatch_decoder(response_model)
+        if decoder is None:
+            raise MissingDecoderError(
+                model=response_model,
+                registered_names=tuple(type(d).__name__ for d in self._decoders),
+            )
+
         response = await self._dispatch(request)
         try:
-            decoded = self._decoder.decode(response.content, response_model)
+            decoded = decoder.decode(response.content, response_model)
         except Exception as exc:
             raise DecodeError(response=response, model=response_model, original=exc) from exc
         return response, decoded
