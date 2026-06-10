@@ -1,12 +1,10 @@
 """PydanticDecoder — module-level cached TypeAdapter adapter for ResponseDecoder.
 
-Requires the `pydantic` extra: `pip install httpware[pydantic]`. The optional-extras
-gate is enforced upstream — `client.py:_default_pydantic_decoder()` raises
-ImportError when pydantic is absent, so this module is never imported in that
-path. Tests simulating "pydantic not installed" patch
-`import_checker.is_pydantic_installed=False` at runtime, after this module is
-already loaded; `PydanticDecoder.__init__` then raises ImportError with the
-install hint.
+Requires the `pydantic` extra: `pip install httpware[pydantic]`. Constructing
+`PydanticDecoder()` directly when pydantic is not installed raises ImportError.
+The default-decoder path in `client.py:_build_default_decoders()` skips this
+class entirely when `is_pydantic_installed` is False, so `AsyncClient()` does
+not trip the ImportError when the user is not using `response_model=`.
 """
 
 import functools
@@ -35,6 +33,20 @@ class PydanticDecoder:
     def __init__(self) -> None:
         if not import_checker.is_pydantic_installed:
             raise ImportError(MISSING_DEPENDENCY_MESSAGE)
+
+    def can_decode(self, model: type) -> bool:
+        """Return True iff pydantic can build a schema for `model`.
+
+        Cached via `_get_adapter`; subsequent calls (including `decode`) reuse
+        the same `TypeAdapter` instance. Rejects `msgspec.Struct` subclasses —
+        pydantic raises `PydanticSchemaGenerationError` (a `TypeError`) when
+        building a schema for them.
+        """
+        try:
+            _get_adapter(model)
+        except Exception:  # noqa: BLE001 — can_decode is a probe; any failure means no
+            return False
+        return True
 
     def decode(self, content: bytes, model: type[T]) -> T:
         """Validate `content` as JSON against `model` in a single parse pass."""

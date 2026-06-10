@@ -254,3 +254,43 @@ class DecodeError(ClientError):
             _reconstruct_decode_error,
             (type(self), self.response, self.model, self.original),
         )
+
+
+def _missing_decoder_summary(model: type, registered_names: tuple[str, ...]) -> str:
+    if not registered_names:
+        hint = (
+            "no decoders registered. Install `pip install httpware[pydantic]` "
+            "or `pip install httpware[msgspec]`, or pass decoders=[...] explicitly."
+        )
+    else:
+        joined = " + ".join(registered_names)
+        hint = f"registered decoders ({joined}) all rejected it. Pass a custom decoder via decoders=[...]."
+    return f"no decoder for response_model={model!r}: {hint}"
+
+
+def _reconstruct_missing_decoder(
+    cls: "type[MissingDecoderError]",
+    model: type,
+    registered_names: tuple[str, ...],
+) -> "MissingDecoderError":
+    return cls(model=model, registered_names=registered_names)
+
+
+class MissingDecoderError(ClientError):
+    """Raised when response_model= is set but no registered decoder claims the model.
+
+    Fires at .send() entry, BEFORE the HTTP call — no point sending a request
+    whose response cannot be decoded. Distinct from DecodeError, which means
+    the decoder ran and the payload was malformed.
+    """
+
+    model: type
+    registered_names: tuple[str, ...]
+
+    def __init__(self, *, model: type, registered_names: tuple[str, ...]) -> None:
+        self.model = model
+        self.registered_names = registered_names
+        super().__init__(_missing_decoder_summary(model, registered_names))
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_reconstruct_missing_decoder, (type(self), self.model, self.registered_names))

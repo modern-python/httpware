@@ -18,6 +18,7 @@ from httpware.errors import (
     DecodeError,
     ForbiddenError,
     InternalServerError,
+    MissingDecoderError,
     NetworkError,
     NotFoundError,
     RateLimitedError,
@@ -305,3 +306,54 @@ def test_decode_error_pickleable() -> None:
     assert isinstance(restored.original, ValueError)
     assert str(restored.original) == "bad payload"
     assert restored.response.status_code == HTTPStatus.OK
+
+
+class _Foo:
+    pass
+
+
+def test_missing_decoder_error_carries_model() -> None:
+    exc = MissingDecoderError(model=_Foo, registered_names=())
+    assert exc.model is _Foo
+
+
+def test_missing_decoder_error_carries_registered_names() -> None:
+    exc = MissingDecoderError(model=_Foo, registered_names=("PydanticDecoder",))
+    assert exc.registered_names == ("PydanticDecoder",)
+
+
+def test_missing_decoder_error_no_registered_message() -> None:
+    exc = MissingDecoderError(model=_Foo, registered_names=())
+    msg = str(exc)
+    assert "no decoders registered" in msg
+    assert "httpware[pydantic]" in msg
+    assert "httpware[msgspec]" in msg
+
+
+def test_missing_decoder_error_single_registered_message() -> None:
+    exc = MissingDecoderError(model=_Foo, registered_names=("PydanticDecoder",))
+    assert "registered decoders (PydanticDecoder) all rejected" in str(exc)
+
+
+def test_missing_decoder_error_two_registered_message() -> None:
+    exc = MissingDecoderError(
+        model=_Foo,
+        registered_names=("PydanticDecoder", "MsgspecDecoder"),
+    )
+    assert "registered decoders (PydanticDecoder + MsgspecDecoder) all rejected" in str(exc)
+
+
+def test_missing_decoder_error_is_client_error() -> None:
+    exc = MissingDecoderError(model=_Foo, registered_names=())
+    assert isinstance(exc, ClientError)
+
+
+def test_missing_decoder_error_pickle_roundtrip() -> None:
+    exc = MissingDecoderError(
+        model=_Foo,
+        registered_names=("PydanticDecoder", "MsgspecDecoder"),
+    )
+    revived = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(revived, MissingDecoderError)
+    assert revived.model is _Foo
+    assert revived.registered_names == ("PydanticDecoder", "MsgspecDecoder")

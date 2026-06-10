@@ -10,6 +10,18 @@ T = TypeVar("T")
 class ResponseDecoder(Protocol):
     """Structural protocol every response-body decoder satisfies."""
 
+    def can_decode(self, model: type) -> bool:
+        """Return True iff this decoder claims responsibility for `model`.
+
+        The client walks its `_decoders` tuple in order and picks the first
+        decoder whose `can_decode` returns True. Implementations should claim
+        every model type they can actually handle — broad is correct, because
+        list ordering encodes the caller's preference for shared shapes.
+        Native types of another library (e.g. `PydanticDecoder` vs
+        `msgspec.Struct`) MUST be rejected.
+        """
+        ...
+
     def decode(self, content: bytes, model: type[T]) -> T:
         """Decode `content` (raw response bytes) into an instance of `model`.
 

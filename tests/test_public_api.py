@@ -44,6 +44,7 @@ def test_expected_exports() -> None:
         "ForbiddenError",
         "InternalServerError",
         "Middleware",
+        "MissingDecoderError",
         "NetworkError",
         "Next",
         "NotFoundError",
@@ -71,3 +72,8 @@ def test_expected_exports() -> None:
     assert expected == actual, (
         f"__all__ mismatch:\n  missing from __all__: {expected - actual}\n  unexpected in __all__: {actual - expected}"
     )
+
+
+def test_missing_decoder_error_exported() -> None:
+    assert "MissingDecoderError" in httpware.__all__
+    assert httpware.MissingDecoderError.__module__ == "httpware.errors"

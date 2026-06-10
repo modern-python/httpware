@@ -13,8 +13,9 @@ pip install httpware
 Optional extras:
 
 ```bash
-pip install httpware[pydantic]   # PydanticDecoder (the default decoder path)
-pip install httpware[msgspec]    # MsgspecDecoder
+pip install httpware[pydantic]   # PydanticDecoder — handles BaseModel + dataclasses + primitives + generics
+pip install httpware[msgspec]    # MsgspecDecoder — handles Struct + dataclasses + primitives + generics
+pip install httpware[pydantic,msgspec]   # both extras — both decoders register; BaseModel routes to pydantic, Struct to msgspec
 ```
 
 ## First request
@@ -64,6 +65,31 @@ async def main() -> None:
 
 Need the raw response **and** a decoded body from the same call (e.g., for header-based pagination)? See [Link header pagination](recipes/link-header-pagination.md) — it uses `send_with_response`.
 
+### Decoder dispatch
+
+When `response_model=` is set, the client walks `decoders` in order and picks
+the first decoder whose `can_decode(model)` returns `True`. Both built-in
+decoders claim broadly within their library; the ordering encodes your
+preference for shared shapes (`dict`, `list[Foo]`, dataclasses, primitives):
+
+```python
+# pydantic-first (the default when both extras are installed):
+# - BaseModel  -> pydantic
+# - Struct     -> msgspec
+# - dict, list -> pydantic (first in list)
+AsyncClient(decoders=[PydanticDecoder(), MsgspecDecoder()])
+
+# msgspec-first — same native routing, but shared shapes go to msgspec:
+# - BaseModel  -> pydantic
+# - Struct     -> msgspec
+# - dict, list -> msgspec
+AsyncClient(decoders=[MsgspecDecoder(), PydanticDecoder()])
+```
+
+If no registered decoder claims your `response_model`, the call raises
+`MissingDecoderError` *before* the HTTP request — see the
+[Errors reference](errors.md#missingdecodererror).
+
 ### With resilience middleware
 
 Compose resilience middleware at construction; `AsyncBulkhead` goes outside `AsyncRetry` so one slot covers all retry attempts.
@@ -109,7 +135,7 @@ All errors inherit `httpware.ClientError`. The categories:
 - **Status errors** (4xx/5xx responses) — raised automatically, no `raise_for_status()` needed: `NotFoundError`, `RateLimitedError`, `ServiceUnavailableError`, and the rest. All subclass `StatusError`.
 - **Transport errors** — connection / network / protocol failures before a response arrived. `NetworkError` (transient) subclasses `TransportError`.
 - **Resilience refusals** — `RetryBudgetExhaustedError` and `BulkheadFullError`, raised by the resilience middleware.
-- **Decode errors** — `DecodeError`, raised when `response_model=` decoding fails (HTTP call itself succeeded).
+- **Decode errors** — `DecodeError`, raised when `response_model=` decoding fails (HTTP call itself succeeded). `MissingDecoderError`, raised when no registered decoder claims the `response_model=` type — fires *before* the HTTP call.
 
 See the [Errors reference](errors.md) for the full tree and catching strategies.
 
