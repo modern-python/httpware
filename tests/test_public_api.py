@@ -29,6 +29,7 @@ def test_no_removed_symbols_leaked() -> None:
 def test_expected_exports() -> None:
     expected = {
         "AsyncBulkhead",
+        "AsyncCircuitBreaker",
         "AsyncClient",
         "AsyncMiddleware",
         "AsyncNext",

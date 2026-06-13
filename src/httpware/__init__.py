@@ -38,12 +38,21 @@ from httpware.middleware import (
     before_request,
     on_error,
 )
-from httpware.middleware.resilience import AsyncBulkhead, AsyncRetry, AsyncTimeout, Bulkhead, Retry, RetryBudget
+from httpware.middleware.resilience import (
+    AsyncBulkhead,
+    AsyncCircuitBreaker,
+    AsyncRetry,
+    AsyncTimeout,
+    Bulkhead,
+    Retry,
+    RetryBudget,
+)
 
 
 __all__ = [
     "STATUS_TO_EXCEPTION",
     "AsyncBulkhead",
+    "AsyncCircuitBreaker",
     "AsyncClient",
     "AsyncMiddleware",
     "AsyncNext",
