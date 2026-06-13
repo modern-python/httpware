@@ -2,7 +2,7 @@
 
 Items raised in reviews that are real but not actionable now.
 
-As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see [`engineering.md`](engineering.md) §8. The Open section below is the long-tail register: items that remain technically real but depend on speculative future work, so they're parked here pending a concrete trigger.
+As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see the [change Index](README.md). The Open section below is the long-tail register: items that remain technically real but depend on speculative future work, so they're parked here pending a concrete trigger.
 
 ## Open
 
