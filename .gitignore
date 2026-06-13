@@ -23,5 +23,4 @@ wheels/
 .python-version
 .venv
 uv.lock
-plan.md
 site/

@@ -111,4 +111,4 @@ For middleware with state-keeping (counters, circuit-breaker state), assert on i
 
 - **[Middleware guide](middleware.md)** — write the middleware you're testing.
 - **[Resilience reference](resilience.md)** — testing `AsyncRetry`/`AsyncBulkhead` configurations.
-- **`planning/engineering.md` §6** — the project's own testing patterns (Hypothesis property-based tests, `pytest-asyncio` auto-mode, the `RecordedTransport`-was-removed history).
+- **`architecture/testing.md`** — the project's own testing patterns (Hypothesis property-based tests, `pytest-asyncio` auto-mode, the `RecordedTransport`-was-removed history).

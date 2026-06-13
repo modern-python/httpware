@@ -354,4 +354,4 @@ with Client(
 - **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `AsyncRetry` and `AsyncBulkhead` use.
 - **[Errors reference](errors.md)** — `RetryBudgetExhaustedError`, `BulkheadFullError`, `CircuitOpenError`, and the broader exception tree.
 - **[Observability](index.md#observability)** — the operational events these middleware emit.
-- **`planning/engineering.md` §3** — the formal Middleware/Seam-A contract.
+- **`architecture/middleware.md`** — the formal Middleware/Seam-A contract.
