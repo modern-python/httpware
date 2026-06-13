@@ -5,15 +5,18 @@ Covers the routing examples in planning/specs/2026-06-09-multi-decoder-design.md
 shared shapes route to the first decoder in the list.
 """
 
+import contextlib
 import dataclasses
+from collections.abc import Iterator
 from http import HTTPStatus
+from unittest.mock import MagicMock, patch
 
 import httpx2
 import msgspec
 import pydantic
 import pytest
 
-from httpware import AsyncClient, Client, MissingDecoderError
+from httpware import AsyncClient, Client, MissingDecoderError, ResponseDecoder
 from httpware.decoders.msgspec import MsgspecDecoder
 from httpware.decoders.pydantic import PydanticDecoder
 
@@ -56,6 +59,19 @@ def _sync_client_with_body(payload: bytes, decoders: list) -> Client:
     )
 
 
+@contextlib.contextmanager
+def _decode_spies(*decoders: ResponseDecoder) -> Iterator[list[MagicMock]]:
+    """Wrap each decoder's `decode` so a test can assert WHICH one ran.
+
+    Two real decoders that both claim a shared shape (e.g. `dict[str, int]` or a
+    stdlib dataclass) produce identical output, so output equality can't prove
+    the ordering invariant. Spying on `decode` shows which decoder the dispatcher
+    actually selected. Spies are yielded in the same order as `decoders`.
+    """
+    with contextlib.ExitStack() as stack:
+        yield [stack.enter_context(patch.object(d, "decode", wraps=d.decode)) for d in decoders]
+
+
 async def test_async_basemodel_routes_to_pydantic() -> None:
     client = _async_client_with_body(
         b'{"id": 1, "name": "Ada"}',
@@ -77,33 +93,37 @@ async def test_async_struct_routes_to_msgspec() -> None:
 
 
 async def test_async_dict_routes_to_first_decoder() -> None:
-    """Shared shape: first decoder in the list wins."""
-    pyd = PydanticDecoder()
-    msg = MsgspecDecoder()
+    """Shared shape (dict): the FIRST decoder in the list actually decodes it."""
+    pyd, msg = PydanticDecoder(), MsgspecDecoder()
     client = _async_client_with_body(b'{"a": 1}', decoders=[pyd, msg])
-    result = await client.get("https://example.test/x", response_model=dict[str, int])
-    assert type(result) is dict
+    with _decode_spies(pyd, msg) as (pyd_spy, msg_spy):
+        result = await client.get("https://example.test/x", response_model=dict[str, int])
     assert result == {"a": 1}
+    pyd_spy.assert_called_once()
+    msg_spy.assert_not_called()
 
 
 async def test_async_dict_routes_to_msgspec_when_first() -> None:
-    """Reversed list flips routing for shared shapes."""
-    client = _async_client_with_body(
-        b'{"a": 1}',
-        decoders=[MsgspecDecoder(), PydanticDecoder()],
-    )
-    result = await client.get("https://example.test/x", response_model=dict[str, int])
+    """Reversed list: the shared shape now routes to msgspec, proven by the spy."""
+    msg, pyd = MsgspecDecoder(), PydanticDecoder()
+    client = _async_client_with_body(b'{"a": 1}', decoders=[msg, pyd])
+    with _decode_spies(msg, pyd) as (msg_spy, pyd_spy):
+        result = await client.get("https://example.test/x", response_model=dict[str, int])
     assert result == {"a": 1}
+    msg_spy.assert_called_once()
+    pyd_spy.assert_not_called()
 
 
 async def test_async_dataclass_routes_to_first_decoder() -> None:
-    client = _async_client_with_body(
-        b'{"id": 1, "name": "Ada"}',
-        decoders=[PydanticDecoder(), MsgspecDecoder()],
-    )
-    result = await client.get("https://example.test/x", response_model=_DC)
+    """Stdlib dataclass is a shared shape; the first decoder (pydantic) decodes it."""
+    pyd, msg = PydanticDecoder(), MsgspecDecoder()
+    client = _async_client_with_body(b'{"id": 1, "name": "Ada"}', decoders=[pyd, msg])
+    with _decode_spies(pyd, msg) as (pyd_spy, msg_spy):
+        result = await client.get("https://example.test/x", response_model=_DC)
     assert type(result) is _DC
     assert result.id == 1
+    pyd_spy.assert_called_once()
+    msg_spy.assert_not_called()
 
 
 async def test_async_list_of_basemodel_routes_to_pydantic() -> None:
@@ -176,22 +196,51 @@ def test_sync_struct_routes_to_msgspec() -> None:
 
 
 def test_sync_dict_routes_to_first_decoder() -> None:
-    client = _sync_client_with_body(
-        b'{"a": 1}',
-        decoders=[PydanticDecoder(), MsgspecDecoder()],
-    )
-    result = client.get("https://example.test/x", response_model=dict[str, int])
+    """Sync twin: shared shape (dict) routes to the first decoder (pydantic)."""
+    pyd, msg = PydanticDecoder(), MsgspecDecoder()
+    client = _sync_client_with_body(b'{"a": 1}', decoders=[pyd, msg])
+    with _decode_spies(pyd, msg) as (pyd_spy, msg_spy):
+        result = client.get("https://example.test/x", response_model=dict[str, int])
     assert result == {"a": 1}
+    pyd_spy.assert_called_once()
+    msg_spy.assert_not_called()
     client.close()
 
 
 def test_sync_dict_routes_to_msgspec_when_first() -> None:
-    client = _sync_client_with_body(
-        b'{"a": 1}',
-        decoders=[MsgspecDecoder(), PydanticDecoder()],
-    )
-    result = client.get("https://example.test/x", response_model=dict[str, int])
+    """Sync twin: reversed list routes the shared shape to msgspec."""
+    msg, pyd = MsgspecDecoder(), PydanticDecoder()
+    client = _sync_client_with_body(b'{"a": 1}', decoders=[msg, pyd])
+    with _decode_spies(msg, pyd) as (msg_spy, pyd_spy):
+        result = client.get("https://example.test/x", response_model=dict[str, int])
     assert result == {"a": 1}
+    msg_spy.assert_called_once()
+    pyd_spy.assert_not_called()
+    client.close()
+
+
+def test_sync_dataclass_routes_to_first_decoder() -> None:
+    """Sync twin: stdlib dataclass routes to the first decoder (pydantic)."""
+    pyd, msg = PydanticDecoder(), MsgspecDecoder()
+    client = _sync_client_with_body(b'{"id": 1, "name": "Ada"}', decoders=[pyd, msg])
+    with _decode_spies(pyd, msg) as (pyd_spy, msg_spy):
+        result = client.get("https://example.test/x", response_model=_DC)
+    assert type(result) is _DC
+    assert result.id == 1
+    pyd_spy.assert_called_once()
+    msg_spy.assert_not_called()
+    client.close()
+
+
+def test_sync_list_of_basemodel_routes_to_pydantic() -> None:
+    """Sync twin: list[BaseModel] is claimed only by pydantic (msgspec rejects it)."""
+    client = _sync_client_with_body(
+        b'[{"id": 1, "name": "Ada"}, {"id": 2, "name": "Bo"}]',
+        decoders=[PydanticDecoder(), MsgspecDecoder()],
+    )
+    result = client.get("https://example.test/x", response_model=list[_PydanticUser])
+    assert len(result) == 2  # noqa: PLR2004
+    assert all(type(item) is _PydanticUser for item in result)
     client.close()
 
 
