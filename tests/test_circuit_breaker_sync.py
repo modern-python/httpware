@@ -307,27 +307,34 @@ def test_non_counted_exception_in_probe_releases_slot() -> None:
 
 
 def test_success_threshold_probe_failure_mid_streak_reopens() -> None:
-    """A probe failure mid-streak resets consecutive_successes; two fresh successes required."""
+    """A probe failure mid-streak resets consecutive_successes — the next close needs two FRESH successes.
+
+    Discriminating: if the success counter were NOT reset on reopen, the circuit would
+    close after a single post-reopen success and the final request would reach the
+    transport instead of being rejected.
+    """
     clock = _Clock()
-    # Sequence: 2x500 to open; probe-1=200 (streak=1); probe-2=500 (reopen, streak=0);
-    # advance again; probe-3=200 (streak=1); probe-4=200 (streak=2 >= threshold -> CLOSED);
-    # one more 200 to confirm CLOSED.
-    handler = _StatusSequence([500, 500, 200, 500, 200, 200, 200])
+    # 2x500 open; probe-1=200 (s=1); probe-2=500 (reopen, s->0); probe-3=200 (s=1, NOT 2);
+    # probe-4=500 -> half-open probe failure -> reopen -> next request rejected.
+    handler = _StatusSequence([500, 500, 200, 500, 200, 500])
     breaker = CircuitBreaker(failure_threshold=2, success_threshold=2, reset_timeout=5.0, _now=clock)
     with _client(handler, breaker=breaker) as client:
         for _ in range(2):
             with pytest.raises(InternalServerError):
                 client.get("https://example.test/x")
         clock.advance(5.0)
-        client.get("https://example.test/x")  # probe-1: 200 -> HALF_OPEN streak=1
-        with pytest.raises(InternalServerError):  # probe-2: 500 -> reopen, streak=0
+        client.get("https://example.test/x")  # probe-1: 200 -> HALF_OPEN s=1
+        with pytest.raises(InternalServerError):  # probe-2: 500 -> reopen, s reset to 0
             client.get("https://example.test/x")
         clock.advance(5.0)
-        client.get("https://example.test/x")  # probe-3: 200 -> streak=1
-        client.get("https://example.test/x")  # probe-4: 200 -> streak=2 -> CLOSED
-        response = client.get("https://example.test/x")  # CLOSED, passes through
-    assert response.status_code == HTTPStatus.OK
-    assert handler.calls == 7  # noqa: PLR2004  # 2+2+1+1+1
+        client.get("https://example.test/x")  # probe-3: 200 -> s=1 (would be 2->CLOSED if not reset)
+        with pytest.raises(InternalServerError):  # probe-4: 500 -> half-open probe failure -> reopen
+            client.get("https://example.test/x")
+        # OPEN now (no clock advance): a missing-reset bug would have CLOSED the circuit
+        # after probe-3, so this request would reach the transport instead of being rejected.
+        with pytest.raises(CircuitOpenError):
+            client.get("https://example.test/x")
+    assert handler.calls == 6  # noqa: PLR2004  # the final request was short-circuited (not the 7th transport hit)
 
 
 def test_reset_timeout_zero_admits_probe_immediately() -> None:
