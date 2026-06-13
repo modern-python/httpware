@@ -44,6 +44,7 @@ from httpware.middleware.resilience import (
     AsyncRetry,
     AsyncTimeout,
     Bulkhead,
+    CircuitBreaker,
     Retry,
     RetryBudget,
 )
@@ -61,6 +62,7 @@ __all__ = [
     "BadRequestError",
     "Bulkhead",
     "BulkheadFullError",
+    "CircuitBreaker",
     "CircuitOpenError",
     "Client",
     "ClientError",

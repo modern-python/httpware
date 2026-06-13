@@ -33,7 +33,7 @@ import httpx2
 
 from httpware._internal.observability import _emit_event
 from httpware.errors import CircuitOpenError, NetworkError, StatusError, TimeoutError  # noqa: A004
-from httpware.middleware import AsyncNext
+from httpware.middleware import AsyncNext, Next
 
 
 _FAILURE_THRESHOLD_INVALID = "failure_threshold must be >= 1"
@@ -246,4 +246,55 @@ class AsyncCircuitBreaker:
             self._state.release_probe(role)
             raise
         self._state.on_success(role, request)
+        return response
+
+
+class CircuitBreaker:
+    """Sync classic circuit breaker middleware. Mirror of AsyncCircuitBreaker.
+
+    Serializes every state transition with a threading.Lock. Sharable across Clients
+    (one shared circuit); a sync instance cannot be shared with an AsyncClient.
+    """
+
+    def __init__(
+        self,
+        *,
+        failure_threshold: int = 5,
+        reset_timeout: float = 30.0,
+        success_threshold: int = 1,
+        failure_status_codes: frozenset[int] | None = None,
+        _now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._state = _CircuitBreakerState(
+            failure_threshold=failure_threshold,
+            reset_timeout=reset_timeout,
+            success_threshold=success_threshold,
+            failure_status_codes=failure_status_codes,
+            now=_now,
+        )
+        self._lock = threading.Lock()
+
+    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+        """Admit, forward, then record the outcome. Fast-fail when the circuit is not closed."""
+        with self._lock:
+            role = self._state.admit(request)
+        try:
+            response = next(request)
+        except StatusError as exc:
+            with self._lock:
+                if self._state.is_failure_status(exc.response.status_code):
+                    self._state.on_failure(role, request)
+                else:
+                    self._state.on_success(role, request)
+            raise
+        except (NetworkError, TimeoutError):
+            with self._lock:
+                self._state.on_failure(role, request)
+            raise
+        except BaseException:
+            with self._lock:
+                self._state.release_probe(role)
+            raise
+        with self._lock:
+            self._state.on_success(role, request)
         return response

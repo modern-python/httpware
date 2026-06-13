@@ -38,6 +38,7 @@ def test_expected_exports() -> None:
         "BadRequestError",
         "Bulkhead",
         "BulkheadFullError",
+        "CircuitBreaker",
         "CircuitOpenError",
         "Client",
         "ClientError",
