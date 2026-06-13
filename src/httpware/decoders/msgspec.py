@@ -54,11 +54,13 @@ class MsgspecDecoder:
     """
 
     _msgspec_decoders: dict[type, "msgspec.json.Decoder[typing.Any]"]
+    _can_decode_results: dict[type, bool]
 
     def __init__(self) -> None:
         if not import_checker.is_msgspec_installed:
             raise ImportError(MISSING_DEPENDENCY_MESSAGE)
         self._msgspec_decoders = {}
+        self._can_decode_results = {}
 
     def _get_msgspec_decoder(self, model: type[T]) -> "msgspec.json.Decoder[T]":
         decoder = self._msgspec_decoders.get(model)
@@ -69,6 +71,23 @@ class MsgspecDecoder:
 
     def can_decode(self, model: type) -> bool:
         """Return True iff msgspec natively understands `model` end-to-end.
+
+        The verdict is memoized per `model`: the probe below (an uncached
+        `type_info` call plus a recursive tree walk) runs once per type, not on
+        every dispatch. Unhashable models skip the cache and probe fresh.
+        """
+        try:
+            cached = self._can_decode_results.get(model)
+        except TypeError:  # unhashable model — can't memoize, probe fresh
+            return self._probe_can_decode(model)
+        if cached is not None:
+            return cached
+        result = self._probe_can_decode(model)
+        self._can_decode_results[model] = result
+        return result
+
+    def _probe_can_decode(self, model: type) -> bool:
+        """Decide whether msgspec natively decodes `model` (the uncached path).
 
         msgspec builds a Decoder for almost any class via a generic CustomType
         fallback; the Decoder constructor does NOT raise on unsupported types

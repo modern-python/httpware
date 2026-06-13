@@ -26,11 +26,13 @@ class PydanticDecoder:
     """Decode raw response bytes into `model` via a per-instance cached `pydantic.TypeAdapter`."""
 
     _adapters: dict[type, TypeAdapter[typing.Any]]
+    _can_decode_results: dict[type, bool]
 
     def __init__(self) -> None:
         if not import_checker.is_pydantic_installed:
             raise ImportError(MISSING_DEPENDENCY_MESSAGE)
         self._adapters = {}
+        self._can_decode_results = {}
 
     def _get_adapter(self, model: type[T]) -> "TypeAdapter[T]":
         adapter = self._adapters.get(model)
@@ -41,6 +43,23 @@ class PydanticDecoder:
 
     def can_decode(self, model: type) -> bool:
         """Return True iff pydantic can build a schema for `model`.
+
+        The verdict is memoized per `model` so a rejection (which costs a
+        `PydanticSchemaGenerationError` round-trip) is not re-probed on every
+        dispatch. Unhashable models skip the cache and probe fresh.
+        """
+        try:
+            cached = self._can_decode_results.get(model)
+        except TypeError:  # unhashable model — can't memoize, probe fresh
+            return self._probe_can_decode(model)
+        if cached is not None:
+            return cached
+        result = self._probe_can_decode(model)
+        self._can_decode_results[model] = result
+        return result
+
+    def _probe_can_decode(self, model: type) -> bool:
+        """Decide whether pydantic can build a schema for `model` (uncached).
 
         Probes via `_get_adapter`; subsequent calls (including `decode`) reuse
         the cached `TypeAdapter`. Rejects `msgspec.Struct` subclasses —

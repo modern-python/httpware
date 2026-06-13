@@ -2,7 +2,7 @@
 
 import dataclasses
 from http import HTTPStatus
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import httpx2
 import msgspec
@@ -196,3 +196,37 @@ def test_msgspec_still_accepts_native_containers(model: type) -> None:
     plain builtin element types.
     """
     assert MsgspecDecoder().can_decode(model) is True
+
+
+def test_msgspec_can_decode_result_is_cached() -> None:
+    """Repeat can_decode calls reuse a cached verdict, not the per-dispatch probe."""
+    decoder = MsgspecDecoder()
+    with patch(
+        "httpware.decoders.msgspec.msgspec.inspect.type_info",
+        wraps=msgspec.inspect.type_info,
+    ) as spy:
+        assert decoder.can_decode(_Item) is True
+        assert decoder.can_decode(_Item) is True
+    assert spy.call_count == 1
+    assert decoder._can_decode_results[_Item] is True  # noqa: SLF001
+
+
+def test_msgspec_can_decode_caches_negative_verdict() -> None:
+    """A rejection is cached too, so repeat probes don't repeat the walk."""
+    decoder = MsgspecDecoder()
+    with patch(
+        "httpware.decoders.msgspec.msgspec.inspect.type_info",
+        wraps=msgspec.inspect.type_info,
+    ) as spy:
+        assert decoder.can_decode(_PydanticUser) is False
+        assert decoder.can_decode(_PydanticUser) is False
+    assert spy.call_count == 1
+    assert decoder._can_decode_results[_PydanticUser] is False  # noqa: SLF001
+
+
+def test_msgspec_can_decode_unhashable_model_does_not_raise() -> None:
+    """An unhashable model falls back to a fresh probe instead of raising from the cache."""
+    decoder = MsgspecDecoder()
+    decoder._can_decode_results = MagicMock()  # noqa: SLF001
+    decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
+    assert decoder.can_decode(_Item) is True

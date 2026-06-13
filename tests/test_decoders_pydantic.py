@@ -3,7 +3,7 @@
 import asyncio
 import concurrent.futures
 import dataclasses
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import msgspec
 import pydantic
@@ -211,3 +211,31 @@ def test_pydantic_can_decode_uses_cache() -> None:
     decoder.can_decode(User)
     assert len(decoder._adapters) == 1  # noqa: SLF001
     assert User in decoder._adapters  # noqa: SLF001
+
+
+def test_pydantic_can_decode_result_is_cached() -> None:
+    """Repeat can_decode calls reuse a cached verdict, not the per-dispatch probe."""
+    decoder = PydanticDecoder()
+    with patch.object(decoder, "_get_adapter", wraps=decoder._get_adapter) as spy:  # noqa: SLF001
+        assert decoder.can_decode(User) is True
+        assert decoder.can_decode(User) is True
+    assert spy.call_count == 1
+    assert decoder._can_decode_results[User] is True  # noqa: SLF001
+
+
+def test_pydantic_can_decode_caches_negative_verdict() -> None:
+    """A rejection is cached too, so repeat probes skip the schema-build round-trip."""
+    decoder = PydanticDecoder()
+    with patch.object(decoder, "_get_adapter", wraps=decoder._get_adapter) as spy:  # noqa: SLF001
+        assert decoder.can_decode(_Struct) is False
+        assert decoder.can_decode(_Struct) is False
+    assert spy.call_count == 1
+    assert decoder._can_decode_results[_Struct] is False  # noqa: SLF001
+
+
+def test_pydantic_can_decode_unhashable_model_does_not_raise() -> None:
+    """An unhashable model falls back to a fresh probe instead of raising from the cache."""
+    decoder = PydanticDecoder()
+    decoder._can_decode_results = MagicMock()  # noqa: SLF001
+    decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
+    assert decoder.can_decode(User) is True
