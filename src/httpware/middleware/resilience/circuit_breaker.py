@@ -27,7 +27,7 @@ import logging
 import threading
 import time
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 import httpx2
 
@@ -73,7 +73,7 @@ class _CircuitBreakerState:
         failure_threshold: int,
         reset_timeout: float,
         success_threshold: int,
-        failure_status_codes: frozenset[int] | None,
+        failure_status_codes: Collection[int] | None,
         now: Callable[[], float],
     ) -> None:
         if failure_threshold < 1:
@@ -85,8 +85,10 @@ class _CircuitBreakerState:
         self._failure_threshold = failure_threshold
         self._reset_timeout = reset_timeout
         self._success_threshold = success_threshold
+        # Accept any Collection (set, frozenset, list, ...) and freeze it so callers
+        # aren't forced to construct a frozenset just to satisfy the type checker.
         self._failure_status_codes = (
-            failure_status_codes if failure_status_codes is not None else _DEFAULT_FAILURE_STATUS_CODES
+            frozenset(failure_status_codes) if failure_status_codes is not None else _DEFAULT_FAILURE_STATUS_CODES
         )
         self._now = now
         self._state = _CircuitState.CLOSED
@@ -198,7 +200,7 @@ class AsyncCircuitBreaker:
         failure_threshold: int = 5,
         reset_timeout: float = 30.0,
         success_threshold: int = 1,
-        failure_status_codes: frozenset[int] | None = None,
+        failure_status_codes: Collection[int] | None = None,
         _now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state = _CircuitBreakerState(
@@ -262,7 +264,7 @@ class CircuitBreaker:
         failure_threshold: int = 5,
         reset_timeout: float = 30.0,
         success_threshold: int = 1,
-        failure_status_codes: frozenset[int] | None = None,
+        failure_status_codes: Collection[int] | None = None,
         _now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state = _CircuitBreakerState(

@@ -140,7 +140,7 @@ def test_network_error_counts_as_failure() -> None:
 
 def test_custom_failure_status_codes_trips_on_member() -> None:
     handler = _StatusSequence([503, 503])
-    breaker = CircuitBreaker(failure_threshold=2, failure_status_codes=frozenset({503}), _now=_Clock())
+    breaker = CircuitBreaker(failure_threshold=2, failure_status_codes={503}, _now=_Clock())  # plain set accepted
     with _client(handler, breaker=breaker) as client:
         for _ in range(2):
             with pytest.raises(ServiceUnavailableError):
@@ -152,7 +152,7 @@ def test_custom_failure_status_codes_trips_on_member() -> None:
 
 def test_custom_failure_status_codes_excludes_other_5xx() -> None:
     handler = _StatusSequence([500, 500, 500, 500])
-    breaker = CircuitBreaker(failure_threshold=2, failure_status_codes=frozenset({503}), _now=_Clock())
+    breaker = CircuitBreaker(failure_threshold=2, failure_status_codes=[503], _now=_Clock())  # list accepted too
     with _client(handler, breaker=breaker) as client:
         for _ in range(4):
             with pytest.raises(InternalServerError):
