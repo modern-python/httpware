@@ -2,7 +2,7 @@
 
 `httpware` raises typed exceptions automatically — everything inherits `ClientError`, and HTTP responses with 4xx/5xx status raise status-keyed `StatusError` subclasses without you having to call `response.raise_for_status()`.
 
-For the resilience-specific errors (`RetryBudgetExhaustedError`, `BulkheadFullError`) see the [Resilience reference](resilience.md).
+For the resilience-specific errors (`RetryBudgetExhaustedError`, `BulkheadFullError`, `CircuitOpenError`) see the [Resilience reference](resilience.md).
 
 The status-keyed exception tree is shared between `Client` and `AsyncClient`. Catching `NotFoundError` in sync code uses the same import as catching it in async code (`from httpware import NotFoundError`).
 
@@ -27,6 +27,7 @@ ClientError                          (catch-all for anything httpware raises)
 │       └── ServiceUnavailableError (503)
 ├── RetryBudgetExhaustedError       (a retry was needed but the budget refused)
 ├── BulkheadFullError                (acquire_timeout elapsed before a slot opened)
+├── CircuitOpenError                 (circuit is OPEN or HALF_OPEN probe slot taken; request not forwarded)
 ├── DecodeError                      (response_model= decoder failed; HTTP call itself succeeded)
 └── MissingDecoderError              (no registered decoder claims response_model=; fires before the HTTP call)
 ```
@@ -118,6 +119,9 @@ exc.response.request.method   # the HTTP method
 `BulkheadFullError` carries:
 - `max_concurrent: int` — the configured cap
 - `acquire_timeout: float | None` — the configured timeout
+
+`CircuitOpenError` carries:
+- `retry_after: float | None` — seconds until the circuit will next admit a probe; `None` when a concurrent probe is already in flight (HALF_OPEN slot taken).
 
 Use these for caller-side logging / alerting:
 

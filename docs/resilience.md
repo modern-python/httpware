@@ -6,7 +6,7 @@
 - **`RetryBudget`** — Finagle-style token bucket; safe to share across sync `Client` and `AsyncClient` in the same process. (Finagle-style bounds the global retry rate to prevent retry storms when downstreams degrade.)
 - **`Bulkhead` / `AsyncBulkhead`** — concurrency limiter with bounded acquire-wait (`threading.Semaphore` and `asyncio.Semaphore` respectively)
 
-The canonical composition is `middleware=[AsyncBulkhead(...), AsyncRetry()]` — `AsyncBulkhead` outside `AsyncRetry` so one slot covers all retry attempts of a single call. Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
+A key ordering constraint: `AsyncBulkhead` must sit inside `AsyncRetry` so one slot covers all retry attempts of a single call. For the full recommended ordering across all four primitives, see [Composition](#composition). Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
 
 ## `AsyncRetry`
 
