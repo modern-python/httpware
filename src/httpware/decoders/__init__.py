@@ -19,6 +19,13 @@ class ResponseDecoder(Protocol):
         list ordering encodes the caller's preference for shared shapes.
         Native types of another library (e.g. `PydanticDecoder` vs
         `msgspec.Struct`) MUST be rejected.
+
+        `can_decode` MUST NOT raise. It runs at dispatch time — before the HTTP
+        call and outside the `DecodeError` wrap that protects `decode` — so an
+        exception here escapes the `ClientError` contract rather than being
+        translated. A decoder that cannot determine support for `model` must
+        return False (decline), not raise; the built-in decoders treat any
+        probe failure as False.
         """
         ...
 
