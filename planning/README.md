@@ -70,7 +70,7 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-_None._
+- **[docs-accuracy-fixes](changes/active/2026-06-13.04-docs-accuracy-fixes/change.md)** (draft, 2026-06-13) — Fix the 5 verified factual errors from the [docs audit](audits/2026-06-13-docs-audit.md): RetryBudget formula, modern-di 2.x recipe, contributing-doc CI/grep claim, `just lint` comment, middleware stable-contracts list (+ AsyncTimeout non-finite wording).
 
 ### Archived (shipped)
 

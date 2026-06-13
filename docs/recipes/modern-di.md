@@ -20,17 +20,26 @@ class ServiceClients(Group):
 
 
 async def main() -> None:
-    async with Container(scope=Scope.APP, groups=[ServiceClients]) as container:
-        client = await container.resolve(AsyncClient)
+    container = Container(scope=Scope.APP, groups=[ServiceClients])
+    try:
+        client = container.resolve(AsyncClient)
         response = await client.get("/users/1")
         print(response.status_code)
+    finally:
+        await container.close_async()  # runs the AsyncClient.aclose finalizer
 ```
+
+> **modern-di 2.x.** Resolution is sync — `container.resolve(...)`, no `await`.
+> The root container is created plainly and torn down with `await
+> container.close_async()` (the `async with` form is for
+> `build_child_container(...)`, not the root). On modern-di 1.x, resolution was
+> awaited; pin accordingly if you are still on 1.x.
 
 Breaking that down:
 
 - **`Scope.APP`** ties the client to the application lifetime. One client per process; the connection pool is reused across all calls.
 - **`cache_settings=providers.CacheSettings(...)`** is what makes the provider a singleton. Without it, `Factory` returns a fresh `AsyncClient` on every resolve.
-- **`finalizer=AsyncClient.aclose`** is the unbound async method. `modern-di` detects it as a coroutine function (via `inspect.iscoroutinefunction`) and `await`s it on container teardown.
+- **`finalizer=AsyncClient.aclose`** is the unbound async method. `modern-di` detects the async finalizer and `await`s it on container teardown (here, on `close_async()`).
 
 A common first instinct here is `finalizer=lambda c: c.aclose()`. **That does not work** — the lambda itself is sync, so `modern-di` calls it synchronously and discards the returned coroutine unawaited. The underlying connection pool leaks. Pass the unbound async method directly, or wrap in `async def`.
 
@@ -96,10 +105,13 @@ class ServiceClients(Group):
 
 
 async def main() -> None:
-    async with Container(scope=Scope.APP, groups=[ServiceClients]) as container:
-        users = await container.resolve(UserApi)
-        billing = await container.resolve(BillingApi)
+    container = Container(scope=Scope.APP, groups=[ServiceClients])
+    try:
+        users = container.resolve(UserApi)
+        billing = container.resolve(BillingApi)
         # ... use them
+    finally:
+        await container.close_async()
 ```
 
 A couple of notes:

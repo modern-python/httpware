@@ -67,8 +67,12 @@ A Finagle-style token bucket bounding retry rate. Each request deposits a token;
 ### The token-bucket formula
 
 ```
-ceiling = int(len(deposits_in_window) * percent_can_retry) + int(min_retries_per_sec * ttl)
+ceiling = ceil(len(deposits_in_window) * percent_can_retry) + int(min_retries_per_sec * ttl)
 ```
+
+The percent term rounds **up** (`math.ceil`), so even a handful of recent
+deposits permits at least one retry above the floor; the floor term truncates
+(`int`).
 
 A withdrawal fails when `len(withdrawn_in_window) >= ceiling`.
 
@@ -233,7 +237,7 @@ Bounds total wall-clock time across the entire inner pipeline. Place it outermos
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `timeout` | **REQUIRED** | Overall deadline in seconds. Must be `> 0`; `≤0` raises `ValueError`. |
+| `timeout` | **REQUIRED** | Overall deadline in seconds. Must be a finite number `> 0`; a non-finite (`inf`/`nan`) or `≤0` value raises `ValueError`. |
 
 **This is not a per-call timeout.** httpx2's connect/read/write/pool timeouts are the right tool for bounding a single outbound call; `AsyncTimeout` doesn't duplicate them. What httpx2 cannot bound is the total wall-clock across a whole retry sequence — `AsyncTimeout` fills that gap.
 

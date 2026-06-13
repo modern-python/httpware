@@ -8,7 +8,7 @@ Thank you for your interest in contributing. `httpware` is an open-source resili
 git clone https://github.com/modern-python/httpware.git
 cd httpware
 just install        # uv lock --upgrade && uv sync --all-extras --frozen --group lint
-just lint           # ruff format + ruff check + ty check
+just lint           # eof-fixer + ruff format + ruff check + ty check
 just test           # pytest with coverage
 ```
 
@@ -29,7 +29,9 @@ just test           # pytest with coverage
 
 ## Architecture invariants
 
-These are enforced by CI grep gates. Do not break them in pull requests:
+These are project invariants. The CI lint pass (`just lint-ci` — `ruff` + `ty`)
+catches what the linters can see (e.g. `print()` via ruff `T20`); the rest are
+enforced in code review. Do not break them in pull requests:
 
 - No `httpx2._*` (private API) usage anywhere in the library.
 - No `from __future__ import annotations`.
