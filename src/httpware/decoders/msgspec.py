@@ -15,6 +15,36 @@ MISSING_DEPENDENCY_MESSAGE = "MsgspecDecoder requires the 'msgspec' extra. Insta
 T = TypeVar("T")
 
 
+def _contains_custom_type(info: "msgspec.inspect.Type") -> bool:
+    """Return True if `info` is a CustomType or nests one in its parameters.
+
+    Walks generic-container parameterization (list/dict/set/tuple/union element
+    types) by visiting any attribute that is itself a `msgspec.inspect.Type` or a
+    tuple of them. It deliberately does NOT descend into `StructType`/dataclass
+    fields: those expose `fields` as `Field` objects (not `Type`), so the walk
+    stops at the boundary of a type msgspec natively owns. That boundary is what
+    makes the walk both correct (a Struct is a valid target) and safe against
+    infinite recursion on self-referential struct definitions.
+    """
+    if isinstance(info, msgspec.inspect.CustomType):
+        return True
+    for name in dir(info):
+        if name.startswith("_"):
+            continue
+        value = getattr(info, name, None)
+        if isinstance(value, msgspec.inspect.Type):
+            if _contains_custom_type(value):
+                return True
+        elif (
+            isinstance(value, tuple)
+            and value
+            and all(isinstance(item, msgspec.inspect.Type) for item in value)
+            and any(_contains_custom_type(item) for item in value)
+        ):
+            return True
+    return False
+
+
 class MsgspecDecoder:
     """Decode raw response bytes via a per-instance cached `msgspec.json.Decoder(model)`.
 
@@ -38,18 +68,19 @@ class MsgspecDecoder:
         return decoder
 
     def can_decode(self, model: type) -> bool:
-        """Return True iff msgspec natively understands `model`.
+        """Return True iff msgspec natively understands `model` end-to-end.
 
         msgspec builds a Decoder for almost any class via a generic CustomType
-        fallback; the Decoder constructor itself does NOT raise on unsupported
-        types (e.g. pydantic.BaseModel). We use msgspec.inspect.type_info
-        to detect the fallback and reject CustomType results explicitly.
+        fallback; the Decoder constructor does NOT raise on unsupported types
+        (e.g. pydantic.BaseModel, or a container parameterized by one). We walk
+        msgspec.inspect.type_info and reject if a CustomType appears anywhere in
+        the type tree, so MissingDecoderError fires before a request is sent.
         """
         try:
             info = msgspec.inspect.type_info(model)
         except Exception:  # noqa: BLE001 — can_decode is a probe; any failure means no
             return False
-        if isinstance(info, msgspec.inspect.CustomType):
+        if _contains_custom_type(info):
             return False
         try:
             self._get_msgspec_decoder(model)
