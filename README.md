@@ -50,7 +50,7 @@ with Client(base_url="https://example.test") as client:
     print(response.json())
 ```
 
-Typed decoding via `response_model=` works in both worlds — requires `pip install httpware[pydantic]`. Decode failures (malformed body, schema mismatch) raise `httpware.DecodeError`, a `ClientError` subclass — so `except httpware.ClientError` covers them alongside transport and status errors.
+Typed decoding via `response_model=` works in both worlds — install either `pip install httpware[pydantic]` or `pip install httpware[msgspec]` (or both; pydantic is tried first when both are present). Decode failures (malformed body, schema mismatch) raise `httpware.DecodeError`, a `ClientError` subclass — so `except httpware.ClientError` covers them alongside transport and status errors.
 
 ```python
 from httpware import AsyncClient

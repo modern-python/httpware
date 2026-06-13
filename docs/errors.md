@@ -163,10 +163,15 @@ Raised by `send()` / `send_with_response()` / verb methods when `response_model=
 - `model: type` — the `response_model=` value that wasn't claimed.
 - `registered_names: tuple[str, ...]` — class names of the registered decoders that all rejected the model. Empty tuple means no decoders were registered.
 
-Corrective action depends on the message hint:
+The message reads `no decoder for response_model=<Model>: <hint>`, and the corrective action depends on the hint. The two hints, verbatim:
 
-- `no decoders registered. Install pip install httpware[pydantic] or pip install httpware[msgspec], or pass decoders=[...] explicitly.` — install an extra or pass an explicit decoder list.
-- `registered decoders (PydanticDecoder + MsgspecDecoder) all rejected it.` — your `response_model` type is exotic enough that neither built-in claims it. Pass a custom `ResponseDecoder` via `decoders=[...]`.
+- **No decoders were registered** — install an extra or pass an explicit decoder list:
+
+        no decoders registered. Install `pip install httpware[pydantic]` or `pip install httpware[msgspec]`, or pass decoders=[...] explicitly.
+
+- **Registered decoders all rejected the model** — your `response_model` type is exotic enough that neither built-in claims it; pass a custom `ResponseDecoder` via `decoders=[...]`:
+
+        registered decoders (PydanticDecoder + MsgspecDecoder) all rejected it. Pass a custom decoder via decoders=[...].
 
 Unlike `DecodeError`, this error fires *before* the HTTP request — no traffic is sent.
 
