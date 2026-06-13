@@ -1,4 +1,4 @@
-"""Resilience primitives: Bulkhead, Retry, RetryBudget, AsyncTimeout."""
+"""Resilience primitives: Bulkhead/AsyncBulkhead, Retry/AsyncRetry, RetryBudget, AsyncTimeout."""
 
 from httpware.middleware.resilience.budget import RetryBudget
 from httpware.middleware.resilience.bulkhead import AsyncBulkhead, Bulkhead

@@ -69,6 +69,21 @@ async def test_inner_timeout_propagates_unchanged() -> None:
     assert "overall timeout" not in str(info.value)
 
 
+async def test_raw_builtin_timeout_from_next_propagates_by_identity() -> None:
+    """A raw builtins.TimeoutError from next (e.g. a nested asyncio.timeout) is re-raised as-is."""
+    inner = builtins.TimeoutError("nested asyncio timeout")
+
+    async def _next(_request: httpx2.Request) -> httpx2.Response:
+        raise inner
+
+    middleware = AsyncTimeout(timeout=10.0)
+    with pytest.raises(builtins.TimeoutError) as info:
+        await middleware(_request(), _next)
+
+    assert info.value is inner  # propagated by identity, not re-wrapped
+    assert "overall timeout" not in str(info.value)
+
+
 def test_zero_timeout_rejected() -> None:
     with pytest.raises(ValueError, match="timeout must be > 0"):
         AsyncTimeout(timeout=0)
