@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-13
 slug: portable-planning-convention
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 55
+outcome: 'Shipped via PR #55 — two-axis convention adopted: architecture/ truth + planning/changes/ bundles; engineering.md split into 8 files; 40 pairs archived.'
 ---
 
 # Design: Adopt the portable two-axis planning convention

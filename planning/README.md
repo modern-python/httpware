@@ -70,12 +70,11 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-- **[portable-planning-convention](changes/active/2026-06-13.03-portable-planning-convention/design.md)**
-  (2026-06-13) — Adopt the portable two-axis convention: per-capability
-  `architecture/` truth files + `changes/` bundles, full history backfill,
-  byte-identical Conventions. *This change.*
+_None._
 
 ### Archived (shipped)
+
+- **[portable-planning-convention](changes/archive/2026-06-13.03-portable-planning-convention/design.md)** (#55, 2026-06-13) — Adopt the portable two-axis convention: per-capability `architecture/` truth files + `changes/` bundles, full history backfill, byte-identical Conventions.
 - **[circuit-breaker-and-timeout](changes/archive/2026-06-13.02-circuit-breaker-and-timeout/design.md)** (#51, 2026-06-13) — Shipped 0.10.0 — CircuitBreaker + AsyncTimeout
 - **[msgspec-nested-customtype-fix](changes/archive/2026-06-13.01-msgspec-nested-customtype-fix/design.md)** (#43, 2026-06-13) — Shipped 0.9.1 — nested-CustomType guard
 - **[delta-audit](changes/archive/2026-06-12.01-delta-audit/design.md)** (#43, 2026-06-12) — 0.9.0 delta audit; closed via 0.9.1
