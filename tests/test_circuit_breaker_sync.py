@@ -70,6 +70,7 @@ def test_closed_passes_through() -> None:
     with _client(handler, breaker=breaker) as client:
         response = client.get("https://example.test/x")
     assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 1
 
 
 def test_open_emits_opened_event_and_rejects(caplog: pytest.LogCaptureFixture) -> None:
@@ -87,8 +88,14 @@ def test_open_emits_opened_event_and_rejects(caplog: pytest.LogCaptureFixture) -
     assert info.value.retry_after is not None
     assert handler.calls == 2  # noqa: PLR2004
     records = [r for r in caplog.records if r.name == "httpware.circuit_breaker"]
-    assert any("opened" in r.message for r in records)
-    assert any("rejecting" in r.message for r in records)
+    opened = [r for r in records if "opened" in r.message]
+    rejected = [r for r in records if "rejecting" in r.message]
+    assert len(opened) == 1
+    assert opened[0].failure_threshold == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert opened[0].failures == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert len(rejected) == 1
+    assert rejected[0].retry_after is not None  # ty: ignore[unresolved-attribute]
+    assert rejected[0].method == "GET"  # ty: ignore[unresolved-attribute]
 
 
 def test_success_resets_failure_streak() -> None:
@@ -259,5 +266,6 @@ def test_half_open_second_concurrent_request_rejected_with_none_retry_after() ->
         rejected.append(info.value)
         release_probe.set()
         thread.join(timeout=5.0)
+        assert not thread.is_alive()
 
     assert rejected[0].retry_after is None
