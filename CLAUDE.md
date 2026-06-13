@@ -81,7 +81,7 @@ src/httpware/
 Three documented internal boundaries. AI agents must respect them — never cross a seam except through its documented protocol.
 
 1. **Seam A** — `Client`/`AsyncClient` ↔ `Middleware`/`AsyncMiddleware` — middleware chain composed at `Client.__init__` and `AsyncClient.__init__`, frozen for the client's lifetime. Internal terminal calls `httpx2.Client.send` or `httpx2.AsyncClient.send`, maps exceptions, raises `StatusError` on 4xx/5xx. Sync and async surfaces are kept at parity.
-2. **Seam B** — `Client`/`AsyncClient` ↔ `ResponseDecoder` — called when `response_model` is provided. Signature: `decode(content: bytes, model: type[T]) -> T`. Implementations of both `send` methods call the decoder identically.
+2. **Seam B** — `Client`/`AsyncClient` ↔ `ResponseDecoder` list — both clients take `decoders: Sequence[ResponseDecoder] | None` (a *list*, not a single decoder; `None` resolves against installed extras, pydantic-first). When `response_model` is provided, `send`/`send_with_response` (sync and async alike) walk the list and the first decoder whose `can_decode(model: type) -> bool` returns True runs `decode(content: bytes, model: type[T]) -> T`; if no decoder claims the model, `MissingDecoderError` is raised *before* the HTTP call. Decoder exceptions are wrapped as `DecodeError` at the seam. Full contract: [`engineering.md`](planning/engineering.md) §Seam B.
 3. **Seam C** — `httpware` ↔ optional extras — each opt-in dependency imported only inside its dedicated module.
 
 ## Testing
