@@ -12,6 +12,7 @@ from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
     BulkheadFullError,
+    CircuitOpenError,
     ClientError,
     ClientStatusError,
     ConflictError,
@@ -106,6 +107,7 @@ def test_status_error_repr_strips_userinfo() -> None:
 
 
 _NOT_FOUND = 404
+_RETRY_AFTER_2_5 = 2.5
 _RETRY_ATTEMPTS_3 = 3
 _RETRY_ATTEMPTS_2 = 2
 _RETRY_ATTEMPTS_5 = 5
@@ -357,3 +359,38 @@ def test_missing_decoder_error_pickle_roundtrip() -> None:
     assert isinstance(revived, MissingDecoderError)
     assert revived.model is _Foo
     assert revived.registered_names == ("PydanticDecoder", "MsgspecDecoder")
+
+
+def test_circuit_open_error_is_client_error() -> None:
+    exc = CircuitOpenError(retry_after=_RETRY_AFTER_2_5)
+    assert isinstance(exc, ClientError)
+    assert exc.retry_after == _RETRY_AFTER_2_5
+
+
+def test_circuit_open_error_accepts_none_retry_after() -> None:
+    exc = CircuitOpenError(retry_after=None)
+    assert exc.retry_after is None
+
+
+def test_circuit_open_error_summary_with_retry_after() -> None:
+    exc = CircuitOpenError(retry_after=_RETRY_AFTER_2_5)
+    assert str(exc) == "circuit open (retry_after=2.500s)"
+
+
+def test_circuit_open_error_summary_with_none_retry_after() -> None:
+    exc = CircuitOpenError(retry_after=None)
+    assert str(exc) == "circuit open (a probe request is already in flight)"
+
+
+def test_circuit_open_error_pickleable_with_float() -> None:
+    exc = CircuitOpenError(retry_after=_RETRY_AFTER_2_5)
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(restored, CircuitOpenError)
+    assert restored.retry_after == _RETRY_AFTER_2_5
+
+
+def test_circuit_open_error_pickleable_with_none() -> None:
+    exc = CircuitOpenError(retry_after=None)
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
+    assert isinstance(restored, CircuitOpenError)
+    assert restored.retry_after is None
