@@ -1,9 +1,16 @@
 # httpware
 
-[![Test](https://github.com/modern-python/httpware/actions/workflows/ci.yml/badge.svg)](https://github.com/modern-python/httpware/actions/workflows/ci.yml)
-[![PyPI version](https://badge.fury.io/py/httpware.svg)](https://pypi.org/project/httpware/)
-[![Python versions](https://img.shields.io/pypi/pyversions/httpware.svg)](https://pypi.org/project/httpware/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![PyPI version](https://img.shields.io/pypi/v/httpware.svg)](https://pypi.org/project/httpware/)
+[![Supported Python versions](https://img.shields.io/pypi/pyversions/httpware.svg)](https://pypi.org/project/httpware/)
+[![Downloads](https://img.shields.io/pypi/dm/httpware.svg)](https://pypistats.org/packages/httpware)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/modern-python/httpware/actions/workflows/ci.yml)
+[![CI](https://github.com/modern-python/httpware/actions/workflows/ci.yml/badge.svg)](https://github.com/modern-python/httpware/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/modern-python/httpware.svg)](https://github.com/modern-python/httpware/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/modern-python/httpware)](https://github.com/modern-python/httpware/stargazers)
+[![Context7](https://img.shields.io/badge/Context7-docs-blue)](https://context7.com/modern-python/httpware)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 
 **A Python HTTP client framework with sync and async clients for building resilient service clients.**
 
@@ -138,14 +145,15 @@ pip install httpware[otel]
 
 When installed, `_emit_event` calls `trace.get_current_span().add_event(name, attributes=...)` automatically. We never create our own spans; for HTTP-level tracing install `opentelemetry-instrumentation-httpx` separately.
 
-## 📚 [Documentation](https://httpware.modern-python.org)
-
 ## 🗒️ [Release notes](https://github.com/modern-python/httpware/releases)
+
+## 📚 [Documentation](https://httpware.modern-python.org)
 
 ## 📦 [PyPI](https://pypi.org/project/httpware)
 
-## 📝 [License](https://github.com/modern-python/httpware/blob/main/LICENSE)
+## 📝 [License](LICENSE)
 
 ## Part of `modern-python`
 
-Browse the full list of templates and libraries in [`modern-python`](https://github.com/modern-python) — see the org profile for the categorized index.
+Browse the full list of templates and libraries in
+[`modern-python`](https://github.com/modern-python) — see the org profile for the categorized index.
