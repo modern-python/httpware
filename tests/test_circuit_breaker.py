@@ -120,9 +120,11 @@ async def test_open_emits_opened_event_and_rejects(caplog: pytest.LogCaptureFixt
     opened = [r for r in records if "opened" in r.message]
     rejected = [r for r in records if "rejecting" in r.message]
     assert len(opened) == 1
+    assert opened[0].event == "circuit.opened"  # ty: ignore[unresolved-attribute]
     assert opened[0].failure_threshold == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
     assert opened[0].failures == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
     assert len(rejected) == 1
+    assert rejected[0].event == "circuit.rejected"  # ty: ignore[unresolved-attribute]
     assert rejected[0].retry_after is not None  # ty: ignore[unresolved-attribute]
     assert rejected[0].method == "GET"  # ty: ignore[unresolved-attribute]
 
@@ -285,25 +287,136 @@ async def test_reset_timeout_admits_probe_then_closes(caplog: pytest.LogCaptureF
             response = await client.get("https://example.test/x")  # probe -> 200 -> CLOSED
     assert response.status_code == HTTPStatus.OK
     assert handler.calls == 3  # noqa: PLR2004 — 2 failures + 1 probe
-    messages = [r.message for r in caplog.records if r.name == "httpware.circuit_breaker"]
+    records = [r for r in caplog.records if r.name == "httpware.circuit_breaker"]
+    assert any(r.event == "circuit.half_open" for r in records)  # ty: ignore[unresolved-attribute]
+    assert any(r.event == "circuit.closed" for r in records)  # ty: ignore[unresolved-attribute]
+    messages = [r.message for r in records]
     assert any("half-open" in m for m in messages)
     assert any("closed" in m for m in messages)
 
 
-async def test_probe_failure_reopens_circuit() -> None:
+async def test_probe_failure_reopens_circuit(caplog: pytest.LogCaptureFixture) -> None:
     clock = _Clock()
     handler = _StatusSequence([500, 500, 500])  # open after 2; probe (3rd) fails -> reopen
     breaker = AsyncCircuitBreaker(failure_threshold=2, reset_timeout=10.0, _now=clock)
     async with _client(handler, breaker=breaker) as client:
+        with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
+            for _ in range(2):
+                with pytest.raises(InternalServerError):
+                    await client.get("https://example.test/x")
+            clock.advance(10.0)
+            with pytest.raises(InternalServerError):  # probe runs, fails
+                await client.get("https://example.test/x")
+            with pytest.raises(CircuitOpenError):  # reopened; immediate retry rejected
+                await client.get("https://example.test/x")
+    assert handler.calls == 3  # noqa: PLR2004 — 2 failures + 1 probe-failure
+    # Probe failure emits circuit.opened with failures=1 (the single probe that reopened it).
+    reopen_records = [
+        r
+        for r in caplog.records
+        if r.name == "httpware.circuit_breaker"
+        and r.event == "circuit.opened"  # ty: ignore[unresolved-attribute]
+        and r.failures == 1  # ty: ignore[unresolved-attribute]
+    ]
+    assert len(reopen_records) == 1
+
+
+async def test_open_reject_retry_after_value() -> None:
+    """retry_after is exactly reset_timeout - elapsed (not just non-None)."""
+    clock = _Clock()
+    handler = _StatusSequence([500, 500])
+    breaker = AsyncCircuitBreaker(failure_threshold=2, reset_timeout=30.0, _now=clock)
+    async with _client(handler, breaker=breaker) as client:
         for _ in range(2):
             with pytest.raises(InternalServerError):
                 await client.get("https://example.test/x")
-        clock.advance(10.0)
-        with pytest.raises(InternalServerError):  # probe runs, fails
+        clock.advance(10.0)  # 10s into a 30s open window
+        with pytest.raises(CircuitOpenError) as info:
             await client.get("https://example.test/x")
-        with pytest.raises(CircuitOpenError):  # reopened; immediate retry rejected
+    assert info.value.retry_after == 20.0  # noqa: PLR2004  # 30 - 10, exact
+    # The max(0.0, …) floor is only reachable if elapsed > reset_timeout while still
+    # OPEN, but the lazy OPEN→HALF_OPEN transition in admit() fires as soon as
+    # elapsed >= reset_timeout — so the circuit is never both OPEN and elapsed >
+    # reset_timeout.  The floor is defensive dead code; no separate floor test needed.
+
+
+async def test_429_resets_failure_streak() -> None:
+    """A 429 response is treated as success, resetting the failure streak."""
+    handler = _StatusSequence([500, 429, 500, 500])
+    breaker = AsyncCircuitBreaker(failure_threshold=2, _now=_Clock())
+    async with _client(handler, breaker=breaker) as client:
+        with pytest.raises(InternalServerError):
+            await client.get("https://example.test/x")  # streak=1
+        with pytest.raises(RateLimitedError):
+            await client.get("https://example.test/x")  # 429 -> success, resets streak to 0
+        with pytest.raises(InternalServerError):
+            await client.get("https://example.test/x")  # streak=1 again
+        with pytest.raises(InternalServerError):
+            await client.get("https://example.test/x")  # streak=2 -> opens
+    assert handler.calls == 4  # noqa: PLR2004  # all four reached the transport; never short-circuited
+
+
+async def test_success_threshold_probe_failure_mid_streak_reopens() -> None:
+    """A probe failure mid-streak resets consecutive_successes; two fresh successes required."""
+    clock = _Clock()
+    # Sequence: 2x500 to open; probe-1=200 (streak=1); probe-2=500 (reopen, streak=0);
+    # advance again; probe-3=200 (streak=1); probe-4=200 (streak=2 >= threshold -> CLOSED);
+    # one more 200 to confirm CLOSED.
+    handler = _StatusSequence([500, 500, 200, 500, 200, 200, 200])
+    breaker = AsyncCircuitBreaker(failure_threshold=2, success_threshold=2, reset_timeout=5.0, _now=clock)
+    async with _client(handler, breaker=breaker) as client:
+        for _ in range(2):
+            with pytest.raises(InternalServerError):
+                await client.get("https://example.test/x")
+        clock.advance(5.0)
+        await client.get("https://example.test/x")  # probe-1: 200 -> HALF_OPEN streak=1
+        with pytest.raises(InternalServerError):  # probe-2: 500 -> reopen, streak=0
             await client.get("https://example.test/x")
-    assert handler.calls == 3  # noqa: PLR2004 — 2 failures + 1 probe-failure
+        clock.advance(5.0)
+        await client.get("https://example.test/x")  # probe-3: 200 -> streak=1
+        await client.get("https://example.test/x")  # probe-4: 200 -> streak=2 -> CLOSED
+        response = await client.get("https://example.test/x")  # CLOSED, passes through
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 7  # noqa: PLR2004  # 2+2+1+1+1
+
+
+async def test_reset_timeout_zero_admits_probe_immediately() -> None:
+    """With reset_timeout=0, the circuit admits a probe immediately (elapsed >= 0 always)."""
+    handler = _StatusSequence([500, 200])
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=0.0, _now=_Clock())
+    async with _client(handler, breaker=breaker) as client:
+        with pytest.raises(InternalServerError):
+            await client.get("https://example.test/x")  # opens
+        # No clock advance needed — reset_timeout=0, so elapsed >= 0 is immediately true.
+        response = await client.get("https://example.test/x")  # admitted as probe
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 2  # noqa: PLR2004  # both reached the transport
+
+
+async def test_empty_failure_status_codes_ignores_5xx_trips_on_network_error() -> None:
+    """With failure_status_codes=[], no status ever counts; only NetworkError trips the breaker."""
+    handler = _StatusSequence([500, 500, 500])
+    breaker = AsyncCircuitBreaker(failure_threshold=2, failure_status_codes=[], _now=_Clock())
+    async with _client(handler, breaker=breaker) as client:
+        for _ in range(3):
+            with pytest.raises(InternalServerError):
+                await client.get("https://example.test/x")
+    assert handler.calls == 3  # noqa: PLR2004  # never opened — 500 not in empty set
+
+    def _raise(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "connect failed"
+        raise httpx2.ConnectError(msg)
+
+    breaker2 = AsyncCircuitBreaker(failure_threshold=2, failure_status_codes=[], _now=_Clock())
+    async with AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(_raise)),
+        middleware=[breaker2],
+    ) as client2:
+        for _ in range(2):
+            with pytest.raises(NetworkError):
+                await client2.get("https://example.test/x")
+        with pytest.raises(CircuitOpenError):
+            await client2.get("https://example.test/x")
 
 
 async def test_success_threshold_requires_multiple_probes() -> None:

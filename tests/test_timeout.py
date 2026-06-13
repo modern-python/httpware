@@ -49,6 +49,7 @@ async def test_expiry_raises_httpware_timeout_chained_from_builtin(
     records = [r for r in caplog.records if r.name == "httpware.timeout"]
     assert len(records) == 1
     assert records[0].levelno == logging.WARNING
+    assert records[0].event == "timeout.exceeded"  # ty: ignore[unresolved-attribute]
     assert records[0].timeout == 0.01  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
     assert records[0].method == "GET"  # ty: ignore[unresolved-attribute]
     assert "example.test/x" in records[0].url  # ty: ignore[unresolved-attribute]
