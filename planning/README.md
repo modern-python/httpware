@@ -65,6 +65,7 @@ Templates live in [`_templates/`](_templates/).
 `date`, `slug`, `supersedes`, `superseded_by`, `pr`, `outcome`.
 `plan.md`: `status`, `date`, `slug`, `spec`, `pr`. Files in `architecture/`
 carry **no** frontmatter — living prose, dated by git.
+
 ## Index
 
 ### Active
