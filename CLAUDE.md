@@ -8,14 +8,16 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 **Where to find what:**
 
-- [`planning/engineering.md`](planning/engineering.md) — the distilled design reference: invariants and *why*, the three protocol seams, exception contract, module layout, testing patterns, optional-extras pattern, remaining roadmap. Read this before adding any new module or extension point.
-- [`planning/deferred-work.md`](planning/deferred-work.md) — review-surfaced items that are real but not actionable now.
-- [`planning/specs/`](planning/specs/) and [`planning/plans/`](planning/plans/) — per-feature design specs and implementation plans (active work).
-- [`planning/archive/specs/`](planning/archive/specs/) and [`planning/archive/plans/`](planning/archive/plans/) — shipped or superseded work, kept for historical context.
-- [`planning/retros/`](planning/retros/) — release- and epic-level retrospectives.
+- [`architecture/`](architecture/) (repo root) — the per-capability living truth (overview, client, middleware, decoders, errors, resilience, optional extras, testing); the promotion target on every ship. **Read the relevant file before changing that capability.**
+- [`planning/README.md`](planning/README.md) — the planning conventions (two axes, change bundles, three lanes, frontmatter) + the change Index.
+- [`planning/changes/{active,archive}/<YYYY-MM-DD.NN-slug>/`](planning/changes/) — per-change bundles (`design.md` + `plan.md`, or `change.md` for the lightweight lane).
+- [`planning/audits/`](planning/audits/) — findings reports + `scripts/` tooling.
+- [`planning/retros/`](planning/retros/) — retrospectives.
 - [`planning/releases/`](planning/releases/) — per-version release notes (also published on GitHub Releases).
+- [`planning/deferred.md`](planning/deferred.md) — review-surfaced, not-yet-actionable items.
+- [`planning/_templates/`](planning/_templates/) — design/plan/change templates.
 
-**Per-feature workflow:** brainstorming → spec in `planning/specs/` → writing-plans → plan in `planning/plans/` → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
+**Per-feature workflow:** brainstorming → `design.md` in `planning/changes/active/<id>/` → writing-plans → `plan.md` in the same bundle → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. On ship, promote the conclusions into the affected `architecture/<capability>.md` by hand and move the bundle to `planning/changes/archive/`. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
 
 ## Commands
 
@@ -61,7 +63,7 @@ These are non-negotiable. CI rejects PRs that violate them.
 - **Private symbols**: `_leading_underscore`. Cross-module private code lives in `_internal/`.
 - **Imports**: absolute paths inside `src/httpware/`; relative imports only within the same subpackage.
 - **Docstrings**: PEP 257. Module/class/public-method required; `D1` (missing docstring) is ignored.
-- **Exception construction**: status-keyed `StatusError` subclasses (the 4xx/5xx tree) take a single positional `response: httpx2.Response` and do NOT override `__init__` — all fields via `exc.response.*`. This rule scopes to `StatusError` only; non-status `ClientError` subclasses such as `DecodeError`, `MissingDecoderError`, `BulkheadFullError`, and `RetryBudgetExhaustedError` deliberately define `__init__` with keyword-only fields. See `engineering.md` §4.
+- **Exception construction**: status-keyed `StatusError` subclasses (the 4xx/5xx tree) take a single positional `response: httpx2.Response` and do NOT override `__init__` — all fields via `exc.response.*`. This rule scopes to `StatusError` only; non-status `ClientError` subclasses such as `DecodeError`, `MissingDecoderError`, `BulkheadFullError`, `RetryBudgetExhaustedError`, and `CircuitOpenError` deliberately define `__init__` with keyword-only fields. See `architecture/errors.md`.
 
 ## Module layout
 
@@ -81,7 +83,7 @@ src/httpware/
 Three documented internal boundaries. AI agents must respect them — never cross a seam except through its documented protocol.
 
 1. **Seam A** — `Client`/`AsyncClient` ↔ `Middleware`/`AsyncMiddleware` — middleware chain composed at `Client.__init__` and `AsyncClient.__init__`, frozen for the client's lifetime. Internal terminal calls `httpx2.Client.send` or `httpx2.AsyncClient.send`, maps exceptions, raises `StatusError` on 4xx/5xx. Sync and async surfaces are kept at parity.
-2. **Seam B** — `Client`/`AsyncClient` ↔ `ResponseDecoder` list — both clients take `decoders: Sequence[ResponseDecoder] | None` (a *list*, not a single decoder; `None` resolves against installed extras, pydantic-first). When `response_model` is provided, `send`/`send_with_response` (sync and async alike) walk the list and the first decoder whose `can_decode(model: type) -> bool` returns True runs `decode(content: bytes, model: type[T]) -> T`; if no decoder claims the model, `MissingDecoderError` is raised *before* the HTTP call. Decoder exceptions are wrapped as `DecodeError` at the seam. Full contract: [`engineering.md`](planning/engineering.md) §Seam B.
+2. **Seam B** — `Client`/`AsyncClient` ↔ `ResponseDecoder` list — both clients take `decoders: Sequence[ResponseDecoder] | None` (a *list*, not a single decoder; `None` resolves against installed extras, pydantic-first). When `response_model` is provided, `send`/`send_with_response` (sync and async alike) walk the list and the first decoder whose `can_decode(model: type) -> bool` returns True runs `decode(content: bytes, model: type[T]) -> T`; if no decoder claims the model, `MissingDecoderError` is raised *before* the HTTP call. Decoder exceptions are wrapped as `DecodeError` at the seam. Full contract: [`architecture/decoders.md`](architecture/decoders.md).
 3. **Seam C** — `httpware` ↔ optional extras — each opt-in dependency imported only inside its dedicated module.
 
 ## Testing
@@ -92,5 +94,5 @@ Three documented internal boundaries. AI agents must respect them — never cros
 
 ## When in doubt
 
-- Check [`planning/engineering.md`](planning/engineering.md) before adding a new module or extension point.
+- Check the relevant [`architecture/`](architecture/) capability file before adding a new module or extension point.
 - Surface ambiguity as a documentation gap rather than improvising.

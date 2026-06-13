@@ -183,4 +183,4 @@ Unlike `DecodeError`, this error fires *before* the HTTP request — no traffic 
 
 - **[Resilience reference](resilience.md)** — `AsyncRetry`, `RetryBudget`, `AsyncBulkhead` parameter tables.
 - **[Middleware guide](middleware.md)** — the `@async_on_error` decorator can translate exceptions into responses.
-- **`planning/engineering.md` §4** — the formal exception contract.
+- **`architecture/errors.md`** — the formal exception contract.
