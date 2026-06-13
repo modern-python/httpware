@@ -152,3 +152,47 @@ def test_unhashable_model_falls_back_to_uncached_decoder() -> None:
     ):
         result = MsgspecDecoder().decode(b"42", int)
         assert result == 42  # noqa: PLR2004
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        list[_PydanticUser],
+        dict[str, _PydanticUser],
+        dict[_PydanticUser, str],
+        _PydanticUser | None,
+        tuple[_PydanticUser, int],
+        list[list[_PydanticUser]],
+        set[_PydanticUser],
+    ],
+)
+def test_msgspec_rejects_containers_of_pydantic_models(model: type) -> None:
+    """Nested CustomType (a pydantic model inside a container) must be rejected.
+
+    Before the fix, can_decode inspected only the top-level type_info node, so a
+    container parameterized by a BaseModel slipped past and built a decoder via
+    the CustomType fallback — bypassing the MissingDecoderError pre-flight.
+    """
+    assert MsgspecDecoder().can_decode(model) is False
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        _Item,
+        list[_Item],
+        dict[str, _Item],
+        list[list[_Item]],
+        dict[str, int],
+        list[int],
+        int,
+    ],
+)
+def test_msgspec_still_accepts_native_containers(model: type) -> None:
+    """Containers parameterized only by msgspec-native types stay accepted.
+
+    Guards against the recursive walker over-rejecting: the walk must stop at
+    Struct boundaries (StructType.fields are Field, not Type) and must not flag
+    plain builtin element types.
+    """
+    assert MsgspecDecoder().can_decode(model) is True
