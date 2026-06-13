@@ -28,13 +28,13 @@ def _request() -> httpx2.Request:
 @given(
     failure_threshold=st.integers(min_value=1, max_value=5),
     reset_timeout=st.floats(min_value=1.0, max_value=100.0),
-    advances=st.lists(st.floats(min_value=0.0, max_value=0.5), min_size=1, max_size=20),
+    fractions=st.lists(st.floats(min_value=0.0, max_value=0.99), min_size=1, max_size=20),
 )
 @settings(max_examples=50, deadline=None)
 async def test_open_circuit_never_forwards_before_reset_timeout(
     failure_threshold: int,
     reset_timeout: float,
-    advances: list[float],
+    fractions: list[float],
 ) -> None:
     clock = _Clock()
     breaker = AsyncCircuitBreaker(
@@ -52,20 +52,17 @@ async def test_open_circuit_never_forwards_before_reset_timeout(
     async def _five_hundred(request: httpx2.Request) -> httpx2.Response:
         raise InternalServerError(httpx2.Response(500, request=request))
 
-    # Open the circuit: failure_threshold consecutive 500s.
+    # Open the circuit while the clock reads 0.0, so opened_at == 0.0.
     for _ in range(failure_threshold):
         with pytest.raises(InternalServerError):
             await breaker(_request(), _five_hundred)
 
-    # Now OPEN. Advance the clock in small steps that stay strictly below reset_timeout.
-    calls_before = forwarded
-    total = 0.0
-    for step in advances:
-        if total + step >= reset_timeout:
-            break
-        total += step
-        clock.t = total
+    # Now OPEN. Probe at clock times strictly below reset_timeout (fraction <= 0.99), so
+    # elapsed = clock.t - 0.0 < reset_timeout and every request is rejected without ever
+    # forwarding to _ok. No conditional branch here — coverage is deterministic across examples.
+    for fraction in fractions:
+        clock.t = fraction * reset_timeout
         with pytest.raises(CircuitOpenError):
             await breaker(_request(), _ok)
 
-    assert forwarded == calls_before  # `next` (_ok) was never called while OPEN pre-timeout
+    assert forwarded == 0  # `next` (_ok) was never called while OPEN pre-timeout
