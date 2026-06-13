@@ -24,9 +24,7 @@ from httpware.middleware.resilience import AsyncRetry
 | `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value instead of the jittered backoff. If the header value exceeds `max_delay`, AsyncRetry gives up and re-raises the underlying `StatusError` with a PEP 678 note `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. Set `max_delay` higher (or `respect_retry_after=False`) to opt out. |
 | `budget` | `RetryBudget()` (default-configured) | The token bucket. Pass a shared `RetryBudget` instance to apply one budget across multiple clients. |
 
-For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the client or
-pass `timeout=` per request. `httpware` does not own a structured-cancellation
-timeout knob.
+For a whole-operation wall-clock bound across all retry attempts, compose `AsyncTimeout` outermost — see [AsyncTimeout](#asynctimeout) below. For a per-request bound, use `httpx2.Timeout` on the client or pass `timeout=` per request.
 
 ### Retry-After parsing
 
@@ -156,7 +154,7 @@ Classic consecutive-failure circuit breaker. Counts failures and prevents reques
 ### States
 
 - **CLOSED** — normal operation. Each counted failure increments the consecutive-failure counter. Once `failure_threshold` consecutive counted failures accumulate, the circuit opens.
-- **OPEN** — fast-fail. All requests are rejected immediately with `CircuitOpenError` (carrying `retry_after` seconds until the next probe window). After `reset_timeout` seconds the circuit moves to HALF_OPEN.
+- **OPEN** — fast-fail. While elapsed time is below `reset_timeout`, requests are rejected immediately with `CircuitOpenError` (carrying `retry_after` seconds until the next probe window). The first request after `reset_timeout` elapses transitions the circuit to HALF_OPEN and becomes the probe.
 - **HALF_OPEN** — exactly one probe is admitted. If `success_threshold` consecutive probe successes are observed, the circuit closes. A single probe failure re-opens the circuit.
 
 ### Constructor
@@ -317,7 +315,7 @@ from httpware.middleware.resilience import Retry
 
 `Retry` uses `time.sleep` between attempts. `Retry-After`, streaming-body refusal, exhaustion behavior, and `RetryBudgetExhaustedError` semantics are identical to `AsyncRetry`.
 
-For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the wrapped client or pass `timeout=` per request. `httpware` does not own a structured-cancellation timeout knob.
+For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the wrapped client or pass `timeout=` per request. No sync `Timeout` middleware exists — sync Python has no cancellation primitive that can interrupt a blocking call mid-flight.
 
 ### `Bulkhead`
 

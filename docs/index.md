@@ -138,23 +138,34 @@ All errors inherit `httpware.ClientError`. The categories:
 
 - **Status errors** (4xx/5xx responses) — raised automatically, no `raise_for_status()` needed: `NotFoundError`, `RateLimitedError`, `ServiceUnavailableError`, and the rest. All subclass `StatusError`.
 - **Transport errors** — connection / network / protocol failures before a response arrived. `NetworkError` (transient) subclasses `TransportError`.
-- **Resilience refusals** — `RetryBudgetExhaustedError` and `BulkheadFullError`, raised by the resilience middleware.
+- **Resilience refusals** — `RetryBudgetExhaustedError`, `BulkheadFullError`, and `CircuitOpenError`, raised by the resilience middleware.
 - **Decode errors** — `DecodeError`, raised when `response_model=` decoding fails (HTTP call itself succeeded). `MissingDecoderError`, raised when no registered decoder claims the `response_model=` type — fires *before* the HTTP call.
 
 See the [Errors reference](errors.md) for the full tree and catching strategies.
 
 ## Observability
 
-`AsyncRetry`/`Retry` and `AsyncBulkhead`/`Bulkhead` emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed). Event names and payloads are identical across sync and async; dashboards built against one class apply unchanged to the other.
+All resilience middleware emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed). Event names and payloads are identical across sync and async; dashboards built against one class apply unchanged to the other.
 
-Logger names (`httpware.retry`, `httpware.bulkhead`) and event names (`retry.giving_up`, `retry.budget_refused`, `retry.streaming_refused`, `bulkhead.rejected`) are the stable public contract.
+Logger names and event names are the stable public contract:
+
+| Logger | Events |
+|---|---|
+| `httpware.retry` | `retry.giving_up`, `retry.budget_refused`, `retry.streaming_refused` |
+| `httpware.bulkhead` | `bulkhead.rejected` |
+| `httpware.circuit_breaker` | `circuit.opened` (WARNING), `circuit.rejected` (WARNING), `circuit.half_open` (INFO), `circuit.closed` (INFO) |
+| `httpware.timeout` | `timeout.exceeded` (WARNING) |
+
+Each log record carries an `event` field with the event-name string (e.g. `event="circuit.opened"`), usable for log-aggregator filtering. See [resilience.md](resilience.md) for the full event tables per middleware.
 
 ```python
 import logging
 
-# Enable visibility into retry / bulkhead operational events
+# Enable visibility into resilience operational events
 logging.getLogger("httpware.retry").setLevel(logging.WARNING)
 logging.getLogger("httpware.bulkhead").setLevel(logging.WARNING)
+logging.getLogger("httpware.circuit_breaker").setLevel(logging.INFO)  # INFO for recovery events
+logging.getLogger("httpware.timeout").setLevel(logging.WARNING)
 ```
 
 For OTel attribute enrichment on the active span — install the extra:

@@ -2,8 +2,9 @@
 
 See planning/specs/2026-06-05-observability-design.md for the contract.
 
-Logger names (``httpware.retry``, ``httpware.bulkhead``) and event names
-(``retry.giving_up``, ``bulkhead.rejected``, etc.) are the public observability
+Logger names (``httpware.retry``, ``httpware.bulkhead``, ``httpware.circuit_breaker``,
+``httpware.timeout``) and event names (``retry.giving_up``, ``bulkhead.rejected``,
+``circuit.opened``, ``timeout.exceeded``, etc.) are the public observability
 surface. They are stable: renames are breaking changes.
 """
 

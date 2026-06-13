@@ -112,7 +112,7 @@ It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, an
 
 ## Errors
 
-All 4xx/5xx responses raise typed exceptions automatically: `NotFoundError`, `ServiceUnavailableError`, `RateLimitedError`, etc. — all subclasses of `httpware.StatusError`. Transport-layer transient failures raise `NetworkError`; the resilience middleware raise `RetryBudgetExhaustedError` and `BulkheadFullError`. Everything inherits `httpware.ClientError`.
+All 4xx/5xx responses raise typed exceptions automatically: `NotFoundError`, `ServiceUnavailableError`, `RateLimitedError`, etc. — all subclasses of `httpware.StatusError`. Transport-layer transient failures raise `NetworkError`; the resilience middleware raise `RetryBudgetExhaustedError`, `BulkheadFullError`, and `CircuitOpenError`. Everything inherits `httpware.ClientError`.
 
 ## Observability
 
@@ -126,7 +126,7 @@ import logging
 # Enable visibility into resilience operational events
 logging.getLogger("httpware.retry").setLevel(logging.WARNING)
 logging.getLogger("httpware.bulkhead").setLevel(logging.WARNING)
-logging.getLogger("httpware.circuit_breaker").setLevel(logging.WARNING)
+logging.getLogger("httpware.circuit_breaker").setLevel(logging.INFO)   # INFO: includes recovery events (half_open, closed)
 logging.getLogger("httpware.timeout").setLevel(logging.WARNING)
 ```
 
