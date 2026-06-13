@@ -61,7 +61,7 @@ These are non-negotiable. CI rejects PRs that violate them.
 - **Private symbols**: `_leading_underscore`. Cross-module private code lives in `_internal/`.
 - **Imports**: absolute paths inside `src/httpware/`; relative imports only within the same subpackage.
 - **Docstrings**: PEP 257. Module/class/public-method required; `D1` (missing docstring) is ignored.
-- **Exception construction**: status-keyed errors take a single positional `response: httpx2.Response`. Subclasses do not override `__init__`. All fields available via `exc.response.*`.
+- **Exception construction**: status-keyed `StatusError` subclasses (the 4xx/5xx tree) take a single positional `response: httpx2.Response` and do NOT override `__init__` — all fields via `exc.response.*`. This rule scopes to `StatusError` only; non-status `ClientError` subclasses such as `DecodeError`, `MissingDecoderError`, `BulkheadFullError`, and `RetryBudgetExhaustedError` deliberately define `__init__` with keyword-only fields. See `engineering.md` §4.
 
 ## Module layout
 

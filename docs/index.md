@@ -73,6 +73,10 @@ decoders claim broadly within their library; the ordering encodes your
 preference for shared shapes (`dict`, `list[Foo]`, dataclasses, primitives):
 
 ```python
+from httpware import AsyncClient
+from httpware.decoders.msgspec import MsgspecDecoder
+from httpware.decoders.pydantic import PydanticDecoder
+
 # pydantic-first (the default when both extras are installed):
 # - BaseModel  -> pydantic
 # - Struct     -> msgspec
