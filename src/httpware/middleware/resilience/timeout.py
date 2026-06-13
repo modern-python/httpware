@@ -14,6 +14,7 @@ timeouts. Sync callers configure httpx2's timeouts directly; there is no sync Ti
 
 import asyncio
 import logging
+import math
 
 import httpx2
 
@@ -22,7 +23,7 @@ from httpware.errors import TimeoutError as HttpwareTimeoutError
 from httpware.middleware import AsyncNext
 
 
-_TIMEOUT_INVALID = "timeout must be > 0"
+_TIMEOUT_INVALID = "timeout must be a finite number > 0"
 
 _LOGGER = logging.getLogger("httpware.timeout")
 
@@ -43,7 +44,7 @@ class AsyncTimeout:
     """
 
     def __init__(self, *, timeout: float) -> None:
-        if timeout <= 0:
+        if not math.isfinite(timeout) or timeout <= 0:
             raise ValueError(_TIMEOUT_INVALID)
         self._timeout = timeout
 

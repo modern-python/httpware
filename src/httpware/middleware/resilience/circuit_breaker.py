@@ -5,7 +5,10 @@ See planning/specs/2026-06-13-circuit-breaker-and-timeout-design.md for the cont
 A counted failure is a NetworkError, an httpware TimeoutError, or a StatusError whose
 status_code is in the effective failure set (default: all 5xx). 4xx — including 429 —
 count as successes: 429 means healthy-but-throttling, and tripping on it amplifies
-incidents. Any other exception propagates without affecting circuit state.
+incidents. Any other exception propagates without affecting circuit state. In
+particular, non-NetworkError transport problems — e.g. httpx2.InvalidURL from a
+malformed URL — are foreign: they propagate unchanged and do not increment the
+failure counter, so programming errors cannot trip the breaker.
 
 State machine (classic / consecutive-failure):
     CLOSED    — forward; count consecutive counted-failures; open at failure_threshold.

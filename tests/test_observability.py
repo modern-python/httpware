@@ -29,6 +29,7 @@ def test_emit_event_logs_at_warning_with_extra_fields(caplog: pytest.LogCaptureF
     assert record.message == "something interesting happened"
     assert record.foo == 1  # ty: ignore[unresolved-attribute]
     assert record.bar == "x"  # ty: ignore[unresolved-attribute]
+    assert record.event == "test.event"  # ty: ignore[unresolved-attribute]
 
 
 def test_emit_event_respects_level_parameter(caplog: pytest.LogCaptureFixture) -> None:
@@ -95,3 +96,22 @@ def test_emit_event_works_when_otel_installed_but_no_active_span() -> None:
         attributes={"a": 1},
     )
     # No assertion needed — the absence of an exception IS the assertion.
+
+
+def test_emit_event_swallows_add_event_failure() -> None:
+    """A failing OTel add_event must not break the caller; the log record still fires."""
+    mock_span = MagicMock(name="MockSpan")
+    mock_span.add_event.side_effect = RuntimeError("exporter boom")
+    with (
+        patch("httpware._internal.import_checker.is_otel_installed", True),
+        patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+    ):
+        # must not raise
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="resilient",
+            attributes={"k": "v"},
+        )
+    mock_span.add_event.assert_called_once()
