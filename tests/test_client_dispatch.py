@@ -207,3 +207,36 @@ def test_sync_missing_decoder_with_empty_list() -> None:
     with pytest.raises(MissingDecoderError):
         client.get("https://example.test/x", response_model=_PydanticUser)
     client.close()
+
+
+async def test_async_msgspec_only_list_of_basemodel_preflight_raises() -> None:
+    """MsgspecDecoder-only client raises MissingDecoderError for list[BaseModel] without sending a request."""
+
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+        pytest.fail("transport should not be invoked: pre-flight must reject first")
+
+    transport = httpx2.MockTransport(handler)
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=transport),
+        decoders=[MsgspecDecoder()],
+    )
+    with pytest.raises(MissingDecoderError) as exc_info:
+        await client.get("https://example.test/x", response_model=list[_PydanticUser])
+    assert exc_info.value.registered_names == ("MsgspecDecoder",)
+
+
+def test_sync_msgspec_only_list_of_basemodel_preflight_raises() -> None:
+    """Sync MsgspecDecoder-only client raises MissingDecoderError for list[BaseModel] without sending a request."""
+
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+        pytest.fail("transport should not be invoked: pre-flight must reject first")
+
+    transport = httpx2.MockTransport(handler)
+    client = Client(
+        httpx2_client=httpx2.Client(transport=transport),
+        decoders=[MsgspecDecoder()],
+    )
+    with pytest.raises(MissingDecoderError) as exc_info:
+        client.get("https://example.test/x", response_model=list[_PydanticUser])
+    assert exc_info.value.registered_names == ("MsgspecDecoder",)
+    client.close()
