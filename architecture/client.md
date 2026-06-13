@@ -1,6 +1,6 @@
 # Client
 
-`httpware` ships two clients: a sync `Client` and an async `AsyncClient`, both at the top level. They are thin wrappers over `httpx2.Client` and `httpx2.AsyncClient` respectively. Both carry full feature parity: typed decoding, the middleware chain, the `Retry`/`Bulkhead` resilience primitives, and `stream()`.
+`httpware` ships two clients: a sync `Client` and an async `AsyncClient`, both at the top level. They are thin wrappers over `httpx2.Client` and `httpx2.AsyncClient` respectively. Both carry full feature parity: typed decoding, the middleware chain, the full resilience suite, and `stream()`.
 
 ## The internal terminal
 
