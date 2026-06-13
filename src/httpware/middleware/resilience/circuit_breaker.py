@@ -152,8 +152,7 @@ class _CircuitBreakerState:
             if self._consecutive_failures >= self._failure_threshold:
                 self._open(request, failures=self._consecutive_failures)
         elif self._state is _CircuitState.HALF_OPEN:
-            self._consecutive_successes = 0
-            self._open(request, failures=1)
+            self._open(request, failures=1)  # 1 = the single probe failure that re-opened the circuit
 
     def release_probe(self, role: str) -> None:
         """Release the probe slot without recording success or failure (non-counted exc)."""
@@ -163,6 +162,8 @@ class _CircuitBreakerState:
     def _open(self, request: httpx2.Request, *, failures: int) -> None:
         self._state = _CircuitState.OPEN
         self._opened_at = self._now()
+        self._consecutive_failures = 0
+        self._consecutive_successes = 0
         self._emit(
             request,
             "circuit.opened",

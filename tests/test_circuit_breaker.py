@@ -20,6 +20,7 @@ from httpware import (
     NetworkError,
     NotFoundError,
     RateLimitedError,
+    ServiceUnavailableError,
 )
 from httpware.middleware.resilience.circuit_breaker import AsyncCircuitBreaker
 
@@ -164,6 +165,38 @@ async def test_network_error_counts_as_failure() -> None:
                 await client.get("https://example.test/x")
         with pytest.raises(CircuitOpenError):
             await client.get("https://example.test/x")
+
+
+async def test_custom_failure_status_codes_trips_on_member() -> None:
+    """A status code in a custom failure set trips the breaker."""
+    handler = _StatusSequence([503, 503])
+    breaker = AsyncCircuitBreaker(
+        failure_threshold=2,
+        failure_status_codes=frozenset({503}),
+        _now=_Clock(),
+    )
+    async with _client(handler, breaker=breaker) as client:
+        for _ in range(2):
+            with pytest.raises(ServiceUnavailableError):
+                await client.get("https://example.test/x")
+        with pytest.raises(CircuitOpenError):
+            await client.get("https://example.test/x")
+    assert handler.calls == 2  # noqa: PLR2004
+
+
+async def test_custom_failure_status_codes_excludes_other_5xx() -> None:
+    """With a custom set of {503}, a 500 response is NOT a failure — it counts as success."""
+    handler = _StatusSequence([500, 500, 500, 500])
+    breaker = AsyncCircuitBreaker(
+        failure_threshold=2,
+        failure_status_codes=frozenset({503}),
+        _now=_Clock(),
+    )
+    async with _client(handler, breaker=breaker) as client:
+        for _ in range(4):
+            with pytest.raises(InternalServerError):
+                await client.get("https://example.test/x")
+    assert handler.calls == 4  # noqa: PLR2004  # 500 not in custom set -> never opened
 
 
 async def test_non_counted_exception_propagates_without_state_change() -> None:
