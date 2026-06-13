@@ -48,7 +48,7 @@ tests/test_circuit_breaker.py                           # NEW — async
 tests/test_circuit_breaker_sync.py                      # NEW — sync mirror
 tests/test_circuit_breaker_props.py                     # NEW — hypothesis invariant (optional but specified)
 tests/test_errors.py                                    # + CircuitOpenError fields/pickle
-tests/test_observability.py                             # + 5 new event names (centralized assertion)
+# (event names asserted in the feature test files above, not test_observability.py)
 docs/resilience.md                                      # + CircuitBreaker + AsyncTimeout sections
 README.md                                               # resilience paragraph
 planning/releases/0.10.0.md                             # NEW
@@ -290,7 +290,7 @@ TDD, 100% branch coverage enforced (`--cov-fail-under=100`). `httpx2.MockTranspo
 
 **`tests/test_errors.py`:** `CircuitOpenError` is a `ClientError`, stores `retry_after`, summary string for both `None` and a float, pickle round-trip via `__reduce__` (mirror `test_bulkhead_full_error_pickleable`).
 
-**`tests/test_observability.py`:** add the 5 new event names to the centralized event-name assertion.
+**Event-name assertions:** there is no central event-name registry test (`test_observability.py` only unit-tests the `_emit_event` helper), so the 5 new event names are asserted in their own feature test files via `caplog` — `circuit.opened`/`circuit.rejected` in `test_open_emits_opened_event_and_rejects`, `circuit.half_open`/`circuit.closed` in `test_reset_timeout_admits_probe_then_closes`, `timeout.exceeded` in `test_expiry_raises_httpware_timeout_chained_from_builtin`.
 
 `# pragma: no cover` only for genuinely-unreachable invariant arms (e.g. the `_check_loop` inner race arm), matching the existing style.
 
