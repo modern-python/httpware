@@ -6,6 +6,7 @@ from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
     BulkheadFullError,
+    CircuitOpenError,
     ClientError,
     ClientStatusError,
     ConflictError,
@@ -37,19 +38,32 @@ from httpware.middleware import (
     before_request,
     on_error,
 )
-from httpware.middleware.resilience import AsyncBulkhead, AsyncRetry, Bulkhead, Retry, RetryBudget
+from httpware.middleware.resilience import (
+    AsyncBulkhead,
+    AsyncCircuitBreaker,
+    AsyncRetry,
+    AsyncTimeout,
+    Bulkhead,
+    CircuitBreaker,
+    Retry,
+    RetryBudget,
+)
 
 
 __all__ = [
     "STATUS_TO_EXCEPTION",
     "AsyncBulkhead",
+    "AsyncCircuitBreaker",
     "AsyncClient",
     "AsyncMiddleware",
     "AsyncNext",
     "AsyncRetry",
+    "AsyncTimeout",
     "BadRequestError",
     "Bulkhead",
     "BulkheadFullError",
+    "CircuitBreaker",
+    "CircuitOpenError",
     "Client",
     "ClientError",
     "ClientStatusError",

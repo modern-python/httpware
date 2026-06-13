@@ -214,6 +214,35 @@ class BulkheadFullError(ClientError):
         )
 
 
+def _reconstruct_circuit_open(
+    cls: "type[CircuitOpenError]",
+    retry_after: float | None,
+) -> "CircuitOpenError":
+    return cls(retry_after=retry_after)
+
+
+class CircuitOpenError(ClientError):
+    """Raised when a CircuitBreaker refuses a request because the circuit is not closed.
+
+    Fires when the circuit is OPEN, or when it is HALF_OPEN and the single probe
+    slot is already taken. The request is never forwarded to ``next``. ``retry_after``
+    carries the seconds until the circuit will next admit a probe, when known
+    (``None`` when a concurrent probe is already in flight).
+    """
+
+    retry_after: float | None
+
+    def __init__(self, *, retry_after: float | None) -> None:
+        self.retry_after = retry_after
+        if retry_after is None:
+            super().__init__("circuit open (a probe request is already in flight)")
+        else:
+            super().__init__(f"circuit open (retry_after={retry_after:.3f}s)")
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_reconstruct_circuit_open, (type(self), self.retry_after))
+
+
 def _reconstruct_decode_error(
     cls: "type[DecodeError]",
     response: httpx2.Response,

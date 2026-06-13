@@ -6,7 +6,7 @@
 - **`RetryBudget`** — Finagle-style token bucket; safe to share across sync `Client` and `AsyncClient` in the same process. (Finagle-style bounds the global retry rate to prevent retry storms when downstreams degrade.)
 - **`Bulkhead` / `AsyncBulkhead`** — concurrency limiter with bounded acquire-wait (`threading.Semaphore` and `asyncio.Semaphore` respectively)
 
-The canonical composition is `middleware=[AsyncBulkhead(...), AsyncRetry()]` — `AsyncBulkhead` outside `AsyncRetry` so one slot covers all retry attempts of a single call. Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
+A key ordering constraint: `AsyncBulkhead` must sit outside `AsyncRetry` (before it in `middleware=`) so one slot covers all retry attempts of a single call. For the full recommended ordering across all four primitives, see [Composition](#composition). Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
 
 ## `AsyncRetry`
 
@@ -144,27 +144,154 @@ async with (
 
 When `acquire_timeout` elapses without a slot opening, `AsyncBulkhead` raises `BulkheadFullError` (carries the configured `max_concurrent` and `acquire_timeout` for caller logging). See the [Errors reference](errors.md). The `httpware.bulkhead` `bulkhead.rejected` observability event fires at the same site — see [Observability](index.md#observability).
 
-## Composition
+## `AsyncCircuitBreaker` / `CircuitBreaker`
 
-The canonical ordering is `middleware=[AsyncBulkhead, AsyncRetry]` — `AsyncBulkhead` outermost so one slot covers all retry attempts of a single call:
+```python
+from httpware.middleware.resilience import AsyncCircuitBreaker  # async
+from httpware.middleware.resilience import CircuitBreaker        # sync
+```
+
+Classic consecutive-failure circuit breaker. Counts failures and prevents requests from reaching a downstream that is known to be broken.
+
+### States
+
+- **CLOSED** — normal operation. Each counted failure increments the consecutive-failure counter. Once `failure_threshold` consecutive counted failures accumulate, the circuit opens.
+- **OPEN** — fast-fail. All requests are rejected immediately with `CircuitOpenError` (carrying `retry_after` seconds until the next probe window). After `reset_timeout` seconds the circuit moves to HALF_OPEN.
+- **HALF_OPEN** — exactly one probe is admitted. If `success_threshold` consecutive probe successes are observed, the circuit closes. A single probe failure re-opens the circuit.
+
+### Constructor
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `failure_threshold` | `5` | Consecutive counted failures required to open. `<1` raises `ValueError`. |
+| `reset_timeout` | `30.0` (s) | Seconds to stay OPEN before admitting a probe. `<0` raises `ValueError`. |
+| `success_threshold` | `1` | Consecutive probe successes required to close. `<1` raises `ValueError`. |
+| `failure_status_codes` | `None` | Which status codes count as failures. `None` → all 5xx (`500`–`599`). |
+
+### Failure classification
+
+A **counted failure** is a `NetworkError`, an httpware `TimeoutError`, or a `StatusError` whose status code is in `failure_status_codes`. All other exceptions propagate without affecting circuit state.
+
+**4xx responses — including 429 — count as successes.** A 429 means the service is healthy but throttling; tripping the circuit on it would amplify an incident by adding circuit-open rejections on top of the throttle.
+
+### `CircuitOpenError`
+
+Raised when the circuit is OPEN (with a positive `retry_after: float`) or when HALF_OPEN with a probe already in flight (`retry_after=None`). Inherits `httpware.ClientError`. See the [Errors reference](errors.md).
+
+### Observability
+
+Emitted on logger `httpware.circuit_breaker`:
+
+| Event | When |
+|---|---|
+| `circuit.opened` | Failure threshold reached; circuit transitions CLOSED → OPEN |
+| `circuit.rejected` | Request fast-failed (OPEN or HALF_OPEN probe slot taken) |
+| `circuit.half_open` | Reset timeout elapsed; circuit transitions OPEN → HALF_OPEN |
+| `circuit.closed` | Success threshold reached; circuit transitions HALF_OPEN → CLOSED |
+
+### Sharing
+
+Pass the same instance to multiple clients to enforce one shared circuit across them. A `CircuitBreaker` (sync) cannot be shared with an `AsyncCircuitBreaker` — they use different concurrency primitives.
+
+### Async example
 
 ```python
 from httpware import AsyncClient
-from httpware.middleware.resilience import AsyncBulkhead, AsyncRetry
+from httpware.middleware.resilience import AsyncCircuitBreaker
+
+
+breaker = AsyncCircuitBreaker(failure_threshold=3, reset_timeout=60.0)
+
+async with AsyncClient(
+    base_url="https://api.example.com",
+    middleware=[breaker],
+) as client:
+    response = await client.get("/users/1")
+```
+
+### Sync example
+
+```python
+from httpware import Client
+from httpware.middleware.resilience import CircuitBreaker
+
+
+breaker = CircuitBreaker(failure_threshold=3, reset_timeout=60.0)
+
+with Client(
+    base_url="https://api.example.com",
+    middleware=[breaker],
+) as client:
+    client.get("/users/1")
+```
+
+## `AsyncTimeout`
+
+```python
+from httpware.middleware.resilience import AsyncTimeout
+```
+
+Bounds total wall-clock time across the entire inner pipeline. Place it outermost to enforce "this whole operation must finish within `timeout` seconds, even across retries and backoff sleeps." On expiry it raises `httpware.TimeoutError`.
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `timeout` | **REQUIRED** | Overall deadline in seconds. Must be `> 0`; `≤0` raises `ValueError`. |
+
+**This is not a per-call timeout.** httpx2's connect/read/write/pool timeouts are the right tool for bounding a single outbound call; `AsyncTimeout` doesn't duplicate them. What httpx2 cannot bound is the total wall-clock across a whole retry sequence — `AsyncTimeout` fills that gap.
+
+**No sync `Timeout` exists.** Sync Python has no cancellation primitive that can interrupt a blocking httpx2 call mid-flight. For sync per-call bounds, configure `httpx2.Timeout` on the wrapped client or pass `timeout=` per request.
+
+Observability event: `timeout.exceeded` on logger `httpware.timeout`.
+
+```python
+from httpware import AsyncClient
+from httpware.middleware.resilience import AsyncCircuitBreaker, AsyncRetry, AsyncTimeout
+
+
+async with AsyncClient(
+    base_url="https://api.example.com",
+    middleware=[
+        AsyncTimeout(timeout=10.0),   # overall deadline across the whole chain
+        AsyncRetry(max_attempts=3),
+    ],
+) as client:
+    response = await client.get("/users/1")
+```
+
+## Composition
+
+The recommended ordering (not enforced, but each position has a reason):
+
+```
+AsyncTimeout → AsyncCircuitBreaker → AsyncBulkhead → AsyncRetry → terminal
+```
+
+- `AsyncTimeout` outermost so the overall deadline covers the entire sequence including retries and backoff.
+- `AsyncCircuitBreaker` outside `AsyncRetry` so an open circuit short-circuits the whole retry loop without attempting any calls. This also means the breaker counts one outcome per fully-exhausted retry sequence rather than one per individual attempt. Placing it outside `AsyncBulkhead` too means a request the open circuit rejects never consumes a concurrency slot.
+- `AsyncBulkhead` outside `AsyncRetry` so one slot covers all retry attempts of a single call. Flip those two (`[AsyncRetry, AsyncBulkhead]`) and each retry grabs a fresh slot — defeating the bulkhead under load.
+
+```python
+from httpware import AsyncClient
+from httpware.middleware.resilience import (
+    AsyncBulkhead,
+    AsyncCircuitBreaker,
+    AsyncRetry,
+    AsyncTimeout,
+)
 
 
 async def main() -> None:
     async with AsyncClient(
         base_url="https://api.example.com",
         middleware=[
+            AsyncTimeout(timeout=30.0),
+            AsyncCircuitBreaker(),
             AsyncBulkhead(max_concurrent=10),
             AsyncRetry(),
         ],
     ) as client:
         await client.get("/users/1")
 ```
-
-Flipping the order (`[AsyncRetry, AsyncBulkhead]`) means each retry attempt grabs a fresh slot — defeating the bulkhead under load. Don't do that.
 
 Cross-cutting middleware that emit per-call state (e.g., the Request-ID middleware in the [Middleware guide](middleware.md)) should sit outside `AsyncRetry` for the same reason — so all attempts of one call share one ID rather than getting a fresh ID per attempt.
 
@@ -227,6 +354,6 @@ with Client(
 ## See also
 
 - **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `AsyncRetry` and `AsyncBulkhead` use.
-- **[Errors reference](errors.md)** — `RetryBudgetExhaustedError`, `BulkheadFullError`, and the broader exception tree.
-- **[Observability](index.md#observability)** — the four operational events these middleware emit.
+- **[Errors reference](errors.md)** — `RetryBudgetExhaustedError`, `BulkheadFullError`, `CircuitOpenError`, and the broader exception tree.
+- **[Observability](index.md#observability)** — the operational events these middleware emit.
 - **`planning/engineering.md` §3** — the formal Middleware/Seam-A contract.
