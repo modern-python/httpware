@@ -6,7 +6,7 @@
 - **`RetryBudget`** — Finagle-style token bucket; safe to share across sync `Client` and `AsyncClient` in the same process. (Finagle-style bounds the global retry rate to prevent retry storms when downstreams degrade.)
 - **`Bulkhead` / `AsyncBulkhead`** — concurrency limiter with bounded acquire-wait (`threading.Semaphore` and `asyncio.Semaphore` respectively)
 
-A key ordering constraint: `AsyncBulkhead` must sit inside `AsyncRetry` so one slot covers all retry attempts of a single call. For the full recommended ordering across all four primitives, see [Composition](#composition). Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
+A key ordering constraint: `AsyncBulkhead` must sit outside `AsyncRetry` (before it in `middleware=`) so one slot covers all retry attempts of a single call. For the full recommended ordering across all four primitives, see [Composition](#composition). Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
 
 ## `AsyncRetry`
 
@@ -263,12 +263,12 @@ async with AsyncClient(
 The recommended ordering (not enforced, but each position has a reason):
 
 ```
-AsyncTimeout → AsyncCircuitBreaker → AsyncRetry → AsyncBulkhead → terminal
+AsyncTimeout → AsyncCircuitBreaker → AsyncBulkhead → AsyncRetry → terminal
 ```
 
 - `AsyncTimeout` outermost so the overall deadline covers the entire sequence including retries and backoff.
-- `AsyncCircuitBreaker` outside `AsyncRetry` so an open circuit short-circuits the whole retry loop without attempting any calls. This also means the breaker counts one outcome per fully-exhausted retry sequence rather than one per individual attempt.
-- `AsyncBulkhead` inside `AsyncRetry` so one slot covers all retry attempts of a single call. Flip it (`[AsyncRetry, AsyncBulkhead]`) and each retry grabs a fresh slot — defeating the bulkhead under load.
+- `AsyncCircuitBreaker` outside `AsyncRetry` so an open circuit short-circuits the whole retry loop without attempting any calls. This also means the breaker counts one outcome per fully-exhausted retry sequence rather than one per individual attempt. Placing it outside `AsyncBulkhead` too means a request the open circuit rejects never consumes a concurrency slot.
+- `AsyncBulkhead` outside `AsyncRetry` so one slot covers all retry attempts of a single call. Flip those two (`[AsyncRetry, AsyncBulkhead]`) and each retry grabs a fresh slot — defeating the bulkhead under load.
 
 ```python
 from httpware import AsyncClient
@@ -286,8 +286,8 @@ async def main() -> None:
         middleware=[
             AsyncTimeout(timeout=30.0),
             AsyncCircuitBreaker(),
-            AsyncRetry(),
             AsyncBulkhead(max_concurrent=10),
+            AsyncRetry(),
         ],
     ) as client:
         await client.get("/users/1")

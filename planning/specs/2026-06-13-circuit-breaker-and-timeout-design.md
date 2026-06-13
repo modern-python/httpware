@@ -21,7 +21,7 @@ Both are pure stdlib (`asyncio.timeout`, `time.monotonic`, `threading.Lock`, `en
 2. **The breaker v1 trips on consecutive failures** (Polly *classic* breaker): open after `failure_threshold` consecutive counted failures → probe after `reset_timeout` → close after `success_threshold` consecutive half-open successes. Rolling-window / failure-rate (Resilience4j / Polly-v8 default) is **deferred to v2**; the config is shaped so adding a `window` mode later is purely additive.
 3. **Failure classification = 5xx + network + timeout, excluding 429.** A *counted failure* is `NetworkError`, httpware `TimeoutError`, or a `StatusError` whose `status_code` is in the effective failure set (default = all 5xx, 500–599). 4xx including 429 do **not** trip the breaker (429 = healthy-but-throttling; tripping amplifies the incident) and count as breaker *successes*. Any other exception type (e.g. `BulkheadFullError`, `ValueError`) propagates unchanged and does **not** affect circuit state.
 4. **Control surface is events-only (YAGNI).** No public `state` property, no `reset()` / `isolate()`. Monitoring goes through the observability events. State introspection and manual control can be added additively in a later release if a concrete consumer demand surfaces.
-5. **Recommended ordering is breaker-outside-retry.** Documented (not enforced): `AsyncTimeout → AsyncCircuitBreaker → AsyncRetry → AsyncBulkhead → terminal`. With the breaker outside retry, an open circuit short-circuits the *entire* retry loop (don't hammer a service that's already down), and the breaker counts one outcome per fully-exhausted retry sequence rather than per attempt.
+5. **Recommended ordering is breaker-outside-retry.** Documented (not enforced): `AsyncTimeout → AsyncCircuitBreaker → AsyncBulkhead → AsyncRetry → terminal` (corrected during implementation: AsyncBulkhead sits outside AsyncRetry to keep one slot per logical call, consistent with the existing `test_bulkhead_outside_retry_holds_one_slot_across_attempts` guidance). With the breaker outside retry, an open circuit short-circuits the *entire* retry loop (don't hammer a service that's already down), and the breaker counts one outcome per fully-exhausted retry sequence rather than per attempt.
 
 ## Non-goals
 
@@ -296,7 +296,7 @@ TDD, 100% branch coverage enforced (`--cov-fail-under=100`). `httpx2.MockTranspo
 
 ## Docs + release
 
-- **`docs/resilience.md`:** a CircuitBreaker section and an AsyncTimeout section; the recommended ordering `AsyncTimeout → AsyncCircuitBreaker → AsyncRetry → AsyncBulkhead → terminal` (documented, not enforced); the rationale notes ("why no sync Timeout", "why not duplicate httpx2 per-call timeouts", "429/4xx count as successes, not failures").
+- **`docs/resilience.md`:** a CircuitBreaker section and an AsyncTimeout section; the recommended ordering `AsyncTimeout → AsyncCircuitBreaker → AsyncBulkhead → AsyncRetry → terminal` (documented, not enforced); the rationale notes ("why no sync Timeout", "why not duplicate httpx2 per-call timeouts", "429/4xx count as successes, not failures").
 - **`README.md`:** extend the resilience paragraph from "Retry + Bulkhead" to include CircuitBreaker + AsyncTimeout.
 - **`planning/releases/0.10.0.md`:** new release notes (additive minor; new public names; new observability events).
 

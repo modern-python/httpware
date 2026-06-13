@@ -1490,7 +1490,7 @@ Add a `## Overall timeout (async only)` section: what it bounds (total wall-cloc
 Add a short subsection (or extend the existing ordering guidance) documenting the recommended chain order and that it is **not enforced**:
 
 ```
-AsyncTimeout → AsyncCircuitBreaker → AsyncRetry → AsyncBulkhead → terminal
+AsyncTimeout → AsyncCircuitBreaker → AsyncBulkhead → AsyncRetry → terminal
 ```
 
 Explain the consequence of breaker-outside-retry: an open circuit short-circuits the whole retry loop, and the breaker counts one outcome per fully-exhausted retry sequence.
