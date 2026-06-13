@@ -7,6 +7,7 @@ Logger names (``httpware.retry``, ``httpware.bulkhead``) and event names
 surface. They are stable: renames are breaking changes.
 """
 
+import contextlib
 import logging
 import typing
 
@@ -37,7 +38,7 @@ def _emit_event(
     the optional-extras isolation invariant: ``import httpware`` must not pull
     ``opentelemetry`` into ``sys.modules`` when the extra is absent.
     """
-    logger.log(level, message, extra=attributes)
+    logger.log(level, message, extra={**attributes, "event": event_name})
     if import_checker.is_otel_installed:
         try:
             from opentelemetry import trace  # noqa: PLC0415 — lazy by design (optional-extras isolation)
@@ -45,4 +46,9 @@ def _emit_event(
             # opentelemetry namespace exists but the api package is broken or missing —
             # degrade to log-only emission. The structured log record above has already fired.
             return
-        trace.get_current_span().add_event(event_name, attributes=attributes)
+        # Observability must never break the request path — suppress any failure from
+        # add_event (e.g. a recording span with a broken exporter or attribute validation).
+        # The structured log record above has already fired; CancelledError/KeyboardInterrupt
+        # are not Exception subclasses and will still propagate.
+        with contextlib.suppress(Exception):
+            trace.get_current_span().add_event(event_name, attributes=attributes)

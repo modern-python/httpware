@@ -85,10 +85,20 @@ async def test_raw_builtin_timeout_from_next_propagates_by_identity() -> None:
 
 
 def test_zero_timeout_rejected() -> None:
-    with pytest.raises(ValueError, match="timeout must be > 0"):
+    with pytest.raises(ValueError, match="timeout must be a finite number > 0"):
         AsyncTimeout(timeout=0)
 
 
 def test_negative_timeout_rejected() -> None:
-    with pytest.raises(ValueError, match="timeout must be > 0"):
+    with pytest.raises(ValueError, match="timeout must be a finite number > 0"):
         AsyncTimeout(timeout=-1.0)
+
+
+def test_nan_timeout_rejected() -> None:
+    with pytest.raises(ValueError, match="timeout must be a finite number > 0"):
+        AsyncTimeout(timeout=float("nan"))
+
+
+def test_inf_timeout_rejected() -> None:
+    with pytest.raises(ValueError, match="timeout must be a finite number > 0"):
+        AsyncTimeout(timeout=float("inf"))
