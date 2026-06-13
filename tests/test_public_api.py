@@ -33,6 +33,7 @@ def test_expected_exports() -> None:
         "AsyncMiddleware",
         "AsyncNext",
         "AsyncRetry",
+        "AsyncTimeout",
         "BadRequestError",
         "Bulkhead",
         "BulkheadFullError",
