@@ -394,3 +394,13 @@ def test_circuit_open_error_pickleable_with_none() -> None:
     restored = pickle.loads(pickle.dumps(exc))  # noqa: S301
     assert isinstance(restored, CircuitOpenError)
     assert restored.retry_after is None
+
+
+def test_status_error_message_masks_query_secret() -> None:
+    request = httpx2.Request("GET", "https://example.test/p?api_key=topsecret&page=2")
+    response = httpx2.Response(404, request=request)
+    exc = NotFoundError(response)
+    assert "topsecret" not in str(exc)
+    assert "api_key=REDACTED" in str(exc)
+    assert "page=2" in str(exc)
+    assert "topsecret" not in repr(exc)
