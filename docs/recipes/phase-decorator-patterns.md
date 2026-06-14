@@ -14,7 +14,7 @@ The smallest useful case — add a static `Authorization` header to every outgoi
 import httpx2
 
 from httpware import AsyncClient
-from httpware.middleware import async_before_request
+from httpware import async_before_request
 
 
 @async_before_request
@@ -43,7 +43,7 @@ import contextvars
 import httpx2
 
 from httpware import AsyncClient, AsyncRetry
-from httpware.middleware import async_before_request
+from httpware import async_before_request
 
 
 _CORRELATION_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -83,7 +83,7 @@ from collections.abc import Callable
 import httpx2
 
 from httpware import AsyncClient
-from httpware.middleware import AsyncMiddleware, async_after_response
+from httpware import AsyncMiddleware, async_after_response
 
 
 MetricSink = Callable[[str, int], None]
@@ -126,8 +126,8 @@ When the upstream is unreachable, return a synthesized 503 with a sentinel heade
 import httpx2
 
 from httpware import AsyncClient
-from httpware.errors import NetworkError
-from httpware.middleware import async_on_error
+from httpware import NetworkError
+from httpware import async_on_error
 
 
 @async_on_error

@@ -1,6 +1,8 @@
 """Status-keyed exception hierarchy.
 
-Auto-raise rule lives at AsyncClient's internal terminal (see client.py).
+Auto-raise fires at four sites (all in client.py): both clients' internal
+terminals (Client._terminal / AsyncClient._terminal) and both stream() methods
+(Client.stream / AsyncClient.stream).
 Unknown 4xx falls back to ClientStatusError; unknown 5xx to ServerStatusError.
 The fallback assumes 400 <= status < 600.
 

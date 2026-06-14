@@ -15,7 +15,7 @@ A protocol seam is a documented internal boundary. AI agents and contributors mu
 
 ```toml
 [project.optional-dependencies]
-pydantic = ["pydantic>=2"]
+pydantic = ["pydantic>=2.0,<3.0"]
 msgspec = ["msgspec>=0.18"]
 ```
 
