@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-13
 slug: docs-audit-followups
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 58
+outcome: Shipped via #58 (squash a132c1e) — invariant-enforcement claim corrected in CLAUDE.md + architecture/overview.md, plus readability findings R1/R2/R3 and STATUS_TO_EXCEPTION docs (G5).
 ---
 
 # Change: Docs-audit follow-ups — invariant-enforcement wording + readability

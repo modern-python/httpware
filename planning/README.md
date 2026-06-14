@@ -70,11 +70,12 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-- **[docs-audit-followups](changes/active/2026-06-13.05-docs-audit-followups/change.md)** (draft, 2026-06-13) — Second batch from the [docs audit](audits/2026-06-13-docs-audit.md): fix the overstated invariant-enforcement claims in `CLAUDE.md` + `architecture/overview.md` (only `print()`/blanket-`type: ignore` are machine-checked), plus readability findings R1–R3 and documenting the public `STATUS_TO_EXCEPTION` (G5).
-- **[docs-accuracy-fixes](changes/active/2026-06-13.04-docs-accuracy-fixes/change.md)** (draft, 2026-06-13) — Fix the 5 verified factual errors from the [docs audit](audits/2026-06-13-docs-audit.md): RetryBudget formula, modern-di 2.x recipe, contributing-doc CI/grep claim, `just lint` comment, middleware stable-contracts list (+ AsyncTimeout non-finite wording).
+_None._
 
 ### Archived (shipped)
 
+- **[docs-audit-followups](changes/archive/2026-06-13.05-docs-audit-followups/change.md)** (#58, 2026-06-13) — Second docs-audit batch: corrected the overstated invariant-enforcement claims in `CLAUDE.md` + `architecture/overview.md` (only `print()`/blanket-`type: ignore` are machine-checked), readability findings R1–R3, and documented the public `STATUS_TO_EXCEPTION` (G5).
+- **[docs-accuracy-fixes](changes/archive/2026-06-13.04-docs-accuracy-fixes/change.md)** (f203821, 2026-06-13) — Fixed 5 verified factual errors from the [docs audit](audits/2026-06-13-docs-audit.md): RetryBudget formula, modern-di 2.x recipe, contributing-doc CI/grep claim, `just lint` comment, middleware stable-contracts list (+ AsyncTimeout non-finite wording).
 - **[portable-planning-convention](changes/archive/2026-06-13.03-portable-planning-convention/design.md)** (#55, 2026-06-13) — Adopt the portable two-axis convention: per-capability `architecture/` truth files + `changes/` bundles, full history backfill, byte-identical Conventions.
 - **[circuit-breaker-and-timeout](changes/archive/2026-06-13.02-circuit-breaker-and-timeout/design.md)** (#51, 2026-06-13) — Shipped 0.10.0 — CircuitBreaker + AsyncTimeout
 - **[msgspec-nested-customtype-fix](changes/archive/2026-06-13.01-msgspec-nested-customtype-fix/design.md)** (#43, 2026-06-13) — Shipped 0.9.1 — nested-CustomType guard
