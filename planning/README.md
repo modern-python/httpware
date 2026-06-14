@@ -70,7 +70,7 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-_None._
+- **[deep-audit](changes/active/2026-06-14.01-deep-audit/design.md)** (2026-06-14) — Full-codebase deep audit covering the perf/security/supply-chain gaps the 2026-06-07 audit skipped, plus correctness, concurrency, refactoring, and test quality. Report: [audits/2026-06-14-deep-audit.md](audits/2026-06-14-deep-audit.md) — 35 confirmed (1 High, 4 Medium, 14 Low, 14 nits); headline is an `architecture/extras.md` pydantic-isolation accuracy bug. Report-only; confirmed findings spawn follow-up bundles.
 
 ### Archived (shipped)
 
