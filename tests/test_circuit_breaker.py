@@ -21,6 +21,7 @@ from httpware import (
     NotFoundError,
     RateLimitedError,
     ServiceUnavailableError,
+    TimeoutError,
 )
 from httpware.middleware.resilience.circuit_breaker import AsyncCircuitBreaker
 
@@ -164,6 +165,20 @@ async def test_network_error_counts_as_failure() -> None:
     async with _client(_raise, breaker=breaker) as client:
         for _ in range(2):
             with pytest.raises(NetworkError):
+                await client.get("https://example.test/x")
+        with pytest.raises(CircuitOpenError):
+            await client.get("https://example.test/x")
+
+
+async def test_timeout_error_counts_as_failure() -> None:
+    def _raise(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "read timed out"
+        raise httpx2.ReadTimeout(msg, request=request)
+
+    breaker = AsyncCircuitBreaker(failure_threshold=2, _now=_Clock())
+    async with _client(_raise, breaker=breaker) as client:
+        for _ in range(2):
+            with pytest.raises(TimeoutError):
                 await client.get("https://example.test/x")
         with pytest.raises(CircuitOpenError):
             await client.get("https://example.test/x")
