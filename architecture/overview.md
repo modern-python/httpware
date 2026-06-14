@@ -4,11 +4,11 @@
 
 `httpx2` is part of the public surface. Exposing `httpx2.Request`/`httpx2.Response` is the design — `httpware` does not own a full abstraction over the underlying HTTP client.
 
-## Architectural invariants (CI-enforced)
+## Architectural invariants
 
-These are non-negotiable. CI rejects PRs that violate them. The "why" exists so future contributors can judge edge cases instead of blindly following the rule.
+These are non-negotiable, but **enforcement varies — do not assume CI will catch a violation.** Machine-checked: `print()` (ruff `T201`) and a blanket `# type: ignore` (ruff `PGH003`). Partially checked: the `httpx2._` ban — ruff `SLF001` flags private *attribute* access (`httpx2._foo`) but not a *used* private import (`from httpx2._internal import …`). Review-only: the future-import and global-logging bans, and `# type: ignore[<code>]` vs `# ty: ignore[<code>]`. The "why" exists so future contributors can judge edge cases instead of blindly following the rule.
 
-- **No `httpx2._` private API.** *Why:* private symbols can change between patch releases. We accept the public-API surface as the contract.
+- **No `httpx2._` private API.** *Why:* private symbols can change between patch releases. We accept the public-API surface as the contract. *Check:* `grep -rE 'httpx2\._' src/httpware/` should return zero matches — run in review; it is not wired into CI.
 - **No `from __future__ import annotations`.** *Why:* Python 3.11+ floor. PEP 604/585 syntax is native; the future-import would only add noise and inconsistency.
 - **No `print()`.** *Why:* ruff-enforced. Libraries log; they do not print to stdout. Stray prints leak into consumer applications.
 - **No global logging config.** *Why:* `logging.basicConfig()` from a library mutates the consumer's logging tree. We only acquire `logging.getLogger("httpware")` or namespaced child loggers and let consumers configure handlers.

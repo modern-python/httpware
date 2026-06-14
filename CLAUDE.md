@@ -45,11 +45,11 @@ uv run ruff format . && uv run ruff check . --fix && uv run ty check
 uv run pytest
 ```
 
-## Architecture invariants (CI-enforced)
+## Architecture invariants
 
-These are non-negotiable. CI rejects PRs that violate them.
+These are non-negotiable, but **most are NOT machine-checked — don't rely on CI to catch a violation.** Enforced by ruff: `print()` (`T201`) and a blanket `# type: ignore` (`PGH003`). Partially: `httpx2._` (ruff `SLF001` catches attribute access, not a *used* private import). Review-only: the future-import and global-logging bans.
 
-- **No `httpx2` private API**: `grep -rE 'httpx2\._' src/httpware/` must return zero matches. Public symbols only.
+- **No `httpx2` private API**: `grep -rE 'httpx2\._' src/httpware/` should return zero matches (run in review — not wired into CI). Public symbols only.
 - **No `from __future__ import annotations`**: Python 3.11+ floor; PEP 604/585 syntax is native.
 - **No `print()`**: enforced by ruff.
 - **No global logging config**: no `logging.basicConfig()`, no bare `logging.getLogger()`. Acquire `logging.getLogger("httpware")` or `logging.getLogger(f"httpware.{module}")` only.

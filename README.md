@@ -14,7 +14,7 @@
 
 **A Python HTTP client framework with sync and async clients for building resilient service clients.**
 
-`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain composed at client construction, supports opt-in typed response decoding (pydantic and msgspec are both extras), and raises a status-keyed exception tree automatically on 4xx/5xx. It also ships a resilience suite under `httpware.middleware.resilience` — `AsyncRetry`/`Retry` with a Finagle-style `RetryBudget`, `AsyncBulkhead`/`Bulkhead` concurrency limiter, `AsyncCircuitBreaker`/`CircuitBreaker` consecutive-failure breaker, and `AsyncTimeout` for overall-operation wall-clock bounds.
+`httpware` is a thin opinionated wrapper around `httpx2`. It re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain composed at client construction, supports opt-in typed response decoding (pydantic and msgspec are both extras), and raises a status-keyed exception tree automatically on 4xx/5xx. It also ships a resilience suite under `httpware.middleware.resilience` — `AsyncRetry`/`Retry` with a `RetryBudget` (a Finagle-style token bucket that caps the global retry rate to prevent retry storms), `AsyncBulkhead`/`Bulkhead` concurrency limiter, `AsyncCircuitBreaker`/`CircuitBreaker` consecutive-failure breaker, and `AsyncTimeout` for overall-operation wall-clock bounds.
 
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
@@ -28,7 +28,7 @@ pip install httpware[pydantic,msgspec]   # both extras — both decoders registe
 pip install httpware[all]           # everything declared above (pydantic, msgspec, otel)
 ```
 
-`AsyncClient()` resolves `decoders=None` against installed extras: pydantic if installed (first), msgspec if installed (second), or an empty tuple if neither. `AsyncClient()` never raises on missing extras — failure is deferred to the first `response_model=` call, where `MissingDecoderError` fires *before* the HTTP request if no registered decoder claims the model.
+`AsyncClient()` resolves `decoders=None` against installed extras: pydantic if installed (first), msgspec if installed (second), or an empty tuple if neither. Missing extras never raise at construction. Instead, resolution is deferred to the first `response_model=` call — and if no registered decoder claims the model, `MissingDecoderError` fires *before* the HTTP request goes out.
 
 ## Quickstart
 

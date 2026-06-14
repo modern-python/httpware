@@ -101,15 +101,20 @@ batch.)
 **R1 — dense stacked-qualifier sentences in the hottest spots.** `README.md:31`
 (decoder resolution) stacks two qualified clauses; the `respect_retry_after`
 cell in `docs/resilience.md:24` is a four-sentence paragraph inside a table cell.
-Correct, but hard on first read. *Suggest:* split the densest sentences/cells.
+Correct, but hard on first read. **Resolved** (`2026-06-13.05`) — split the
+decoder sentence and tightened the table cell.
 
 **R2 — unglossed jargon on first use.** "Finagle-style" (`README.md:17`),
 "full-jitter", "bulkhead", "PEP 678 note", "token bucket" — most are defined
-later or never, but the README is first contact. *Suggest:* a one-clause gloss on
-first use.
+later or never, but the README is first contact. **Resolved** (`2026-06-13.05`)
+— glossed "Finagle-style `RetryBudget`" (token bucket capping the global retry
+rate) and "PEP 678 note" → "an exception note (PEP 678)". ("bulkhead"/"full-jitter"
+left as standard resilience vocabulary.)
 
 **R3 — `_LOGGER` used in `errors.md` examples (lines 77, 130, 154) without
-definition.** A literal copy-paste hits `NameError`. Minor/conventional.
+definition.** A literal copy-paste hits `NameError`. **Resolved** (`2026-06-13.05`)
+— added `import logging` + `_LOGGER = logging.getLogger("myapp")` to the first
+block and a one-line note that the examples assume it.
 
 ### Onboarding & UX gaps (the larger lane — not bugs)
 
@@ -133,8 +138,9 @@ accompanying change.
   real public test endpoint for the leading example.
 - **G5 — `STATUS_TO_EXCEPTION` is a public `__all__` export
   (`src/httpware/__init__.py:54`) documented nowhere.** The lone undocumented
-  public symbol. *Suggest:* document it (it is the extensible status→exception
-  map) or reconsider its place in `__all__`.
+  public symbol. **Resolved** (`2026-06-13.05`) — documented at the
+  status-to-exception table in `docs/errors.md` (public `Mapping[int,
+  type[StatusError]]`, importable, fallback rows excluded).
 - **G6 — No custom-`ResponseDecoder` guide and no API reference.** The decoder
   seam (Seam B) is a documented extension point but, unlike middleware, gets no
   "write your own" guide; and there is no generated symbol reference
@@ -181,14 +187,23 @@ follow them. No orphan pages and no broken nav targets — the nav is otherwise 
 - **`2026-06-13.04-docs-accuracy-fixes`** (lightweight) — fixes B1, B2, I1, I2, I3,
   and the `AsyncTimeout`-validation wording. All verified against code / official
   upstream docs.
+- **`2026-06-13.05-docs-audit-followups`** (lightweight) — the invariant-enforcement
+  wording fix (triage item below) plus readability/small-gap findings R1, R2, R3, G5.
 
 ## Deferred / triage
 
-- The onboarding & UX gaps (G1–G6) — a separate, larger docs-UX change (de-dup,
-  why-httpware, base-client migration, runnable quickstart, custom-decoder guide,
-  API reference). Not yet scheduled.
-- The `httpx2._` invariant is documented as CI-enforced (`CLAUDE.md`,
-  `architecture/overview.md`, and — fixed here — `contributing.md`) but no CI
-  workflow runs the grep. Either wire `grep -rE 'httpx2\._' src/httpware/` into the
-  lint workflow (tiny CI change) or downgrade the "CI-enforced" wording in the two
-  internal truth docs. Parked pending a decision on which.
+- The onboarding & UX gaps **G1, G2, G3, G4, G6** (why-httpware, base-client
+  migration, README ↔ index de-dup, runnable quickstart, custom-decoder guide +
+  API reference) — a separate, larger docs-UX change that needs design, not
+  mechanical edits. Not yet scheduled. (G5 resolved in `2026-06-13.05`.)
+- ~~The `httpx2._` invariant is documented as CI-enforced but no CI workflow runs
+  the grep.~~ **Resolved (option 2 — fix the claim).** Empirically confirmed against
+  the real `ruff --select ALL` ruleset: only `print()` (`T201`) and a *blanket*
+  `# type: ignore` (`PGH003`) are machine-checked; the `httpx2._` ban is partial
+  (`SLF001` catches private *attribute* access, e.g. `httpx2._foo`, but **not** a
+  *used* private import like `from httpx2._internal import x`); the future-import,
+  global-logging, and `# ty:`-vs-`# type:` rules are review-only. The blanket
+  "(CI-enforced) / CI rejects PRs" heading in `CLAUDE.md` and
+  `architecture/overview.md` was rewritten to state the actual enforcement split
+  and to note the `httpx2._` grep is a review check, not a CI gate.
+  `contributing.md` was already corrected in the `docs-accuracy-fixes` change.
