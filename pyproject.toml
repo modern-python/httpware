@@ -97,4 +97,4 @@ asyncio_default_fixture_loop_scope = "function"
 
 [tool.coverage]
 run.concurrency = ["thread"]
-report.exclude_also = ["if typing.TYPE_CHECKING:"]
+report.exclude_also = ["if typing.TYPE_CHECKING:", 'pytest\.fail\(']

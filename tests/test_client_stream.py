@@ -351,7 +351,7 @@ async def test_stream_raises_response_too_large_when_over_cap() -> None:
     )
     with pytest.raises(ResponseTooLargeError) as caught:
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
     assert caught.value.limit == 10  # noqa: PLR2004 — mirrors max_error_body_bytes above
     assert caught.value.content_length == 200  # noqa: PLR2004 — len(body) above
     await client.aclose()
@@ -368,7 +368,7 @@ async def test_stream_reads_error_body_when_under_cap() -> None:
     )
     with pytest.raises(NotFoundError) as caught:
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
     assert caught.value.response.content == body
     await client.aclose()
 
@@ -382,7 +382,7 @@ async def test_stream_unbounded_by_default_reads_large_error_body() -> None:
     client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)))
     with pytest.raises(InternalServerError) as caught:
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
     assert caught.value.response.content == body
     await client.aclose()
 

@@ -57,3 +57,4 @@ def test_redact_url_masks_whitespace_padded_key() -> None:
     # a space-padded sensitive key name must still be masked
     result = redact_url("https://example.test/p?%20api_key=topsecret")
     assert "topsecret" not in result
+    assert "REDACTED" in result
