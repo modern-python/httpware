@@ -42,12 +42,20 @@ def _strip_userinfo(url: str) -> str:
     parts = urlsplit(url)
     if parts.username is None and parts.password is None:
         return url
-    hostname = parts.hostname or ""
-    if ":" in hostname:  # IPv6 literal — re-wrap in brackets
-        hostname = f"[{hostname}]"
-    netloc = hostname
-    if parts.port is not None:
-        netloc = f"{netloc}:{parts.port}"
+    # Strip the "user:pass@" prefix from the raw netloc to preserve host:port
+    # exactly (including IPv6 brackets), rather than reconstructing from parts.
+    netloc = parts.netloc.split("@", 1)[1] if "@" in parts.netloc else parts.netloc
+    if not netloc:
+        # No host remains after stripping userinfo (e.g. http://user:pass@/path).
+        # urlunsplit with an empty netloc and a path starting with "/" would emit
+        # a triple-slash form ("http:///path").  Reconstruct without an authority
+        # section instead, yielding the scheme-only prefix ("http:/path").
+        tail = parts.path
+        if parts.query:
+            tail += "?" + parts.query
+        if parts.fragment:
+            tail += "#" + parts.fragment
+        return parts.scheme + ":" + tail
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 

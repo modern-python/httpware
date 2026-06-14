@@ -58,3 +58,12 @@ def test_redact_url_masks_whitespace_padded_key() -> None:
     result = redact_url("https://example.test/p?%20api_key=topsecret")
     assert "topsecret" not in result
     assert "REDACTED" in result
+
+
+def test_strip_userinfo_no_hostname_does_not_produce_triple_slash() -> None:
+    """http://user:pass@/path must strip creds without yielding http:///path."""
+    result = redact_url("http://user:pass@/path")
+    assert "user" not in result
+    assert "pass" not in result
+    assert ":///" not in result  # must not be triple-slash
+    assert result == "http:/path"  # no authority, just scheme + path
