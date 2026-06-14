@@ -119,20 +119,29 @@ def test_emit_event_calls_add_event_when_otel_installed() -> None:
     mock_span.add_event.assert_called_once_with("test.event", attributes={"k": "v"})
 
 
-def test_emit_event_works_when_otel_installed_but_no_active_span() -> None:
+def test_emit_event_works_when_otel_installed_but_no_active_span(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """With OTel installed but no tracer configured, get_current_span() returns NonRecordingSpan.
 
-    add_event is a documented no-op. No error.
+    add_event is a documented no-op. The log-only fallback path must still emit
+    a record at the requested level with the correct event attribute.
     """
     # Real OTel API call (no mocking) — opentelemetry-api is installed via the otel extra.
-    _emit_event(
-        _TEST_LOGGER,
-        "test.event",
-        level=logging.WARNING,
-        message="real-otel-but-no-tracer",
-        attributes={"a": 1},
-    )
-    # No assertion needed — the absence of an exception IS the assertion.
+    with caplog.at_level(logging.WARNING, logger="httpware.test.observability"):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="real-otel-but-no-tracer",
+            attributes={"a": 1},
+        )
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.WARNING
+    assert record.message == "real-otel-but-no-tracer"
+    assert record.event == "test.event"  # ty: ignore[unresolved-attribute]
 
 
 def test_emit_event_swallows_add_event_failure() -> None:
