@@ -9,8 +9,10 @@ import pytest
 from httpware import (
     Client,
     ClientStatusError,
+    InternalServerError,
     NetworkError,
     NotFoundError,
+    ResponseTooLargeError,
     ServerStatusError,
     ServiceUnavailableError,
     TransportError,
@@ -304,3 +306,43 @@ def test_stream_with_files_kwarg() -> None:
     ) as response:
         _ = list(response.iter_bytes())
     assert "multipart/form-data" in seen[0].headers["content-type"]
+
+
+def test_stream_raises_response_too_large_when_over_cap_sync() -> None:
+    body = b"x" * 200
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(500, content=body)
+
+    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_error_body_bytes=10)
+    with pytest.raises(ResponseTooLargeError) as caught, client.stream("GET", "https://example.test/x"):
+        pass
+    assert caught.value.limit == 10  # noqa: PLR2004 — mirrors max_error_body_bytes above
+    assert caught.value.content_length == 200  # noqa: PLR2004 — len(body) above
+    client.close()
+
+
+def test_stream_reads_error_body_when_under_cap_sync() -> None:
+    body = b"nope"
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(404, content=body)
+
+    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_error_body_bytes=1000)
+    with pytest.raises(NotFoundError) as caught, client.stream("GET", "https://example.test/x"):
+        pass
+    assert caught.value.response.content == body
+    client.close()
+
+
+def test_stream_unbounded_by_default_reads_large_error_body_sync() -> None:
+    body = b"x" * 200
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(500, content=body)
+
+    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
+    with pytest.raises(InternalServerError) as caught, client.stream("GET", "https://example.test/x"):
+        pass
+    assert caught.value.response.content == body
+    client.close()

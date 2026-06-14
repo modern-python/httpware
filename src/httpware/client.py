@@ -16,7 +16,7 @@ from httpware._internal.status import (
     _raise_on_status_error,
 )
 from httpware.decoders import ResponseDecoder
-from httpware.errors import DecodeError, MissingDecoderError, TransportError
+from httpware.errors import DecodeError, MissingDecoderError, ResponseTooLargeError, TransportError
 from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
 from httpware.middleware.chain import compose, compose_async
 
@@ -29,6 +29,17 @@ _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
     "httpx2_client=... cannot be combined with any of "
     f"{_FORWARDED_KWARG_NAMES}; configure the httpx2 client you pass instead."
 )
+
+
+def _parse_content_length(raw: str | None) -> int | None:
+    """Return a non-negative int Content-Length, or None for missing/garbage. Never raises."""
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
 
 
 def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
@@ -82,6 +93,7 @@ class AsyncClient:
     _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[AsyncMiddleware, ...]
     _dispatch: AsyncNext
+    _max_error_body_bytes: int | None
 
     def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
@@ -96,6 +108,7 @@ class AsyncClient:
         httpx2_client: httpx2.AsyncClient | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[AsyncMiddleware] = (),
+        max_error_body_bytes: int | None = None,
     ) -> None:
         if httpx2_client is not None:
             forwarded = {
@@ -133,6 +146,7 @@ class AsyncClient:
         self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()
         self._user_middleware = tuple(middleware)
         self._dispatch = compose_async(self._user_middleware, self._terminal)
+        self._max_error_body_bytes = max_error_body_bytes
 
     def _dispatch_decoder(self, model: type) -> ResponseDecoder | None:
         """Walk `_decoders` and return the first decoder claiming `model`, or None."""
@@ -785,6 +799,14 @@ class AsyncClient:
 
         async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
+                if self._max_error_body_bytes is not None:
+                    content_length = _parse_content_length(response.headers.get("content-length"))
+                    if content_length is not None and content_length > self._max_error_body_bytes:
+                        raise ResponseTooLargeError(
+                            status_code=response.status_code,
+                            limit=self._max_error_body_bytes,
+                            content_length=content_length,
+                        )
                 await response.aread()  # pre-read body so exc.response.content works
                 _raise_on_status_error(response)
             yield response
@@ -822,6 +844,7 @@ class Client:
     _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[Middleware, ...]
     _dispatch: Next
+    _max_error_body_bytes: int | None
 
     def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
@@ -836,6 +859,7 @@ class Client:
         httpx2_client: httpx2.Client | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[Middleware] = (),
+        max_error_body_bytes: int | None = None,
     ) -> None:
         if httpx2_client is not None:
             forwarded = {
@@ -873,6 +897,7 @@ class Client:
         self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()
         self._user_middleware = tuple(middleware)
         self._dispatch = compose(self._user_middleware, self._terminal)
+        self._max_error_body_bytes = max_error_body_bytes
 
     def _dispatch_decoder(self, model: type) -> ResponseDecoder | None:
         """Walk `_decoders` and return the first decoder claiming `model`, or None."""
@@ -1547,6 +1572,14 @@ class Client:
 
         with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
+                if self._max_error_body_bytes is not None:
+                    content_length = _parse_content_length(response.headers.get("content-length"))
+                    if content_length is not None and content_length > self._max_error_body_bytes:
+                        raise ResponseTooLargeError(
+                            status_code=response.status_code,
+                            limit=self._max_error_body_bytes,
+                            content_length=content_length,
+                        )
                 response.read()  # pre-read body so exc.response.content works
                 _raise_on_status_error(response)
             yield response

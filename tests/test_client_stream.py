@@ -10,8 +10,10 @@ import pytest
 from httpware import (
     AsyncClient,
     ClientStatusError,
+    InternalServerError,
     NetworkError,
     NotFoundError,
+    ResponseTooLargeError,
     ServerStatusError,
     ServiceUnavailableError,
     TransportError,
@@ -19,6 +21,7 @@ from httpware import (
 from httpware import (
     TimeoutError as HttpwareTimeoutError,
 )
+from httpware.client import _parse_content_length
 from httpware.middleware import AsyncMiddleware, AsyncNext
 
 
@@ -335,3 +338,58 @@ async def test_stream_with_files_kwarg() -> None:
     ) as response:
         _ = [chunk async for chunk in response.aiter_bytes()]
     assert "multipart/form-data" in seen[0].headers["content-type"]
+
+
+async def test_stream_raises_response_too_large_when_over_cap() -> None:
+    body = b"x" * 200
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(500, content=body)
+
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)), max_error_body_bytes=10
+    )
+    with pytest.raises(ResponseTooLargeError) as caught:
+        async with client.stream("GET", "https://example.test/x"):
+            pass
+    assert caught.value.limit == 10  # noqa: PLR2004 — mirrors max_error_body_bytes above
+    assert caught.value.content_length == 200  # noqa: PLR2004 — len(body) above
+    await client.aclose()
+
+
+async def test_stream_reads_error_body_when_under_cap() -> None:
+    body = b"nope"
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(404, content=body)
+
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)), max_error_body_bytes=1000
+    )
+    with pytest.raises(NotFoundError) as caught:
+        async with client.stream("GET", "https://example.test/x"):
+            pass
+    assert caught.value.response.content == body
+    await client.aclose()
+
+
+async def test_stream_unbounded_by_default_reads_large_error_body() -> None:
+    body = b"x" * 200
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(500, content=body)
+
+    client = AsyncClient(httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)))
+    with pytest.raises(InternalServerError) as caught:
+        async with client.stream("GET", "https://example.test/x"):
+            pass
+    assert caught.value.response.content == body
+    await client.aclose()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(None, None), ("123", 123), ("abc", None), ("-5", None), ("0", 0)],
+)
+def test_parse_content_length(raw: str | None, expected: int | None) -> None:
+    assert _parse_content_length(raw) == expected
