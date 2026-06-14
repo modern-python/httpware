@@ -57,7 +57,7 @@ async def test_auto_raises_on_4xx_with_body_preread() -> None:
     client = _client(handler)
     with pytest.raises(NotFoundError) as info:
         async with client.stream("GET", "https://example.test/missing"):
-            pytest.fail("should have raised before reaching block body")  # pragma: no cover
+            pytest.fail("should have raised before reaching block body")
     assert info.value.response.status_code == _NOT_FOUND
     assert info.value.response.content == body  # body was pre-read; accessible
 
@@ -71,7 +71,7 @@ async def test_auto_raises_on_5xx_with_body_preread() -> None:
     client = _client(handler)
     with pytest.raises(ServiceUnavailableError) as info:
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
     assert info.value.response.content == body
 
 
@@ -82,7 +82,7 @@ async def test_auto_raises_unknown_4xx_falls_back_to_client_status_error() -> No
     client = _client(handler)
     with pytest.raises(ClientStatusError) as info:
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
     assert type(info.value) is ClientStatusError
     assert info.value.response.status_code == _UNKNOWN_4XX
 
@@ -94,7 +94,7 @@ async def test_auto_raises_unknown_5xx_falls_back_to_server_status_error() -> No
     client = _client(handler)
     with pytest.raises(ServerStatusError) as info:
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
     assert type(info.value) is ServerStatusError
     assert info.value.response.status_code == _UNKNOWN_5XX
 
@@ -116,7 +116,7 @@ async def test_network_error_during_request_maps_to_network_error() -> None:
     client = _client(handler)
     with pytest.raises(NetworkError, match="connect refused"):
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
 
 
 async def test_network_error_during_body_consumption_maps_to_network_error() -> None:
@@ -147,7 +147,7 @@ async def test_timeout_during_stream_maps_to_httpware_timeout() -> None:
     client = _client(handler)
     with pytest.raises(HttpwareTimeoutError, match="read timeout"):
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
 
 
 async def test_invalid_url_maps_to_bare_transport_error() -> None:
@@ -158,7 +158,7 @@ async def test_invalid_url_maps_to_bare_transport_error() -> None:
     client = _client(handler)
     with pytest.raises(TransportError) as info:
         async with client.stream("GET", "https://example.test/x"):
-            pytest.fail("unreachable")  # pragma: no cover
+            pytest.fail("unreachable")
     assert not isinstance(info.value, NetworkError)
 
 
