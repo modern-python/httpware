@@ -73,6 +73,20 @@ def test_in_flight_never_exceeds_max_concurrent(
     assert handler.max_in_flight <= max_concurrent
 
 
+class _BarrierHandler:
+    """Handler that signals slot acquisition via a threading.Barrier before holding the slot."""
+
+    def __init__(self, barrier: threading.Barrier) -> None:
+        self._barrier = barrier
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        # Signal that this holder has acquired a bulkhead slot and is now in-flight.
+        self._barrier.wait(timeout=5.0)
+        # Hold the slot long enough for the over-limit requests to be rejected.
+        time.sleep(0.05)
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+
 @given(
     max_concurrent=st.integers(min_value=1, max_value=4),
     extra_requests=st.integers(min_value=1, max_value=8),
@@ -82,7 +96,11 @@ def test_fail_fast_rejects_when_at_capacity(
     max_concurrent: int,
     extra_requests: int,
 ) -> None:
-    handler = _InFlightHandler(delay=0.05)  # hold slots long enough for fail-fast to fire
+    # Barrier: max_concurrent holders + 1 main thread — all parties meet once every
+    # holder has acquired its bulkhead slot (i.e. is inside the handler).
+    # timeout=5.0 sets the default for all barrier.wait() calls.
+    acquired_barrier = threading.Barrier(max_concurrent + 1, timeout=5.0)
+    handler = _BarrierHandler(acquired_barrier)
     transport = httpx2.MockTransport(handler)
     client = Client(
         httpx2_client=httpx2.Client(transport=transport),
@@ -92,8 +110,8 @@ def test_fail_fast_rejects_when_at_capacity(
     # Fill the bulkhead with max_concurrent long-running threads.
     pool = ThreadPoolExecutor(max_workers=max_concurrent + extra_requests)
     holders = [pool.submit(client.get, f"https://example.test/hold-{i}") for i in range(max_concurrent)]
-    # Wait for the holders to acquire — sleep long enough for thread startup.
-    time.sleep(0.005)
+    # Wait deterministically — barrier releases only once ALL holders are inside the handler.
+    acquired_barrier.wait(timeout=5.0)
 
     # Any extra requests should fail fast with BulkheadFullError.
     for i in range(extra_requests):
