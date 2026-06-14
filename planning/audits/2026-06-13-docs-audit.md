@@ -125,17 +125,20 @@ accompanying change.
 - **G1 — No "why httpware".** Both README and index lead with "thin wrapper over
   httpx2" + a feature list. The actual selling points (typed errors without
   `raise_for_status()`; typed bodies via `response_model=`) are buried mid-page.
-  *Suggest:* a 3-bullet "Why httpware" block up top.
-- **G2 — No base-client migration guide.** httpware explicitly supersedes
-  community-of-python/base-client, yet that inbound audience has zero signpost in
-  the user docs. *Suggest:* `docs/migration-from-base-client.md`.
+  **Resolved** (`2026-06-14.01`) — 3-bullet "Why httpware" block added to the top
+  of both README and `docs/index.md`.
+- **G2 — No base-client migration guide.** **Won't do** (`2026-06-14.01`) — per
+  the maintainer, base-client is scrubbed entirely, not documented; the lone live
+  mention (`CLAUDE.md`) was removed and no migration guide is written.
 - **G3 — README ↔ index.md ~70% duplicated**, including the entire observability
-  contract table — guaranteed to drift on the next logger/event change. *Suggest:*
-  one canonical home (docs/); README becomes value-prop + install + one quickstart
-  + links.
+  contract table — guaranteed to drift on the next logger/event change. **Resolved**
+  (`2026-06-14.01`) — README slimmed to a front-door (why + install + one runnable
+  quickstart + links); `docs/index.md` is now the single canonical home for the
+  full quickstart/resilience/streaming/errors/observability content.
 - **G4 — First quickstart hits `https://example.test`**, which resolves to
-  nothing — a newcomer's first paste yields `NetworkError`, not data. *Suggest:* a
-  real public test endpoint for the leading example.
+  nothing — a newcomer's first paste yields `NetworkError`, not data. **Resolved**
+  (`2026-06-14.01`) — leading examples (README + `docs/index.md`) now hit
+  `jsonplaceholder.typicode.com/users/1`; verified to return a decoded `User` live.
 - **G5 — `STATUS_TO_EXCEPTION` is a public `__all__` export
   (`src/httpware/__init__.py:54`) documented nowhere.** The lone undocumented
   public symbol. **Resolved** (`2026-06-13.05`) — documented at the
@@ -151,6 +154,11 @@ Navigation nits (LOW): mkdocs nav orders Resilience before Middleware though
 Resilience is built on it and forward-references it; several `architecture/*.md`
 references in published pages are bare paths, not links, so a site reader cannot
 follow them. No orphan pages and no broken nav targets — the nav is otherwise clean.
+**Resolved** (`2026-06-14.01`) — nav reordered (Middleware before Resilience) and
+all five bare `architecture/*.md` references converted to absolute GitHub links.
+
+Only **G6** (custom-`ResponseDecoder` guide; no API reference per maintainer)
+remains open after `2026-06-14.01`.
 
 ### Verified correct (negative results)
 

@@ -110,7 +110,7 @@ The example pairs naturally with the 0.6.0 observability events: a `httpware.ret
 - **Redaction:** Use a `logging.Filter` on the consumer side. `httpware` deliberately does no redaction in-library (per the 0.6.0 observability design).
 - **URL or header validation:** `httpx2` owns it. Don't reimplement.
 - **Per-call behavior that doesn't apply to other calls:** Pass through `request.extensions=` (or the `extensions=` kwarg at the call site) instead. Middleware exists for *cross-cutting* concerns.
-- **HTTP-level span creation for tracing:** Install `opentelemetry-instrumentation-httpx` instead of writing an OTel middleware in httpware. We retired story `5-4` (standalone OTel middleware) for this reason — `opentelemetry-instrumentation-httpx` already covers transport-level tracing, and a separate httpware layer would duplicate it. See `architecture/middleware.md`.
+- **HTTP-level span creation for tracing:** Install `opentelemetry-instrumentation-httpx` instead of writing an OTel middleware in httpware. We retired story `5-4` (standalone OTel middleware) for this reason — `opentelemetry-instrumentation-httpx` already covers transport-level tracing, and a separate httpware layer would duplicate it. See [`architecture/middleware.md`](https://github.com/modern-python/httpware/blob/main/architecture/middleware.md).
 
 ## Wiring OpenTelemetry
 
@@ -198,6 +198,6 @@ Sync and async middleware classes do not interop: a `Middleware` cannot be passe
 
 ## See also
 
-- **`architecture/middleware.md` (Seam A)** — the formal protocol contract and why the chain is frozen at construction.
+- **[`architecture/middleware.md`](https://github.com/modern-python/httpware/blob/main/architecture/middleware.md) (Seam A)** — the formal protocol contract and why the chain is frozen at construction.
 - **`src/httpware/middleware/resilience/`** — `AsyncRetry`, `AsyncBulkhead`, `RetryBudget` as real-world consumers of this exact protocol.
 - **[Quick-Start composition example](index.md#with-resilience-middleware)** — composing built-in middleware.
