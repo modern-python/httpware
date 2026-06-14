@@ -2,6 +2,12 @@
 
 A Python HTTP client framework with sync and async clients for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry`/`Retry` + `RetryBudget`, `AsyncBulkhead`/`Bulkhead`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 
+## Why httpware
+
+- **Typed errors, no `raise_for_status()`** — 4xx/5xx automatically raise a status-keyed exception tree (`NotFoundError`, `RateLimitedError`, …), all under `httpware.StatusError`.
+- **Typed response bodies** — `response_model=YourType` decodes the body straight to your pydantic or msgspec model; a missing decoder fails fast, *before* the request goes out.
+- **Production resilience as composable middleware** — retry + retry-budget, bulkhead, circuit breaker, and timeout, composed at construction — all over standard `httpx2`.
+
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
 ## Install
@@ -28,8 +34,8 @@ import asyncio
 from httpware import AsyncClient
 
 async def main() -> None:
-    async with AsyncClient(base_url="https://example.test") as client:
-        response = await client.get("/users/42")
+    async with AsyncClient(base_url="https://jsonplaceholder.typicode.com") as client:
+        response = await client.get("/users/1")
         print(response.json())
 
 asyncio.run(main())
@@ -40,8 +46,8 @@ asyncio.run(main())
 ```python
 from httpware import Client
 
-with Client(base_url="https://example.test") as client:
-    response = client.get("/users/42")
+with Client(base_url="https://jsonplaceholder.typicode.com") as client:
+    response = client.get("/users/1")
     print(response.json())
 ```
 
