@@ -2,10 +2,14 @@
 
 See planning/specs/2026-06-05-retry-and-retry-budget-design.md for the contract.
 
-Thread-safe and asyncio-safe: all mutations go through a threading.Lock.
-A single RetryBudget instance is safe to share across threads, across
-coroutines on one event loop, and across (sync Client, AsyncClient) pairs
-in the same process.
+Thread-safe and asyncio-safe: all mutations go through a threading.Lock,
+which ensures no torn state across concurrent accesses. When a RetryBudget
+is shared between a sync Client (pool thread) and an AsyncClient (event-loop
+thread), a sync thread holding the lock can briefly block the loop thread's
+acquisition; the critical section (purge + append/compare) is intentionally
+tiny to bound this latency. Safe to share across threads, across coroutines
+on one event loop, and across (sync Client, AsyncClient) pairs in the same
+process.
 """
 
 import math
