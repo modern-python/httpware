@@ -53,8 +53,16 @@ async def _drive_async_side(budget: RetryBudget) -> None:
         await asyncio.gather(*[_safe_get(async_client) for _ in range(_N_ASYNC_TASKS)])
 
 
+def _fixed_clock() -> float:
+    """Return a constant timestamp so RetryBudget._purge never evicts deposits during this test."""
+    return 0.0
+
+
 def test_shared_budget_across_sync_threads_and_async_loop() -> None:
-    budget = RetryBudget(ttl=60.0, min_retries_per_sec=1000.0, percent_can_retry=0.5)
+    # _now is pinned to a fixed timestamp: all deposits share the same timestamp,
+    # so the TTL window cutoff is also 0.0 and _purge evicts nothing. This makes
+    # the deposit-count assertion exact and independent of wall-clock elapsed time.
+    budget = RetryBudget(ttl=60.0, min_retries_per_sec=1000.0, percent_can_retry=0.5, _now=_fixed_clock)
 
     sync_transport = httpx2.MockTransport(_failing_handler)
     sync_client = Client(
@@ -73,8 +81,9 @@ def test_shared_budget_across_sync_threads_and_async_loop() -> None:
 
     # The lock kept the budget's internal deques consistent — no IndexError, no corruption.
     # 0.8.3 deposit-hoist: deposits count requests, not attempts (one per __call__,
-    # regardless of max_attempts). Budget TTL is 60.0 so no purge fires during the
-    # sub-second runtime; the count is exact.
+    # regardless of max_attempts). The pinned clock ensures _purge never evicts any
+    # deposit (all timestamps are 0.0, cutoff is 0.0 - 60.0 = -60.0 < 0.0, so the
+    # strict `< cutoff` predicate is always False), making the deposit count exact.
     expected_deposits = (_N_SYNC_THREADS * _N_OPS_PER_THREAD) + _N_ASYNC_TASKS
     assert len(budget._deposits) == expected_deposits, (  # noqa: SLF001
         f"expected {expected_deposits} deposits, got {len(budget._deposits)}"  # noqa: SLF001
