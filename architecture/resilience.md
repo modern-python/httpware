@@ -4,7 +4,7 @@
 
 ## Retry + RetryBudget
 
-`Retry` (and `AsyncRetry`) is a retry middleware backed by a Finagle-style `RetryBudget` — a token bucket that caps the proportion of traffic spent on retries so a degraded backend cannot be amplified into a retry storm. `RetryBudget` is a single thread-safe class shared by both worlds. Backoff between attempts uses full-jitter.
+`Retry` (and `AsyncRetry`) is a retry middleware backed by a Finagle-style `RetryBudget` — a token bucket that caps the proportion of traffic spent on retries so a degraded backend cannot be amplified into a retry storm. `RetryBudget` is a single thread-safe class shared by both worlds: all mutations go through a `threading.Lock`, so state is never torn. "Safe" here means no corruption, not non-blocking — when one budget is shared across a (sync `Client`, `AsyncClient`) pair, a sync thread holding the lock can briefly block the event-loop thread's acquisition. The critical section is intentionally tiny to bound that latency. Backoff between attempts uses full-jitter.
 
 ## Bulkhead
 
@@ -21,3 +21,5 @@ The recommended (documented, not enforced) composition order is `AsyncTimeout �
 ## Observability
 
 `Retry`, `Bulkhead`, `CircuitBreaker`, and `AsyncTimeout` emit operational events via stdlib `logging` records on dedicated loggers (`httpware.retry`, `httpware.bulkhead`, `httpware.circuit_breaker`, `httpware.timeout`) and — when `opentelemetry-api` is installed — OpenTelemetry span events on the active span via `trace.get_current_span().add_event(...)`. The circuit-breaker and timeout event names (`circuit.opened`, `circuit.rejected`, `circuit.half_open`, `circuit.closed`, `timeout.exceeded`) join `retry.*` / `bulkhead.*` as the stable observability surface; renames are breaking changes.
+
+Every event's `url` attribute is redacted before emission: `user:pass@` userinfo is stripped and the values of known-sensitive query/fragment parameters (`api_key`, `access_token`, `token`, `secret`, `password`, …) are masked with `REDACTED`, so secrets in request URLs do not reach logs or telemetry. Redaction happens once at the `_emit_event` emission boundary — covering both the log record and the span event — so it cannot be bypassed by a new emit site, and non-secret URLs are left unchanged. The same `redact_url` sanitizer backs `StatusError` messages and `repr` (see [Errors](errors.md)).
