@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: security-hardening
 spec: security-hardening
-pr: null
+pr: 63
 ---
 
 # security-hardening — implementation plan

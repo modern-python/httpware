@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: security-hardening
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 63
+outcome: Shipped via #63 — URL secret redaction centralized at the _emit_event chokepoint, opt-in max_error_body_bytes + ResponseTooLargeError bound the stream() error pre-read, trust_env + header-reachability docs. Non-streaming hard body cap deferred (planning/deferred.md).
 ---
 
 # Design: Security hardening — URL secret redaction + bounded error-body reads

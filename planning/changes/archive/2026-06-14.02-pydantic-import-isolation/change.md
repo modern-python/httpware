@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: pydantic-import-isolation
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 62
+outcome: Shipped via #62 — pydantic import guarded behind is_pydantic_installed so the decoder module loads without the extra; the architecture/extras.md Seam-C isolation invariant is now true for pydantic. Closed deep-audit High + 2 folded Mediums.
 ---
 
 # Change: Guard the pydantic import so the decoder module loads without the extra
