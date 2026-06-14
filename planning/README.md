@@ -70,7 +70,7 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-_None._
+- **[docs-ux-restructure](changes/active/2026-06-14.01-docs-ux-restructure/design.md)** (draft, 2026-06-14) — Thin README front-door + canonical `docs/index.md`, why-httpware hook (G1), runnable first example (G4), nav nits, base-client scrub. G2 dropped, G6 deferred.
 
 ### Archived (shipped)
 
