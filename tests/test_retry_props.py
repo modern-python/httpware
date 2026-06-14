@@ -1,11 +1,15 @@
-"""Hypothesis property tests for AsyncRetry.
+"""Hypothesis property tests for AsyncRetry — sequential retry-policy bounds.
 
-Properties verified:
+Each test issues a single sequential request (one Hypothesis example at a time)
+and verifies the bounds that apply to a single-caller retry loop:
 1. Total attempts never exceed max_attempts.
 2. Total sleep time never exceeds max_attempts * max_delay.
 3. Non-retryable statuses (NOT in retry_status_codes) cause exactly one attempt.
 4. Non-idempotent methods (NOT in retry_methods) cause exactly one attempt,
    regardless of response status.
+
+Concurrent shared-budget behaviour (multiple callers racing on one RetryBudget)
+is covered separately in tests/test_threading_with_shared_budget.py.
 """
 
 import math
