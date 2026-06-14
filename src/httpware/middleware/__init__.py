@@ -11,6 +11,19 @@ from typing import Protocol, TypeAlias, runtime_checkable
 import httpx2
 
 
+__all__ = [
+    "AsyncMiddleware",
+    "AsyncNext",
+    "Middleware",
+    "Next",
+    "after_response",
+    "async_after_response",
+    "async_before_request",
+    "async_on_error",
+    "before_request",
+    "on_error",
+]
+
 AsyncNext: TypeAlias = Callable[[httpx2.Request], Awaitable[httpx2.Response]]
 
 
