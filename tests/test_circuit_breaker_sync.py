@@ -16,7 +16,7 @@ from httpware import (
     NotFoundError,
     RateLimitedError,
     ServiceUnavailableError,
-    TimeoutError,
+    TimeoutError,  # noqa: A004 — intentional: httpware.TimeoutError shadows the builtin
 )
 from httpware.middleware.resilience.circuit_breaker import CircuitBreaker
 

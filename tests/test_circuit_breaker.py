@@ -21,7 +21,7 @@ from httpware import (
     NotFoundError,
     RateLimitedError,
     ServiceUnavailableError,
-    TimeoutError,
+    TimeoutError,  # noqa: A004 — intentional: httpware.TimeoutError shadows the builtin
 )
 from httpware.middleware.resilience.circuit_breaker import AsyncCircuitBreaker
 
@@ -171,7 +171,7 @@ async def test_network_error_counts_as_failure() -> None:
 
 
 async def test_timeout_error_counts_as_failure() -> None:
-    def _raise(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+    def _raise(request: httpx2.Request) -> httpx2.Response:
         msg = "read timed out"
         raise httpx2.ReadTimeout(msg, request=request)
 
