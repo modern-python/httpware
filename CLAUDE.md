@@ -4,7 +4,7 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 ## Project Overview
 
-`httpware` is a Python HTTP client framework with sync and async clients for building resilient service clients. It supersedes `community-of-python/base-client` and ships under the `modern-python` org. The framework is a thin opinionated wrapper around `httpx2`: it re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain, typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
+`httpware` is a Python HTTP client framework with sync and async clients for building resilient service clients. It ships under the `modern-python` org and is a thin opinionated wrapper around `httpx2`: it re-exports `httpx2.Request`/`httpx2.Response`, adds a middleware chain, typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 
 **Where to find what:**
 
