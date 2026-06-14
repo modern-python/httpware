@@ -142,6 +142,27 @@ def test_per_status_subclasses_construct(status: int, expected: type[StatusError
     assert exc.response.status_code == status
 
 
+@pytest.mark.parametrize(
+    "cls",
+    [
+        BadRequestError,
+        UnauthorizedError,
+        ForbiddenError,
+        NotFoundError,
+        ConflictError,
+        UnprocessableEntityError,
+        RateLimitedError,
+        InternalServerError,
+        ServiceUnavailableError,
+    ],
+)
+def test_status_error_leaves_do_not_override_init(cls: type[StatusError]) -> None:
+    """CLAUDE.md invariant: StatusError leaf classes must not define their own __init__."""
+    assert "__init__" not in cls.__dict__, (
+        f"{cls.__name__} defines __init__ — StatusError leaves must inherit StatusError.__init__ directly"
+    )
+
+
 def test_status_error_strips_userinfo_with_username_only() -> None:
     exc = NotFoundError(_make_response(404, url="https://user@example.test/x"))
     assert "user" not in str(exc)
