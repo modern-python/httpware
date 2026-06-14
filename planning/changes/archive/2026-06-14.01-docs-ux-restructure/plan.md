@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: docs-ux-restructure
 spec: docs-ux-restructure
-pr: null
+pr: 60
 ---
 
 # docs-ux-restructure — implementation plan
