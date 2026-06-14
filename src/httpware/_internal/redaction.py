@@ -51,15 +51,43 @@ def _strip_userinfo(url: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
+def _mask_component(component: str) -> tuple[str, bool]:
+    """Mask sensitive key=value pairs in a query or fragment string.
+
+    Returns ``(masked_component, was_changed)``; when no sensitive key is
+    found the original string is returned unchanged (``was_changed=False``).
+    """
+    pairs = parse_qsl(component, keep_blank_values=True)
+    if not any(key.strip().lower() in SENSITIVE_QUERY_KEYS for key, _ in pairs):
+        return component, False
+    masked = [(key, _REDACTED if key.strip().lower() in SENSITIVE_QUERY_KEYS else value) for key, value in pairs]
+    return urlencode(masked), True
+
+
 def _mask_query(url: str) -> str:
     parts = urlsplit(url)
-    if not parts.query:
+    has_query = bool(parts.query)
+    has_fragment = bool(parts.fragment)
+
+    if not has_query and not has_fragment:
         return url
-    pairs = parse_qsl(parts.query, keep_blank_values=True)
-    if not any(key.lower() in SENSITIVE_QUERY_KEYS for key, _ in pairs):
+
+    new_query = parts.query
+    new_fragment = parts.fragment
+    changed = False
+
+    if has_query:
+        new_query, q_changed = _mask_component(parts.query)
+        changed = changed or q_changed
+
+    if has_fragment:
+        new_fragment, f_changed = _mask_component(parts.fragment)
+        changed = changed or f_changed
+
+    if not changed:
         return url  # common-path guard: nothing sensitive, leave bytes untouched
-    masked = [(key, _REDACTED if key.lower() in SENSITIVE_QUERY_KEYS else value) for key, value in pairs]
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(masked), parts.fragment))
+
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, new_fragment))
 
 
 def redact_url(url: str) -> str:

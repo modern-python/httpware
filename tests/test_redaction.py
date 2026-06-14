@@ -40,3 +40,20 @@ def test_redact_url_masks_repeated_sensitive_keys() -> None:
 
 def test_redact_url_masks_blank_sensitive_value() -> None:
     assert redact_url("https://example.test/p?secret=") == "https://example.test/p?secret=REDACTED"
+
+
+def test_redact_url_masks_fragment_secret() -> None:
+    result = redact_url("https://example.test/p?page=2#access_token=topsecret")
+    assert "topsecret" not in result
+    assert "access_token=REDACTED" in result
+    assert "page=2" in result
+
+
+def test_redact_url_preserves_benign_fragment() -> None:
+    assert redact_url("https://example.test/p#section-3") == "https://example.test/p#section-3"
+
+
+def test_redact_url_masks_whitespace_padded_key() -> None:
+    # a space-padded sensitive key name must still be masked
+    result = redact_url("https://example.test/p?%20api_key=topsecret")
+    assert "topsecret" not in result
