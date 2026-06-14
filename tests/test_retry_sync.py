@@ -594,7 +594,7 @@ def test_retry_after_huge_digit_string_does_not_crash_sync() -> None:
     )
     client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.05))
     response = client.get("https://example.test/x")
-    assert response.status_code == HTTPStatus.OK  # noqa: PLR2004 — 200 OK is the success assertion
+    assert response.status_code == HTTPStatus.OK
     assert len(sleeper.calls) == 1
     assert 0.0 <= sleeper.calls[0] <= 0.05  # noqa: PLR2004 — 0.05 matches max_delay literal above
 

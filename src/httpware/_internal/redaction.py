@@ -36,6 +36,25 @@ SENSITIVE_QUERY_KEYS = frozenset(
 _REDACTED = "REDACTED"
 
 
+def _reassemble(scheme: str, netloc: str, path: str, query: str, fragment: str) -> str:
+    """Like ``urlunsplit``, but avoid the spurious triple-slash for an empty authority.
+
+    ``urlunsplit(("http", "", "/path", ...))`` yields ``http:///path`` for a
+    netloc-using scheme. When userinfo stripping leaves no host (e.g.
+    ``http://user:pass@/path``) we want ``http:/path`` (scheme + path), not a
+    triple-slash. With a non-empty netloc this delegates to ``urlunsplit``, so
+    normal URLs are byte-identical.
+    """
+    if netloc:
+        return urlunsplit((scheme, netloc, path, query, fragment))
+    tail = path
+    if query:
+        tail += "?" + query
+    if fragment:
+        tail += "#" + fragment
+    return f"{scheme}:{tail}" if scheme else tail
+
+
 def _strip_userinfo(url: str) -> str:
     if "@" not in url or "://" not in url:
         return url
@@ -45,18 +64,7 @@ def _strip_userinfo(url: str) -> str:
     # Strip the "user:pass@" prefix from the raw netloc to preserve host:port
     # exactly (including IPv6 brackets), rather than reconstructing from parts.
     netloc = parts.netloc.split("@", 1)[1] if "@" in parts.netloc else parts.netloc
-    if not netloc:
-        # No host remains after stripping userinfo (e.g. http://user:pass@/path).
-        # urlunsplit with an empty netloc and a path starting with "/" would emit
-        # a triple-slash form ("http:///path").  Reconstruct without an authority
-        # section instead, yielding the scheme-only prefix ("http:/path").
-        tail = parts.path
-        if parts.query:
-            tail += "?" + parts.query
-        if parts.fragment:
-            tail += "#" + parts.fragment
-        return parts.scheme + ":" + tail
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    return _reassemble(parts.scheme, netloc, parts.path, parts.query, parts.fragment)
 
 
 def _mask_component(component: str) -> tuple[str, bool]:
@@ -95,7 +103,7 @@ def _mask_query(url: str) -> str:
     if not changed:
         return url  # common-path guard: nothing sensitive, leave bytes untouched
 
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, new_fragment))
+    return _reassemble(parts.scheme, parts.netloc, parts.path, new_query, new_fragment)
 
 
 def redact_url(url: str) -> str:

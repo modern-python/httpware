@@ -67,3 +67,19 @@ def test_strip_userinfo_no_hostname_does_not_produce_triple_slash() -> None:
     assert "pass" not in result
     assert ":///" not in result  # must not be triple-slash
     assert result == "http:/path"  # no authority, just scheme + path
+
+
+def test_redact_url_at_sign_in_path_without_userinfo_is_unchanged() -> None:
+    """An `@` in the path (not credentials) leaves the URL untouched."""
+    assert redact_url("https://example.test/@handle?page=2") == "https://example.test/@handle?page=2"
+
+
+def test_strip_userinfo_no_hostname_preserves_query_and_fragment() -> None:
+    """The no-authority reconstruction keeps the query (masked) and fragment, with no triple-slash."""
+    result = redact_url("http://user:pass@/path?api_key=secret#section")
+    assert ":///" not in result
+    assert "user" not in result
+    assert "pass" not in result
+    assert "secret" not in result
+    assert "api_key=REDACTED" in result
+    assert "#section" in result

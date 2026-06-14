@@ -12,7 +12,7 @@ import pytest
 from httpware import AsyncClient, DecodeError
 from httpware._internal import import_checker
 from httpware.decoders import ResponseDecoder
-from httpware.decoders.msgspec import MsgspecDecoder
+from httpware.decoders.msgspec import MsgspecDecoder, _contains_custom_type
 
 
 class _Item(msgspec.Struct):
@@ -236,8 +236,6 @@ def test_contains_custom_type_raises_import_error_when_msgspec_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When msgspec is absent, _contains_custom_type must raise ImportError, not NameError."""
-    from httpware.decoders.msgspec import MISSING_DEPENDENCY_MESSAGE, _contains_custom_type
-
     monkeypatch.setattr(import_checker, "is_msgspec_installed", False)
     with pytest.raises(ImportError, match="MsgspecDecoder requires"):
-        _contains_custom_type(None)  # type: ignore[arg-type]  # ty: ignore[arg-type] -- guard fires before isinstance checks
+        _contains_custom_type(None)  # ty: ignore[invalid-argument-type] -- guard fires before isinstance checks
