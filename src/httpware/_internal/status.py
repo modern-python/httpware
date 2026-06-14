@@ -29,19 +29,24 @@ def _raise_on_status_error(response: httpx2.Response) -> None:
         raise exc_class(response)
 
 
+def _is_replayable_type(value: object) -> bool:
+    """Return True if value is a replayable type (safe to replay across retry attempts)."""
+    return isinstance(value, (bytes, bytearray, memoryview, str, dict, list, tuple))
+
+
 def _is_streaming_body_async(value: object) -> bool:
-    """Return True if value is an async-iterable that cannot be safely replayed for retry."""
+    """Return True if value is a non-replayable body (async-iterable or sync non-replayable iterable)."""
     if value is None:
         return False
-    if isinstance(value, (bytes, bytearray, memoryview, str, dict)):
+    if _is_replayable_type(value):
         return False
-    return hasattr(value, "__aiter__")
+    return hasattr(value, "__aiter__") or hasattr(value, "__iter__")
 
 
 def _is_streaming_body_sync(value: object) -> bool:
     """Return True if value is a sync iterable body that cannot be safely replayed for retry."""
     if value is None:
         return False
-    if isinstance(value, (bytes, bytearray, memoryview, str, dict, list, tuple)):
+    if _is_replayable_type(value):
         return False
     return hasattr(value, "__iter__")

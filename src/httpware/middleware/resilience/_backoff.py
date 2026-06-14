@@ -17,10 +17,13 @@ def full_jitter_delay(
 
     `attempt_index` is 0 for the first retry, 1 for the second, etc.
 
-    Uses ``2.0 **`` (float exponentiation) rather than ``2 **`` so that
-    ``attempt_index >= 1024`` saturates to ``math.inf`` and ``min`` clamps to
-    ``max_delay`` — ``2 ** 1024`` would raise ``OverflowError`` during the
-    int→float conversion.
+    For large ``attempt_index`` (>= 1024), ``2.0 ** attempt_index`` raises
+    ``OverflowError``. That is caught and the ceiling is clamped directly to
+    ``max_delay``, which is exactly what ``min`` would produce for an infinite
+    exponentiation result.
     """
-    ceiling = min(max_delay, base_delay * (2.0**attempt_index))
+    try:
+        ceiling = min(max_delay, base_delay * (2.0**attempt_index))
+    except OverflowError:
+        ceiling = max_delay
     return _random_uniform(0.0, ceiling)

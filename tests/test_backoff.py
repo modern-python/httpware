@@ -33,3 +33,20 @@ def test_full_jitter_delay_uses_injected_random() -> None:
         _random_uniform=lambda _lo, hi: hi,
     )
     assert delay == BASE_DELAY
+
+
+def test_full_jitter_delay_large_attempt_index_does_not_raise() -> None:
+    """attempt_index >= 1024 must not raise OverflowError; result must be in [0, max_delay]."""
+    delay = full_jitter_delay(2000, base_delay=BASE_DELAY, max_delay=MAX_DELAY)
+    assert 0.0 <= delay <= MAX_DELAY
+
+
+def test_full_jitter_delay_large_attempt_index_clamped_to_max_delay() -> None:
+    """With a deterministic _random_uniform that returns the ceiling, it must return exactly max_delay."""
+    delay = full_jitter_delay(
+        2000,
+        base_delay=BASE_DELAY,
+        max_delay=MAX_DELAY,
+        _random_uniform=lambda _lo, hi: hi,
+    )
+    assert delay == MAX_DELAY

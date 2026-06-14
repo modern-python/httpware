@@ -36,19 +36,35 @@ SENSITIVE_QUERY_KEYS = frozenset(
 _REDACTED = "REDACTED"
 
 
+def _reassemble(scheme: str, netloc: str, path: str, query: str, fragment: str) -> str:
+    """Like ``urlunsplit``, but avoid the spurious triple-slash for an empty authority.
+
+    ``urlunsplit(("http", "", "/path", ...))`` yields ``http:///path`` for a
+    netloc-using scheme. When userinfo stripping leaves no host (e.g.
+    ``http://user:pass@/path``) we want ``http:/path`` (scheme + path), not a
+    triple-slash. With a non-empty netloc this delegates to ``urlunsplit``, so
+    normal URLs are byte-identical.
+    """
+    if netloc:
+        return urlunsplit((scheme, netloc, path, query, fragment))
+    tail = path
+    if query:
+        tail += "?" + query
+    if fragment:
+        tail += "#" + fragment
+    return f"{scheme}:{tail}" if scheme else tail
+
+
 def _strip_userinfo(url: str) -> str:
     if "@" not in url or "://" not in url:
         return url
     parts = urlsplit(url)
     if parts.username is None and parts.password is None:
         return url
-    hostname = parts.hostname or ""
-    if ":" in hostname:  # IPv6 literal — re-wrap in brackets
-        hostname = f"[{hostname}]"
-    netloc = hostname
-    if parts.port is not None:
-        netloc = f"{netloc}:{parts.port}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    # Strip the "user:pass@" prefix from the raw netloc to preserve host:port
+    # exactly (including IPv6 brackets), rather than reconstructing from parts.
+    netloc = parts.netloc.split("@", 1)[1] if "@" in parts.netloc else parts.netloc
+    return _reassemble(parts.scheme, netloc, parts.path, parts.query, parts.fragment)
 
 
 def _mask_component(component: str) -> tuple[str, bool]:
@@ -87,7 +103,7 @@ def _mask_query(url: str) -> str:
     if not changed:
         return url  # common-path guard: nothing sensitive, leave bytes untouched
 
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, new_fragment))
+    return _reassemble(parts.scheme, parts.netloc, parts.path, new_query, new_fragment)
 
 
 def redact_url(url: str) -> str:

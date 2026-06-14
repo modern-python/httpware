@@ -1,6 +1,7 @@
 """Public API surface — what `from httpware import ...` exposes."""
 
 import httpware
+import httpware.middleware
 
 
 def test_all_exports_resolve() -> None:
@@ -82,3 +83,26 @@ def test_expected_exports() -> None:
 def test_missing_decoder_error_exported() -> None:
     assert "MissingDecoderError" in httpware.__all__
     assert httpware.MissingDecoderError.__module__ == "httpware.errors"
+
+
+def test_middleware_module_all_contains_exactly_ten_public_names() -> None:
+    """httpware.middleware.__all__ must list the 10 public protocol/decorator names only."""
+    expected = {
+        "AsyncMiddleware",
+        "AsyncNext",
+        "Middleware",
+        "Next",
+        "after_response",
+        "async_after_response",
+        "async_before_request",
+        "async_on_error",
+        "before_request",
+        "on_error",
+    }
+    assert set(httpware.middleware.__all__) == expected
+
+
+def test_middleware_module_all_does_not_leak_internals() -> None:
+    """httpware.middleware.__all__ must not expose imported helpers or submodules."""
+    leaked = {"httpx2", "Protocol", "Callable", "Awaitable", "TypeAlias", "runtime_checkable", "chain", "resilience"}
+    assert not leaked & set(httpware.middleware.__all__)

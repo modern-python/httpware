@@ -465,6 +465,30 @@ def test_is_streaming_body_true_for_async_iterable_files() -> None:
     assert _is_streaming_body(streamed_files()) is True
 
 
+def test_is_streaming_body_async_true_for_sync_generator() -> None:
+    """_is_streaming_body_async must return True for sync generators — they're non-replayable."""
+
+    def sync_gen() -> typing.Iterator[bytes]:
+        yield b"x"  # pragma: no cover
+
+    assert _is_streaming_body(sync_gen()) is True
+
+
+def test_is_streaming_body_async_false_for_bytes() -> None:
+    """_is_streaming_body_async must return False for bytes (replayable)."""
+    assert _is_streaming_body(b"bytes") is False
+
+
+def test_is_streaming_body_async_false_for_list() -> None:
+    """_is_streaming_body_async must return False for list (replayable)."""
+    assert _is_streaming_body([b"chunk1", b"chunk2"]) is False
+
+
+def test_is_streaming_body_async_false_for_tuple() -> None:
+    """_is_streaming_body_async must return False for tuple (replayable)."""
+    assert _is_streaming_body((b"chunk1", b"chunk2")) is False
+
+
 async def test_retry_refuses_streamed_body_request() -> None:
     """AsyncRetry must not replay a request with a streaming body — re-raise with a PEP-678 note.
 
@@ -687,6 +711,42 @@ async def test_retry_event_url_attribute_masks_query_secret(caplog: pytest.LogCa
     assert len(giving_up) == 1
     assert "topsecret" not in giving_up[0].url  # ty: ignore[unresolved-attribute]
     assert "api_key=REDACTED" in giving_up[0].url  # ty: ignore[unresolved-attribute]
+
+
+async def test_retry_after_exceeds_max_delay_does_not_consume_budget_token() -> None:
+    """When Retry-After > max_delay, give up without consuming a budget token."""
+    sleeper = _SleepRecorder()
+    budget = RetryBudget(ttl=10.0, min_retries_per_sec=10.0, percent_can_retry=0.2)
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9999"}),
+            (HTTPStatus.OK, {}),  # never reached
+        ]
+    )
+    client = _client(
+        handler,
+        retry=AsyncRetry(_sleep=sleeper, budget=budget, base_delay=0.01, max_delay=2.5),
+    )
+    with pytest.raises(ServiceUnavailableError):
+        await client.get("https://example.test/x")
+    # Retry-After > max_delay: give up without spending a budget token.
+    assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
+
+
+async def test_retry_after_huge_digit_string_does_not_crash() -> None:
+    """A very large Retry-After integer string must fall back to jitter, not crash with OverflowError."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders(
+        [
+            (HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9" * 400}),
+            (HTTPStatus.OK, {}),
+        ]
+    )
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.05))
+    response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+    assert len(sleeper.calls) == 1
+    assert 0.0 <= sleeper.calls[0] <= 0.05  # noqa: PLR2004 — 0.05 matches max_delay literal above
 
 
 async def test_method_ineligible_with_streaming_body_does_not_attach_streaming_note() -> None:
