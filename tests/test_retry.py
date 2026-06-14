@@ -465,6 +465,30 @@ def test_is_streaming_body_true_for_async_iterable_files() -> None:
     assert _is_streaming_body(streamed_files()) is True
 
 
+def test_is_streaming_body_async_true_for_sync_generator() -> None:
+    """_is_streaming_body_async must return True for sync generators — they're non-replayable."""
+
+    def sync_gen() -> typing.Iterator[bytes]:
+        yield b"x"
+
+    assert _is_streaming_body(sync_gen()) is True
+
+
+def test_is_streaming_body_async_false_for_bytes() -> None:
+    """_is_streaming_body_async must return False for bytes (replayable)."""
+    assert _is_streaming_body(b"bytes") is False
+
+
+def test_is_streaming_body_async_false_for_list() -> None:
+    """_is_streaming_body_async must return False for list (replayable)."""
+    assert _is_streaming_body([b"chunk1", b"chunk2"]) is False
+
+
+def test_is_streaming_body_async_false_for_tuple() -> None:
+    """_is_streaming_body_async must return False for tuple (replayable)."""
+    assert _is_streaming_body((b"chunk1", b"chunk2")) is False
+
+
 async def test_retry_refuses_streamed_body_request() -> None:
     """AsyncRetry must not replay a request with a streaming body — re-raise with a PEP-678 note.
 
