@@ -38,7 +38,7 @@ Whatever you do, return an `httpx2.Response`. Raising an exception propagates up
 For the common cases where you don't need state-keeping on `self` and don't need to wrap the full `await next(...)` call, `httpware.middleware` exports three decorators that turn a single async function into an `AsyncMiddleware`:
 
 ```python
-from httpware.middleware import async_before_request, async_after_response, async_on_error
+from httpware import async_before_request, async_after_response, async_on_error
 ```
 
 | Decorator | Function signature | When to use |
@@ -64,7 +64,7 @@ import uuid
 import httpx2
 
 from httpware import AsyncClient, AsyncRetry
-from httpware.middleware import AsyncNext
+from httpware import AsyncNext
 
 
 _LOGGER = logging.getLogger("myapp.request_id")
@@ -152,7 +152,7 @@ import logging
 import httpx2
 
 from httpware import Client
-from httpware.middleware import Next
+from httpware import Next
 
 
 _LOGGER = logging.getLogger("myapp.logging_middleware")
