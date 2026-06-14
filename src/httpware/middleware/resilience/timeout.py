@@ -18,7 +18,7 @@ import math
 
 import httpx2
 
-from httpware._internal.observability import _emit_event
+from httpware._internal.observability import _emit_event, _observed_url
 from httpware.errors import TimeoutError as HttpwareTimeoutError
 from httpware.middleware import AsyncNext
 
@@ -69,7 +69,7 @@ class AsyncTimeout:
                 attributes={
                     "timeout": self._timeout,
                     "method": request.method,
-                    "url": str(request.url),
+                    "url": _observed_url(request),
                 },
             )
             msg = f"overall timeout of {self._timeout}s exceeded"

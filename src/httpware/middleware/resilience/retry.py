@@ -17,7 +17,7 @@ from http import HTTPStatus
 
 import httpx2
 
-from httpware._internal.observability import _emit_event
+from httpware._internal.observability import _emit_event, _observed_url
 from httpware._internal.status import STREAMING_BODY_MARKER
 from httpware.errors import NetworkError, RetryBudgetExhaustedError, StatusError, TimeoutError  # noqa: A004
 from httpware.middleware import AsyncNext, Next
@@ -133,7 +133,7 @@ class AsyncRetry:
                     message="retry refused — request body is a stream that cannot replay",
                     attributes={
                         "method": request.method,
-                        "url": str(request.url),
+                        "url": _observed_url(request),
                         "last_exception_type": type(last_exc).__qualname__,
                     },
                 )
@@ -152,7 +152,7 @@ class AsyncRetry:
                     attributes={
                         "attempts": attempt + 1,
                         "method": request.method,
-                        "url": str(request.url),
+                        "url": _observed_url(request),
                         "last_status": last_response.status_code if last_response is not None else None,
                         "last_exception_type": type(last_exc).__qualname__,
                     },
@@ -168,7 +168,7 @@ class AsyncRetry:
                     attributes={
                         "attempts": attempt + 1,
                         "method": request.method,
-                        "url": str(request.url),
+                        "url": _observed_url(request),
                         "last_status": last_response.status_code if last_response is not None else None,
                     },
                 )
@@ -271,7 +271,7 @@ class Retry:
                     message="retry refused — request body is a stream that cannot replay",
                     attributes={
                         "method": request.method,
-                        "url": str(request.url),
+                        "url": _observed_url(request),
                         "last_exception_type": type(last_exc).__qualname__,
                     },
                 )
@@ -290,7 +290,7 @@ class Retry:
                     attributes={
                         "attempts": attempt + 1,
                         "method": request.method,
-                        "url": str(request.url),
+                        "url": _observed_url(request),
                         "last_status": last_response.status_code if last_response is not None else None,
                         "last_exception_type": type(last_exc).__qualname__,
                     },
@@ -306,7 +306,7 @@ class Retry:
                     attributes={
                         "attempts": attempt + 1,
                         "method": request.method,
-                        "url": str(request.url),
+                        "url": _observed_url(request),
                         "last_status": last_response.status_code if last_response is not None else None,
                     },
                 )

@@ -34,7 +34,7 @@ from collections.abc import Callable, Collection
 
 import httpx2
 
-from httpware._internal.observability import _emit_event
+from httpware._internal.observability import _emit_event, _observed_url
 from httpware.errors import CircuitOpenError, NetworkError, StatusError, TimeoutError  # noqa: A004
 from httpware.middleware import AsyncNext, Next
 
@@ -190,7 +190,7 @@ class _CircuitBreakerState:
             event_name,
             level=level,
             message=message,
-            attributes={**attributes, "method": request.method, "url": str(request.url)},
+            attributes={**attributes, "method": request.method, "url": _observed_url(request)},
         )
 
 

@@ -24,7 +24,7 @@ import threading
 
 import httpx2
 
-from httpware._internal.observability import _emit_event
+from httpware._internal.observability import _emit_event, _observed_url
 from httpware.errors import BulkheadFullError
 from httpware.middleware import AsyncNext, Next
 
@@ -114,7 +114,7 @@ class AsyncBulkhead:
                     "max_concurrent": self._max_concurrent,
                     "acquire_timeout": self._acquire_timeout,
                     "method": request.method,
-                    "url": str(request.url),
+                    "url": _observed_url(request),
                 },
             )
             raise BulkheadFullError(
@@ -170,7 +170,7 @@ class Bulkhead:
                     "max_concurrent": self._max_concurrent,
                     "acquire_timeout": self._acquire_timeout,
                     "method": request.method,
-                    "url": str(request.url),
+                    "url": _observed_url(request),
                 },
             )
             raise BulkheadFullError(

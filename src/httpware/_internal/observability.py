@@ -12,7 +12,15 @@ import contextlib
 import logging
 import typing
 
+import httpx2
+
 from httpware._internal import import_checker
+from httpware._internal.redaction import redact_url
+
+
+def _observed_url(request: httpx2.Request) -> str:
+    """Return the request URL safe for emission (userinfo + sensitive query masked)."""
+    return redact_url(str(request.url))
 
 
 def _emit_event(
