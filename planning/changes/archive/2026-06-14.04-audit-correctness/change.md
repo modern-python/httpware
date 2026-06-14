@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: audit-correctness
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 64
+outcome: Shipped via #64 - 8 correctness + public-API findings (RetryBudget token ordering, _parse_retry_after and full_jitter_delay OverflowError, redaction triple-slash, msgspec guard, streaming-body symmetry, RetryBudget docstring, middleware __all__).
 ---
 
 # Change: Deep-audit correctness + public-API fixes

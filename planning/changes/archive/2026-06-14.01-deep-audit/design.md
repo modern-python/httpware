@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: deep-audit
 supersedes: null
 superseded_by: null
 pr: null
-outcome: null
+outcome: Audit complete - 35 confirmed findings, all remediated across #62 (pydantic High+2 Mediums), #63 (security cluster), #64 (correctness), #65 (test quality), #66 (docs). Non-streaming hard body cap deferred (planning/deferred.md).
 ---
 
 # Design: Full-codebase deep audit (perf · security · refactoring · bugs)

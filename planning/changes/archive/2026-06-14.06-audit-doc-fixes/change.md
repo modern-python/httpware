@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: audit-doc-fixes
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 66
+outcome: Shipped via #66 - 5 doc-accuracy findings (Client.stream docs, terminal attribution, errors auto-raise sites, pydantic upper bound, root import paths).
 ---
 
 # Change: Deep-audit documentation accuracy fixes

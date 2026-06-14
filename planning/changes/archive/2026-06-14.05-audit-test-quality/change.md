@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: audit-test-quality
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 65
+outcome: Shipped via #65 - 11 test-quality findings (sync terminal + CookieConflict coverage, StatusError __init__ invariant, missing status constructions, sync mirrors, typing overloads, deterministic bulkhead barrier, pinned budget clock, observability assertion, TimeoutError circuit trigger).
 ---
 
 # Change: Deep-audit test-quality findings

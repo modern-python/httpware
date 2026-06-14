@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-14
 slug: deep-audit
 spec: deep-audit
