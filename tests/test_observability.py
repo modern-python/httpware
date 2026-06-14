@@ -32,6 +32,43 @@ def test_emit_event_logs_at_warning_with_extra_fields(caplog: pytest.LogCaptureF
     assert record.event == "test.event"  # ty: ignore[unresolved-attribute]
 
 
+def test_emit_event_redacts_url_secret_in_log_record(caplog: pytest.LogCaptureFixture) -> None:
+    """The `url` attribute is redacted at the emission boundary, before the log record fires."""
+    with caplog.at_level(logging.WARNING, logger="httpware.test.observability"):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="leaky",
+            attributes={"url": "https://u:p@example.test/x?api_key=topsecret"},
+        )
+
+    record = caplog.records[0]
+    assert "topsecret" not in record.url  # ty: ignore[unresolved-attribute]
+    assert "api_key=REDACTED" in record.url  # ty: ignore[unresolved-attribute]
+    assert "u:p@" not in record.url  # ty: ignore[unresolved-attribute]
+
+
+def test_emit_event_redacts_url_secret_in_otel_event() -> None:
+    """The OTel span event receives the redacted `url`, not the raw secret."""
+    mock_span = MagicMock(name="MockSpan")
+    with (
+        patch("httpware._internal.import_checker.is_otel_installed", True),
+        patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+    ):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="leaky",
+            attributes={"url": "https://example.test/x?token=topsecret"},
+        )
+
+    _, kwargs = mock_span.add_event.call_args
+    assert "topsecret" not in kwargs["attributes"]["url"]
+    assert "token=REDACTED" in kwargs["attributes"]["url"]
+
+
 def test_emit_event_respects_level_parameter(caplog: pytest.LogCaptureFixture) -> None:
     """When level=DEBUG is passed, the record is at DEBUG."""
     with caplog.at_level(logging.DEBUG, logger="httpware.test.observability"):

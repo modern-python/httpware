@@ -4,32 +4,20 @@ Auto-raise rule lives at AsyncClient's internal terminal (see client.py).
 Unknown 4xx falls back to ClientStatusError; unknown 5xx to ServerStatusError.
 The fallback assumes 400 <= status < 600.
 
-__repr__ and the summary message strip user:pass@ userinfo from
-response.request.url to avoid leaking credentials in tracebacks.
-Query-string secrets are NOT stripped here.
+__repr__ and the summary message run response.request.url through
+_internal.redaction.redact_url, which strips user:pass@ userinfo and masks the
+values of known-sensitive query parameters. NOTE: the full request headers
+(Authorization, Cookie, ...) remain reachable via exc.response.request — handler
+authors must redact those before logging.
 """
 
 import builtins
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 import httpx2
 
-
-def _strip_userinfo(url: str) -> str:
-    if "@" not in url or "://" not in url:
-        return url
-    parts = urlsplit(url)
-    if parts.username is None and parts.password is None:
-        return url
-    hostname = parts.hostname or ""
-    if ":" in hostname:  # IPv6 literal — re-wrap in brackets
-        hostname = f"[{hostname}]"
-    netloc = hostname
-    if parts.port is not None:
-        netloc = f"{netloc}:{parts.port}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+from httpware._internal.redaction import redact_url
 
 
 class ClientError(Exception):
@@ -76,13 +64,13 @@ class StatusError(ClientError):
 
     def _summary(self) -> str:
         method = self.response.request.method
-        url = _strip_userinfo(str(self.response.request.url))
+        url = redact_url(str(self.response.request.url))
         return f"{self.response.status_code} {method} {url}"
 
     def __repr__(self) -> str:
         cls_name = type(self).__name__
         method = self.response.request.method
-        url = _strip_userinfo(str(self.response.request.url))
+        url = redact_url(str(self.response.request.url))
         return f"<{cls_name} status={self.response.status_code} method={method} url={url}>"
 
     def __reduce__(self) -> tuple[Any, ...]:
@@ -323,3 +311,40 @@ class MissingDecoderError(ClientError):
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (_reconstruct_missing_decoder, (type(self), self.model, self.registered_names))
+
+
+def _reconstruct_response_too_large(
+    cls: "type[ResponseTooLargeError]",
+    status_code: int,
+    limit: int,
+    content_length: int | None,
+) -> "ResponseTooLargeError":
+    return cls(status_code=status_code, limit=limit, content_length=content_length)
+
+
+class ResponseTooLargeError(ClientError):
+    """Raised when an error response body exceeds the client's max_error_body_bytes cap.
+
+    Fires from stream() on a 4xx/5xx whose declared Content-Length exceeds the
+    configured cap, BEFORE the body is read — so the oversized body is never
+    buffered. Only raised when max_error_body_bytes is set (opt-in).
+    """
+
+    status_code: int
+    limit: int
+    content_length: int | None
+
+    def __init__(self, *, status_code: int, limit: int, content_length: int | None) -> None:
+        self.status_code = status_code
+        self.limit = limit
+        self.content_length = content_length
+        super().__init__(
+            f"error response body too large: status={status_code} "
+            f"content_length={content_length} exceeds max_error_body_bytes={limit}"
+        )
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_response_too_large,
+            (type(self), self.status_code, self.limit, self.content_length),
+        )

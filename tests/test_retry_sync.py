@@ -548,6 +548,21 @@ def test_retry_after_equal_to_max_delay_still_retries() -> None:
     assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
 
 
+def test_retry_event_url_attribute_masks_query_secret_sync(caplog: pytest.LogCaptureFixture) -> None:
+    """Sync resilience event `url` attributes must not leak query-string secrets."""
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE] * 3)
+    client = _client(handler, retry=Retry(_sleep=sleeper, max_attempts=3, base_delay=0.001, max_delay=0.002))
+
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
+        client.get("https://example.test/x?api_key=topsecret")
+
+    giving_up = [r for r in caplog.records if r.name == "httpware.retry" and r.message.startswith("retry gave up")]
+    assert len(giving_up) == 1
+    assert "topsecret" not in giving_up[0].url  # ty: ignore[unresolved-attribute]
+    assert "api_key=REDACTED" in giving_up[0].url  # ty: ignore[unresolved-attribute]
+
+
 def test_method_ineligible_with_streaming_body_does_not_attach_streaming_note() -> None:
     """POST with a streaming body that gets a 503 raises WITHOUT the streaming-note (sync).
 

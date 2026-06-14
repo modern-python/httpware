@@ -54,6 +54,7 @@ def test_expected_exports() -> None:
         "NotFoundError",
         "RateLimitedError",
         "ResponseDecoder",
+        "ResponseTooLargeError",
         "Retry",
         "RetryBudget",
         "RetryBudgetExhaustedError",

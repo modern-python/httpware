@@ -13,6 +13,7 @@ import logging
 import typing
 
 from httpware._internal import import_checker
+from httpware._internal.redaction import redact_url
 
 
 def _emit_event(
@@ -24,6 +25,12 @@ def _emit_event(
     attributes: dict[str, typing.Any],
 ) -> None:
     """Emit one observability event to both channels.
+
+    The ``url`` attribute, when present, is run through
+    ``redaction.redact_url`` here — at the single emission boundary — so a
+    request URL's userinfo and known-sensitive query/fragment secrets never
+    reach a log record or span event, regardless of how a caller built the
+    attributes dict.
 
     1. Always emits a structured log record at ``level`` with ``extra=attributes``
        (so log aggregators that index ``extra`` see structured fields).
@@ -39,7 +46,9 @@ def _emit_event(
     the optional-extras isolation invariant: ``import httpware`` must not pull
     ``opentelemetry`` into ``sys.modules`` when the extra is absent.
     """
-    logger.log(level, message, extra={**attributes, "event": event_name})
+    raw_url = attributes.get("url")
+    safe_attributes = {**attributes, "url": redact_url(raw_url)} if isinstance(raw_url, str) else attributes
+    logger.log(level, message, extra={**safe_attributes, "event": event_name})
     if import_checker.is_otel_installed:
         try:
             from opentelemetry import trace  # noqa: PLC0415 — lazy by design (optional-extras isolation)
@@ -52,4 +61,4 @@ def _emit_event(
         # The structured log record above has already fired; CancelledError/KeyboardInterrupt
         # are not Exception subclasses and will still propagate.
         with contextlib.suppress(Exception):
-            trace.get_current_span().add_event(event_name, attributes=attributes)
+            trace.get_current_span().add_event(event_name, attributes=safe_attributes)

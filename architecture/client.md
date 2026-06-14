@@ -15,3 +15,18 @@ The async middleware surface uses the `Async*`/`async_*` prefix, aligning with h
 ## Streaming
 
 `AsyncClient.stream()` provides a context-manager API for chunked response bodies. It bypasses the middleware chain by design.
+
+## Proxy environment (`trust_env`)
+
+`httpware` wraps `httpx2.Client` / `httpx2.AsyncClient`, which default to `trust_env=True`. The `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` environment variables and `.netrc` credentials are therefore honored by default — no httpware behavior to configure. To opt out, supply an explicit httpx2 client:
+
+```python
+Client(httpx2_client=httpx2.Client(trust_env=False))
+AsyncClient(httpx2_client=httpx2.AsyncClient(trust_env=False))
+```
+
+## Bounded error bodies (`max_error_body_bytes`)
+
+Both `Client` and `AsyncClient` accept `max_error_body_bytes: int | None = None`. The default (`None`) is backward-compatible: error bodies are read without a size limit.
+
+When set, `stream()` raises `ResponseTooLargeError` on a 4xx/5xx response whose declared `Content-Length` header exceeds the cap — before the body is read. Responses without a declared `Content-Length` (chunked transfer) are still read unbounded: a hard mid-read cap would require httpx2 private API, which this project forbids.
