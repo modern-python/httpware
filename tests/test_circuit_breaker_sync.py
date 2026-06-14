@@ -16,6 +16,7 @@ from httpware import (
     NotFoundError,
     RateLimitedError,
     ServiceUnavailableError,
+    TimeoutError,  # noqa: A004 — intentional: httpware.TimeoutError shadows the builtin
 )
 from httpware.middleware.resilience.circuit_breaker import CircuitBreaker
 
@@ -135,6 +136,20 @@ def test_network_error_counts_as_failure() -> None:
     with _client(_raise, breaker=breaker) as client:
         for _ in range(2):
             with pytest.raises(NetworkError):
+                client.get("https://example.test/x")
+        with pytest.raises(CircuitOpenError):
+            client.get("https://example.test/x")
+
+
+def test_timeout_error_counts_as_failure() -> None:
+    def _raise(request: httpx2.Request) -> httpx2.Response:
+        msg = "read timed out"
+        raise httpx2.ReadTimeout(msg, request=request)
+
+    breaker = CircuitBreaker(failure_threshold=2, _now=_Clock())
+    with _client(_raise, breaker=breaker) as client:
+        for _ in range(2):
+            with pytest.raises(TimeoutError):
                 client.get("https://example.test/x")
         with pytest.raises(CircuitOpenError):
             client.get("https://example.test/x")

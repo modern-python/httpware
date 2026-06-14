@@ -99,6 +99,24 @@ async def test_async_decode_error_caught_by_client_error() -> None:
     assert isinstance(exc_info.value, DecodeError)
 
 
+def test_sync_status_error_raised_before_decoder_runs() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(HTTPStatus.NOT_FOUND, content=b'{"id": 1, "name": "x"}', request=request)
+
+    transport = httpx2.MockTransport(handler)
+    client = Client(httpx2_client=httpx2.Client(transport=transport))
+    with pytest.raises(NotFoundError):
+        client.get("https://example.test/u", response_model=_User)
+
+
+def test_sync_decode_error_caught_by_client_error() -> None:
+    """The user-facing promise: `except ClientError` catches decode failures on the sync client."""
+    client = _sync_client_with_payload(b"null")
+    with pytest.raises(ClientError) as exc_info:
+        client.get("https://example.test/u", response_model=_User)
+    assert isinstance(exc_info.value, DecodeError)
+
+
 def test_sync_schema_mismatch_raises_decode_error() -> None:
     client = _sync_client_with_payload(b"null")
     with pytest.raises(DecodeError) as exc_info:

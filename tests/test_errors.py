@@ -129,7 +129,10 @@ def test_status_error_pickleable() -> None:
     [
         (400, BadRequestError),
         (401, UnauthorizedError),
+        (403, ForbiddenError),
         (404, NotFoundError),
+        (409, ConflictError),
+        (422, UnprocessableEntityError),
         (429, RateLimitedError),
         (500, InternalServerError),
         (503, ServiceUnavailableError),
@@ -140,6 +143,28 @@ def test_per_status_subclasses_construct(status: int, expected: type[StatusError
     exc = expected(response)
     assert isinstance(exc, expected)
     assert exc.response.status_code == status
+    assert str(exc)  # smoke-test __str__ produces a non-empty string
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [
+        BadRequestError,
+        UnauthorizedError,
+        ForbiddenError,
+        NotFoundError,
+        ConflictError,
+        UnprocessableEntityError,
+        RateLimitedError,
+        InternalServerError,
+        ServiceUnavailableError,
+    ],
+)
+def test_status_error_leaves_do_not_override_init(cls: type[StatusError]) -> None:
+    """CLAUDE.md invariant: StatusError leaf classes must not define their own __init__."""
+    assert "__init__" not in cls.__dict__, (
+        f"{cls.__name__} defines __init__ — StatusError leaves must inherit StatusError.__init__ directly"
+    )
 
 
 def test_status_error_strips_userinfo_with_username_only() -> None:
