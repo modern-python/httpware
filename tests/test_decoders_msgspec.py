@@ -230,3 +230,14 @@ def test_msgspec_can_decode_unhashable_model_does_not_raise() -> None:
     decoder._can_decode_results = MagicMock()  # noqa: SLF001
     decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
     assert decoder.can_decode(_Item) is True
+
+
+def test_contains_custom_type_raises_import_error_when_msgspec_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When msgspec is absent, _contains_custom_type must raise ImportError, not NameError."""
+    from httpware.decoders.msgspec import MISSING_DEPENDENCY_MESSAGE, _contains_custom_type
+
+    monkeypatch.setattr(import_checker, "is_msgspec_installed", False)
+    with pytest.raises(ImportError, match="MsgspecDecoder requires"):
+        _contains_custom_type(None)  # type: ignore[arg-type]  # ty: ignore[arg-type] -- guard fires before isinstance checks

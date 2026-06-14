@@ -26,6 +26,8 @@ def _contains_custom_type(info: "msgspec.inspect.Type") -> bool:
     makes the walk both correct (a Struct is a valid target) and safe against
     infinite recursion on self-referential struct definitions.
     """
+    if not import_checker.is_msgspec_installed:
+        raise ImportError(MISSING_DEPENDENCY_MESSAGE)
     if isinstance(info, msgspec.inspect.CustomType):
         return True
     for name in dir(info):
