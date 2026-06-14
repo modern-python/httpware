@@ -311,3 +311,40 @@ class MissingDecoderError(ClientError):
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (_reconstruct_missing_decoder, (type(self), self.model, self.registered_names))
+
+
+def _reconstruct_response_too_large(
+    cls: "type[ResponseTooLargeError]",
+    status_code: int,
+    limit: int,
+    content_length: int | None,
+) -> "ResponseTooLargeError":
+    return cls(status_code=status_code, limit=limit, content_length=content_length)
+
+
+class ResponseTooLargeError(ClientError):
+    """Raised when an error response body exceeds the client's max_error_body_bytes cap.
+
+    Fires from stream() on a 4xx/5xx whose declared Content-Length exceeds the
+    configured cap, BEFORE the body is read — so the oversized body is never
+    buffered. Only raised when max_error_body_bytes is set (opt-in).
+    """
+
+    status_code: int
+    limit: int
+    content_length: int | None
+
+    def __init__(self, *, status_code: int, limit: int, content_length: int | None) -> None:
+        self.status_code = status_code
+        self.limit = limit
+        self.content_length = content_length
+        super().__init__(
+            f"error response body too large: status={status_code} "
+            f"content_length={content_length} exceeds max_error_body_bytes={limit}"
+        )
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (
+            _reconstruct_response_too_large,
+            (type(self), self.status_code, self.limit, self.content_length),
+        )

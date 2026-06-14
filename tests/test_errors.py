@@ -23,6 +23,7 @@ from httpware.errors import (
     NetworkError,
     NotFoundError,
     RateLimitedError,
+    ResponseTooLargeError,
     RetryBudgetExhaustedError,
     ServerStatusError,
     ServiceUnavailableError,
@@ -404,3 +405,21 @@ def test_status_error_message_masks_query_secret() -> None:
     assert "api_key=REDACTED" in str(exc)
     assert "page=2" in str(exc)
     assert "topsecret" not in repr(exc)
+
+
+def test_response_too_large_error_fields_and_message() -> None:
+    exc = ResponseTooLargeError(status_code=500, limit=1024, content_length=2048)
+    assert exc.status_code == 500  # noqa: PLR2004 — literal mirrors construction above
+    assert exc.limit == 1024  # noqa: PLR2004 — literal mirrors construction above
+    assert exc.content_length == 2048  # noqa: PLR2004 — literal mirrors construction above
+    assert "1024" in str(exc)
+    assert "2048" in str(exc)
+
+
+def test_response_too_large_error_pickle_round_trip() -> None:
+    exc = ResponseTooLargeError(status_code=503, limit=10, content_length=None)
+    restored = pickle.loads(pickle.dumps(exc))  # noqa: S301 — round-tripping our own exception
+    assert isinstance(restored, ResponseTooLargeError)
+    assert restored.status_code == 503  # noqa: PLR2004 — literal mirrors construction above
+    assert restored.limit == 10  # noqa: PLR2004 — literal mirrors construction above
+    assert restored.content_length is None
