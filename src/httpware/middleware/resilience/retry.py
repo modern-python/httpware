@@ -159,6 +159,24 @@ class AsyncRetry:
                 )
                 raise last_exc
 
+            retry_after: float | None = None
+            if self.respect_retry_after and last_response is not None:
+                header = last_response.headers.get("Retry-After")
+                if header is not None:
+                    retry_after = _parse_retry_after(header)
+
+            if retry_after is not None and retry_after > self.max_delay:
+                if last_exc is None:  # pragma: no cover — retry_after requires last_response which requires last_exc
+                    msg = "AsyncRetry: retry_after path reached with no last_exc"
+                    raise AssertionError(msg)
+                last_exc.add_note(
+                    _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE.format(
+                        retry_after=retry_after,
+                        max_delay=self.max_delay,
+                    ),
+                )
+                raise last_exc
+
             if not self.budget.try_withdraw():
                 _emit_event(
                     _LOGGER,
@@ -178,23 +196,6 @@ class AsyncRetry:
                     attempts=attempt + 1,
                 ) from last_exc
 
-            retry_after: float | None = None
-            if self.respect_retry_after and last_response is not None:
-                header = last_response.headers.get("Retry-After")
-                if header is not None:
-                    retry_after = _parse_retry_after(header)
-
-            if retry_after is not None and retry_after > self.max_delay:
-                if last_exc is None:  # pragma: no cover — retry_after requires last_response which requires last_exc
-                    msg = "AsyncRetry: retry_after path reached with no last_exc"
-                    raise AssertionError(msg)
-                last_exc.add_note(
-                    _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE.format(
-                        retry_after=retry_after,
-                        max_delay=self.max_delay,
-                    ),
-                )
-                raise last_exc
             if retry_after is not None:
                 delay = retry_after
             else:
@@ -297,6 +298,24 @@ class Retry:
                 )
                 raise last_exc
 
+            retry_after: float | None = None
+            if self.respect_retry_after and last_response is not None:
+                header = last_response.headers.get("Retry-After")
+                if header is not None:
+                    retry_after = _parse_retry_after(header)
+
+            if retry_after is not None and retry_after > self.max_delay:
+                if last_exc is None:  # pragma: no cover — retry_after requires last_response which requires last_exc
+                    msg = "Retry: retry_after path reached with no last_exc"
+                    raise AssertionError(msg)
+                last_exc.add_note(
+                    _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE.format(
+                        retry_after=retry_after,
+                        max_delay=self.max_delay,
+                    ),
+                )
+                raise last_exc
+
             if not self.budget.try_withdraw():
                 _emit_event(
                     _LOGGER,
@@ -316,23 +335,6 @@ class Retry:
                     attempts=attempt + 1,
                 ) from last_exc
 
-            retry_after: float | None = None
-            if self.respect_retry_after and last_response is not None:
-                header = last_response.headers.get("Retry-After")
-                if header is not None:
-                    retry_after = _parse_retry_after(header)
-
-            if retry_after is not None and retry_after > self.max_delay:
-                if last_exc is None:  # pragma: no cover — retry_after requires last_response which requires last_exc
-                    msg = "Retry: retry_after path reached with no last_exc"
-                    raise AssertionError(msg)
-                last_exc.add_note(
-                    _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE.format(
-                        retry_after=retry_after,
-                        max_delay=self.max_delay,
-                    ),
-                )
-                raise last_exc
             if retry_after is not None:
                 delay = retry_after
             else:
