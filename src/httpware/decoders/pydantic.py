@@ -10,9 +10,11 @@ not trip the ImportError when the user is not using `response_model=`.
 import typing
 from typing import TypeVar
 
-from pydantic import TypeAdapter
-
 from httpware._internal import import_checker
+
+
+if import_checker.is_pydantic_installed:
+    from pydantic import TypeAdapter
 
 
 MISSING_DEPENDENCY_MESSAGE = (
@@ -23,9 +25,15 @@ T = TypeVar("T")
 
 
 class PydanticDecoder:
-    """Decode raw response bytes into `model` via a per-instance cached `pydantic.TypeAdapter`."""
+    """Decode raw response bytes into `model` via a per-instance cached `pydantic.TypeAdapter`.
 
-    _adapters: dict[type, TypeAdapter[typing.Any]]
+    Requires the `pydantic` extra: `pip install httpware[pydantic]`. Importing
+    this module without the extra works (the `pydantic` import is guarded by an
+    `is_pydantic_installed` check), but instantiating the decoder raises
+    `ImportError`.
+    """
+
+    _adapters: dict[type, "TypeAdapter[typing.Any]"]
     _can_decode_results: dict[type, bool]
 
     def __init__(self) -> None:
