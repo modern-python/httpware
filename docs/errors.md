@@ -50,9 +50,15 @@ ClientError                          (catch-all for anything httpware raises)
 
 The fallback assumes `400 ≤ status < 600`. Statuses outside that range don't raise (they return the response as-is).
 
+The explicit rows above are also exported as the public `STATUS_TO_EXCEPTION` mapping (`Mapping[int, type[StatusError]]`) — `from httpware import STATUS_TO_EXCEPTION` — so you can look up the class for a status code programmatically (e.g. `STATUS_TO_EXCEPTION.get(404)`). The two fallback rows are not in the mapping; they're applied by the raise logic for any unmapped in-range status.
+
 ## Catching strategies
 
+The examples below assume a module logger in your own namespace (not under `httpware.*`): `_LOGGER = logging.getLogger("myapp")`.
+
 ```python
+import logging
+
 from httpware import (
     AsyncClient,
     ClientError,
@@ -63,6 +69,8 @@ from httpware import (
     RetryBudgetExhaustedError,
     BulkheadFullError,
 )
+
+_LOGGER = logging.getLogger("myapp")
 
 
 async def fetch(client: AsyncClient, user_id: int) -> dict | None:
