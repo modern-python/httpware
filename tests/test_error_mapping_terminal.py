@@ -259,3 +259,30 @@ def test_sync_httpx2_invalid_url_does_not_map_to_network_error() -> None:
     with pytest.raises(TransportError) as info:
         client.send(httpx2.Request("GET", "https://example.test/x"))
     assert not isinstance(info.value, NetworkError)
+
+
+# ---------------------------------------------------------------------------
+# Nit13: CookieConflict → TransportError (NOT NetworkError)
+# ---------------------------------------------------------------------------
+
+
+async def test_async_httpx2_cookie_conflict_maps_to_transport_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "cookie conflict"
+        raise httpx2.CookieConflict(msg)
+
+    client = _client_with_handler(handler)
+    with pytest.raises(TransportError) as info:
+        await client.send(httpx2.Request("GET", "https://example.test/x"))
+    assert not isinstance(info.value, NetworkError)
+
+
+def test_sync_httpx2_cookie_conflict_maps_to_transport_error() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        msg = "cookie conflict"
+        raise httpx2.CookieConflict(msg)
+
+    client = _sync_client_with_handler(handler)
+    with pytest.raises(TransportError) as info:
+        client.send(httpx2.Request("GET", "https://example.test/x"))
+    assert not isinstance(info.value, NetworkError)
