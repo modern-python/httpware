@@ -158,7 +158,8 @@ follow them. No orphan pages and no broken nav targets — the nav is otherwise 
 all five bare `architecture/*.md` references converted to absolute GitHub links.
 
 Only **G6** (custom-`ResponseDecoder` guide; no API reference per maintainer)
-remains open after `2026-06-14.01`.
+remains open after `2026-06-14.01` — now parked in the long-tail register,
+[`deferred.md`](../deferred.md) (Documentation), demand-gated.
 
 ### Verified correct (negative results)
 

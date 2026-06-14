@@ -33,3 +33,7 @@ As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see the [change Index
   Three separable additions, rough priority: **(a) rate-over-window trip mode** (the core ask; additive opt-in), **(b) manual control + read-only `state`** (independent; both libraries have it, httpware parked it as YAGNI), **(c) slow-call-rate dimension** (don't — covered by `AsyncTimeout`).
 
   **Concurrency note:** the window recorder (ring buffer for count-based; time-bucketed counters for time-based) is more state than v1's single counter, but recording an outcome stays a synchronous mutation, so the async lock-free atomicity invariant and the sync `threading.Lock` both still hold. Time-based eviction must read `_now()` inside the same synchronous critical section.
+
+### Documentation
+
+- **Custom-`ResponseDecoder` guide** (audit finding G6, [2026-06-13 docs audit](audits/2026-06-13-docs-audit.md)) — the decoder seam (Seam B) is a documented extension point, but unlike middleware it has no "write your own" guide. A short page would show the `can_decode(model: type) -> bool` / `decode(content: bytes, model: type[T]) -> T` protocol, how `decoders=[...]` ordering resolves a model, and a worked third-party-adapter example. Decided alongside the `2026-06-14.01` docs-UX restructure: **defer the guide, and ship no auto API reference / mkdocstrings** (prose carries the signatures). Demand-gated. Revisit trigger: someone asks how to write a custom decoder, a third-party decoder adapter ships, or the `decoders/` protocol surface changes. (`docs/`, `src/httpware/decoders/`)

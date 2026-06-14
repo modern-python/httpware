@@ -70,10 +70,11 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-- **[docs-ux-restructure](changes/active/2026-06-14.01-docs-ux-restructure/design.md)** (draft, 2026-06-14) — Thin README front-door + canonical `docs/index.md`, why-httpware hook (G1), runnable first example (G4), nav nits, base-client scrub. G2 dropped, G6 deferred.
+_None._
 
 ### Archived (shipped)
 
+- **[docs-ux-restructure](changes/archive/2026-06-14.01-docs-ux-restructure/design.md)** (#60, 2026-06-14) — Thin README front-door + canonical `docs/index.md` (G3), why-httpware hook (G1), runnable jsonplaceholder example (G4), nav reorder + architecture links, base-client scrub. G2 dropped; G6 (decoder guide) still open.
 - **[docs-audit-followups](changes/archive/2026-06-13.05-docs-audit-followups/change.md)** (#58, 2026-06-13) — Second docs-audit batch: corrected the overstated invariant-enforcement claims in `CLAUDE.md` + `architecture/overview.md` (only `print()`/blanket-`type: ignore` are machine-checked), readability findings R1–R3, and documented the public `STATUS_TO_EXCEPTION` (G5).
 - **[docs-accuracy-fixes](changes/archive/2026-06-13.04-docs-accuracy-fixes/change.md)** (f203821, 2026-06-13) — Fixed 5 verified factual errors from the [docs audit](audits/2026-06-13-docs-audit.md): RetryBudget formula, modern-di 2.x recipe, contributing-doc CI/grep claim, `just lint` comment, middleware stable-contracts list (+ AsyncTimeout non-finite wording).
 - **[portable-planning-convention](changes/archive/2026-06-13.03-portable-planning-convention/design.md)** (#55, 2026-06-13) — Adopt the portable two-axis convention: per-capability `architecture/` truth files + `changes/` bundles, full history backfill, byte-identical Conventions.
