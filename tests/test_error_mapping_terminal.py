@@ -1,7 +1,7 @@
 """Tests for the AsyncClient and Client internal terminal's exception mapping."""
 
+from collections.abc import Callable
 from http import HTTPStatus
-from typing import Callable
 
 import httpx2
 import pytest
