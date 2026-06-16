@@ -42,6 +42,9 @@ from httpware.middleware import AsyncNext, Next
 _FAILURE_THRESHOLD_INVALID = "failure_threshold must be >= 1"
 _RESET_TIMEOUT_INVALID = "reset_timeout must be >= 0"
 _SUCCESS_THRESHOLD_INVALID = "success_threshold must be >= 1"
+_FAILURE_RATE_THRESHOLD_INVALID = "failure_rate_threshold must be in (0, 1]"
+_WINDOW_SECONDS_INVALID = "window_seconds must be > 0"
+_MINIMUM_CALLS_INVALID = "minimum_calls must be >= 1"
 _CROSS_LOOP_MSG = (
     "AsyncCircuitBreaker is bound to a single event loop. First seen on {first!r}; "
     "current request is on {current!r}. Use one AsyncCircuitBreaker per loop; "
@@ -122,13 +125,16 @@ class _CircuitBreakerState:
     inside a transition); the sync wrapper wraps each call in a threading.Lock.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — breaker state has many orthogonal knobs; a dataclass would be worse
         self,
         *,
         failure_threshold: int,
         reset_timeout: float,
         success_threshold: int,
         failure_status_codes: Collection[int] | None,
+        failure_rate_threshold: float | None,
+        window_seconds: float,
+        minimum_calls: int,
         now: Callable[[], float],
     ) -> None:
         if failure_threshold < 1:
@@ -137,6 +143,12 @@ class _CircuitBreakerState:
             raise ValueError(_RESET_TIMEOUT_INVALID)
         if success_threshold < 1:
             raise ValueError(_SUCCESS_THRESHOLD_INVALID)
+        if failure_rate_threshold is not None and not (0.0 < failure_rate_threshold <= 1.0):
+            raise ValueError(_FAILURE_RATE_THRESHOLD_INVALID)
+        if window_seconds <= 0:
+            raise ValueError(_WINDOW_SECONDS_INVALID)
+        if minimum_calls < 1:
+            raise ValueError(_MINIMUM_CALLS_INVALID)
         self._failure_threshold = failure_threshold
         self._reset_timeout = reset_timeout
         self._success_threshold = success_threshold
@@ -145,6 +157,11 @@ class _CircuitBreakerState:
         self._failure_status_codes = (
             frozenset(failure_status_codes) if failure_status_codes is not None else _DEFAULT_FAILURE_STATUS_CODES
         )
+        self._failure_rate_threshold = failure_rate_threshold
+        self._minimum_calls = minimum_calls
+        self._rate_mode = failure_rate_threshold is not None
+        self._window = _RollingWindow(window_seconds) if self._rate_mode else None
+        self._window_seconds = window_seconds
         self._now = now
         self._state = _CircuitState.CLOSED
         self._consecutive_failures = 0
@@ -249,13 +266,16 @@ class _CircuitBreakerState:
 class AsyncCircuitBreaker:
     """Async classic circuit breaker middleware. See the module docstring for the contract."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
         self,
         *,
         failure_threshold: int = 5,
         reset_timeout: float = 30.0,
         success_threshold: int = 1,
         failure_status_codes: Collection[int] | None = None,
+        failure_rate_threshold: float | None = None,
+        window_seconds: float = 30.0,
+        minimum_calls: int = 20,
         _now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state = _CircuitBreakerState(
@@ -263,6 +283,9 @@ class AsyncCircuitBreaker:
             reset_timeout=reset_timeout,
             success_threshold=success_threshold,
             failure_status_codes=failure_status_codes,
+            failure_rate_threshold=failure_rate_threshold,
+            window_seconds=window_seconds,
+            minimum_calls=minimum_calls,
             now=_now,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -313,13 +336,16 @@ class CircuitBreaker:
     (one shared circuit); a sync instance cannot be shared with an AsyncClient.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
         self,
         *,
         failure_threshold: int = 5,
         reset_timeout: float = 30.0,
         success_threshold: int = 1,
         failure_status_codes: Collection[int] | None = None,
+        failure_rate_threshold: float | None = None,
+        window_seconds: float = 30.0,
+        minimum_calls: int = 20,
         _now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state = _CircuitBreakerState(
@@ -327,6 +353,9 @@ class CircuitBreaker:
             reset_timeout=reset_timeout,
             success_threshold=success_threshold,
             failure_status_codes=failure_status_codes,
+            failure_rate_threshold=failure_rate_threshold,
+            window_seconds=window_seconds,
+            minimum_calls=minimum_calls,
             now=_now,
         )
         self._lock = threading.Lock()

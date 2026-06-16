@@ -7,6 +7,7 @@ httpx2.ConnectError surfaces as NetworkError.
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable
 from http import HTTPStatus
 
@@ -23,7 +24,12 @@ from httpware import (
     ServiceUnavailableError,
     TimeoutError,  # noqa: A004 — intentional: httpware.TimeoutError shadows the builtin
 )
-from httpware.middleware.resilience.circuit_breaker import AsyncCircuitBreaker
+from httpware.middleware.resilience.circuit_breaker import (
+    _FAILURE_RATE_THRESHOLD_INVALID,
+    _MINIMUM_CALLS_INVALID,
+    _WINDOW_SECONDS_INVALID,
+    AsyncCircuitBreaker,
+)
 
 
 class _Clock:
@@ -503,3 +509,27 @@ def test_cross_loop_use_raises_runtimeerror() -> None:
     asyncio.run(_run_once())  # binds to loop L1
     with pytest.raises(RuntimeError, match="bound to a single event loop"):
         asyncio.run(_run_once())
+
+
+# ── rate-mode config validation ──
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
+def test_rate_threshold_out_of_range_raises(bad: float) -> None:
+    with pytest.raises(ValueError, match=re.escape(_FAILURE_RATE_THRESHOLD_INVALID)):
+        AsyncCircuitBreaker(failure_rate_threshold=bad)
+
+
+def test_non_positive_window_seconds_raises() -> None:
+    with pytest.raises(ValueError, match=re.escape(_WINDOW_SECONDS_INVALID)):
+        AsyncCircuitBreaker(failure_rate_threshold=0.5, window_seconds=0.0)
+
+
+def test_minimum_calls_below_one_raises() -> None:
+    with pytest.raises(ValueError, match=re.escape(_MINIMUM_CALLS_INVALID)):
+        AsyncCircuitBreaker(failure_rate_threshold=0.5, minimum_calls=0)
+
+
+def test_classic_mode_is_default_when_rate_threshold_none() -> None:
+    breaker = AsyncCircuitBreaker()  # no failure_rate_threshold
+    assert breaker._state._rate_mode is False  # noqa: SLF001 — white-box assertion for internal mode flag
