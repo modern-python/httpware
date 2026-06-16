@@ -6,10 +6,6 @@ As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see the [change Index
 
 ## Open
 
-### Client API surface
-
-- **Per-verb-with-response siblings** (`get_with_response`, `post_with_response`, `request_with_response`) — the v0.8.2 spec deliberately ships only `send_with_response`; the verb-method shape would add ~400 LOC of overload boilerplate per side for a pattern (response headers + typed body) that's almost always paired with a GET and `build_request`. Revisit if a concrete consumer demand surfaces. (`src/httpware/client.py`)
-
 ### Resilience
 
 - **CircuitBreaker v2 — rolling-window / failure-rate mode** (`src/httpware/middleware/resilience/circuit_breaker.py`) — the 0.10.0 breaker ships only the *classic consecutive-failure* model (open after N counted failures in a row; any success resets the streak). That can't catch *partial* degradation (e.g. a steady 50% error rate that alternates success/fail never trips). Deferred to v2 in the 0.10.0 spec; the config was shaped so a rate mode is purely additive (a new opt-in `failure_rate_threshold` + window + `minimum_calls`, with classic remaining the default). Demand-gated: build when someone needs rate-based tripping.
