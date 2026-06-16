@@ -2,6 +2,8 @@
 
 import httpware
 import httpware.middleware
+from httpware import CircuitState
+from httpware.middleware.resilience import CircuitState as ResilienceCircuitState
 
 
 def test_all_exports_resolve() -> None:
@@ -41,6 +43,7 @@ def test_expected_exports() -> None:
         "BulkheadFullError",
         "CircuitBreaker",
         "CircuitOpenError",
+        "CircuitState",
         "Client",
         "ClientError",
         "ClientStatusError",
@@ -78,6 +81,11 @@ def test_expected_exports() -> None:
     assert expected == actual, (
         f"__all__ mismatch:\n  missing from __all__: {expected - actual}\n  unexpected in __all__: {actual - expected}"
     )
+
+
+def test_circuit_state_exported() -> None:
+    assert CircuitState is ResilienceCircuitState
+    assert {m.value for m in CircuitState} == {"closed", "open", "half_open"}
 
 
 def test_missing_decoder_error_exported() -> None:
