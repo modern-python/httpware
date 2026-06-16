@@ -70,7 +70,7 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-_None._
+- **[circuit-breaker-rate-mode](changes/active/2026-06-16.02-circuit-breaker-rate-mode/design.md)** (2026-06-16) — Add an opt-in time-based failure-rate trip mode to the circuit breaker (classic stays default). Closes deferred item "CircuitBreaker v2 (a)". Targets 0.13.0.
 
 ### Archived (shipped)
 
