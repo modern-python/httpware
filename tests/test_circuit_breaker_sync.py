@@ -11,6 +11,7 @@ import pytest
 
 from httpware import (
     CircuitOpenError,
+    CircuitState,
     Client,
     InternalServerError,
     NetworkError,
@@ -523,3 +524,39 @@ def test_rate_mode_clears_window_on_close() -> None:
         fail_client.get("https://example.test/x")
     ok_client = _client(_StatusSequence([200]), breaker=breaker)
     assert ok_client.get("https://example.test/x").status_code == HTTPStatus.OK
+
+
+# ── state property (sync mirror) ──
+
+
+def test_state_closed_open_and_raw_read_caveat() -> None:
+    clock = _Clock()
+    breaker = CircuitBreaker(failure_threshold=2, reset_timeout=10.0, success_threshold=1, _now=clock)
+    assert breaker.state is CircuitState.CLOSED
+    client = _client(_StatusSequence([500, 500]), breaker=breaker)
+    for _ in range(2):
+        with pytest.raises(InternalServerError):
+            client.get("https://example.test/x")
+    assert breaker.state is CircuitState.OPEN
+    # raw-read caveat: reset_timeout elapses but NO request is made → still OPEN
+    clock.advance(10.0)
+    assert breaker.state is CircuitState.OPEN
+    # the next request is admitted as the probe and (success_threshold=1) closes the circuit
+    ok = _client(_StatusSequence([200]), breaker=breaker)
+    assert ok.get("https://example.test/x").status_code == HTTPStatus.OK
+    assert breaker.state is CircuitState.CLOSED
+
+
+def test_state_half_open_while_probing() -> None:
+    clock = _Clock()
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout=5.0, success_threshold=2, _now=clock)
+    fail = _client(_StatusSequence([500]), breaker=breaker)
+    with pytest.raises(InternalServerError):
+        fail.get("https://example.test/x")
+    assert breaker.state is CircuitState.OPEN
+    clock.advance(5.0)
+    ok = _client(_StatusSequence([200, 200]), breaker=breaker)
+    ok.get("https://example.test/x")  # admitted as probe; 1 success, needs 2 → HALF_OPEN
+    assert breaker.state is CircuitState.HALF_OPEN
+    ok.get("https://example.test/x")  # 2nd consecutive success → CLOSED
+    assert breaker.state is CircuitState.CLOSED

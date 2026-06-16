@@ -210,6 +210,22 @@ breaker = AsyncCircuitBreaker(
 
 When `failure_rate_threshold` is set the breaker watches the rolling `window_seconds` window (default `30.0` s) and opens once the failure rate meets the threshold — provided at least `minimum_calls` (default `20`) outcomes have been observed in that window. Classic mode is the default; `failure_threshold` is ignored in rate mode. Half-open recovery works identically in both modes. The same `CircuitBreaker` constructor accepts the same parameters for sync clients.
 
+### State introspection
+
+Both `AsyncCircuitBreaker` and `CircuitBreaker` expose a read-only `state` property returning a public `CircuitState` enum:
+
+```python
+from httpware import CircuitState
+from httpware.middleware.resilience import AsyncCircuitBreaker
+
+breaker = AsyncCircuitBreaker(failure_threshold=5)
+# ... later, in a health/readiness handler:
+if breaker.state is CircuitState.OPEN:
+    ...  # report the dependency as degraded
+```
+
+`state` reflects the stored state at the moment of the call. It is read-only — writing to it raises `AttributeError`. The OPEN→HALF_OPEN transition is lazy: it fires on the next request admitted after `reset_timeout` elapses, not on a clock tick. So `state` will report `OPEN` until a request is actually admitted as the probe; reading it never triggers the transition. The same property exists on the sync `CircuitBreaker`.
+
 ### Sharing
 
 Pass the same instance to multiple clients to enforce one shared circuit across them. A `CircuitBreaker` (sync) cannot be shared with an `AsyncCircuitBreaker` — they use different concurrency primitives.

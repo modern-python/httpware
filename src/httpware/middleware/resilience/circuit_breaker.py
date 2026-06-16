@@ -70,7 +70,9 @@ _ROLE_PROBE = "probe"
 _LOGGER = logging.getLogger("httpware.circuit_breaker")
 
 
-class _CircuitState(enum.Enum):
+class CircuitState(enum.Enum):
+    """Lifecycle state of a circuit breaker: CLOSED, OPEN, or HALF_OPEN."""
+
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -172,7 +174,7 @@ class _CircuitBreakerState:
         self._window = _RollingWindow(window_seconds) if self._rate_mode else None
         self._window_seconds = window_seconds
         self._now = now
-        self._state = _CircuitState.CLOSED
+        self._state = CircuitState.CLOSED
         self._consecutive_failures = 0
         self._consecutive_successes = 0
         self._opened_at = 0.0
@@ -181,14 +183,19 @@ class _CircuitBreakerState:
     def is_failure_status(self, status_code: int) -> bool:
         return status_code in self._failure_status_codes
 
+    @property
+    def state(self) -> CircuitState:
+        """The circuit's current stored state (raw read; no lazy OPEN→HALF_OPEN transition)."""
+        return self._state
+
     def admit(self, request: httpx2.Request) -> str:
         """Decide the request's role, or raise CircuitOpenError. No await inside."""
-        if self._state is _CircuitState.CLOSED:
+        if self._state is CircuitState.CLOSED:
             return _ROLE_CLOSED
-        if self._state is _CircuitState.OPEN:
+        if self._state is CircuitState.OPEN:
             elapsed = self._now() - self._opened_at
             if elapsed >= self._reset_timeout:
-                self._state = _CircuitState.HALF_OPEN
+                self._state = CircuitState.HALF_OPEN
                 self._probe_in_flight = True
                 self._emit(request, "circuit.half_open", logging.INFO, "circuit half-open — admitting probe", {})
                 return _ROLE_PROBE
@@ -217,15 +224,15 @@ class _CircuitBreakerState:
     def on_success(self, role: str, request: httpx2.Request) -> None:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
-        if self._state is _CircuitState.CLOSED:
+        if self._state is CircuitState.CLOSED:
             if self._rate_mode:
                 self._record_outcome(request, failed=False)
             else:
                 self._consecutive_failures = 0
-        elif self._state is _CircuitState.HALF_OPEN:
+        elif self._state is CircuitState.HALF_OPEN:
             self._consecutive_successes += 1
             if self._consecutive_successes >= self._success_threshold:
-                self._state = _CircuitState.CLOSED
+                self._state = CircuitState.CLOSED
                 self._consecutive_failures = 0
                 self._consecutive_successes = 0
                 if self._rate_mode:
@@ -235,14 +242,14 @@ class _CircuitBreakerState:
     def on_failure(self, role: str, request: httpx2.Request) -> None:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
-        if self._state is _CircuitState.CLOSED:
+        if self._state is CircuitState.CLOSED:
             if self._rate_mode:
                 self._record_outcome(request, failed=True)
             else:
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= self._failure_threshold:
                     self._open(request, failures=self._consecutive_failures)
-        elif self._state is _CircuitState.HALF_OPEN:
+        elif self._state is CircuitState.HALF_OPEN:
             self._open(request, failures=1)  # 1 = the single probe failure that re-opened the circuit
 
     def release_probe(self, role: str) -> None:
@@ -251,7 +258,7 @@ class _CircuitBreakerState:
             self._probe_in_flight = False
 
     def _enter_open(self, request: httpx2.Request, message: str, attributes: dict[str, typing.Any]) -> None:
-        self._state = _CircuitState.OPEN
+        self._state = CircuitState.OPEN
         self._opened_at = self._now()
         self._consecutive_failures = 0
         self._consecutive_successes = 0
@@ -346,6 +353,14 @@ class AsyncCircuitBreaker:
             elif self._loop is not current:  # pragma: no cover
                 raise RuntimeError(_CROSS_LOOP_MSG.format(first=self._loop, current=current))
 
+    @property
+    def state(self) -> CircuitState:
+        """Current circuit state — CLOSED, OPEN, or HALF_OPEN.
+
+        Read-only and side-effect-free (a single atomic attribute read; intentionally lock-free).
+        """
+        return self._state.state
+
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Admit, forward, then record the outcome. Fast-fail when the circuit is not closed."""
         self._check_loop()
@@ -398,6 +413,14 @@ class CircuitBreaker:
             now=_now,
         )
         self._lock = threading.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        """Current circuit state — CLOSED, OPEN, or HALF_OPEN.
+
+        Read-only and side-effect-free (a single atomic attribute read; intentionally lock-free).
+        """
+        return self._state.state
 
     def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
         """Admit, forward, then record the outcome. Fast-fail when the circuit is not closed."""
