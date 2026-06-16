@@ -611,3 +611,24 @@ async def test_rate_mode_clears_window_on_close() -> None:
         await fail_client.get("https://example.test/x")
     ok_client = _client(_StatusSequence([200]), breaker=breaker)
     assert (await ok_client.get("https://example.test/x")).status_code == HTTPStatus.OK
+
+
+async def test_rate_mode_open_event_carries_rate_attributes(caplog: pytest.LogCaptureFixture) -> None:
+    """circuit.opened in rate mode carries rate attributes, not the classic ones."""
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_rate_threshold=0.5, window_seconds=100.0, minimum_calls=4, _now=clock)
+    # 2 failures then 2 successes → total 4 (meets minimum_calls), rate 2/4 = 0.5 → opens
+    client = _client(_StatusSequence([500, 500, 200, 200]), breaker=breaker)
+    with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
+        for _ in range(2):
+            with pytest.raises(InternalServerError):
+                await client.get("https://example.test/x")
+        for _ in range(2):
+            await client.get("https://example.test/x")
+    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[unresolved-attribute]
+    assert opened, "expected a circuit.opened record"
+    rec = opened[-1]
+    assert rec.failure_rate_threshold == 0.5  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert rec.observed_calls >= 4  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert hasattr(rec, "failure_rate")
+    assert not hasattr(rec, "failure_threshold")  # classic attribute absent in rate mode
