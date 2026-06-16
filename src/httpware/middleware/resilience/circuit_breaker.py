@@ -1,4 +1,4 @@
-"""CircuitBreaker + AsyncCircuitBreaker — classic consecutive-failure circuit breaker.
+"""CircuitBreaker + AsyncCircuitBreaker — consecutive-failure and failure-rate circuit breakers.
 
 See planning/specs/2026-06-13-circuit-breaker-and-timeout-design.md for the contract.
 
@@ -16,6 +16,15 @@ State machine (classic / consecutive-failure):
                 becomes the half-open probe.
     HALF_OPEN — admit exactly one probe at a time; success_threshold consecutive probe
                 successes close the circuit; one probe failure re-opens it.
+
+Trip modes:
+    Classic (default) — opens when consecutive counted-failures reach failure_threshold.
+        Set failure_threshold to use this mode; leave failure_rate_threshold unset.
+    Rate (opt-in) — opens when the failure rate over a rolling window_seconds window
+        meets or exceeds failure_rate_threshold, provided at least minimum_calls
+        outcomes have been observed in that window. Set failure_rate_threshold to
+        activate; failure_threshold is ignored in this mode.
+    Half-open recovery and event names are identical across both modes.
 
 The lock-free _CircuitBreakerState holds the transition logic, shared by both wrappers.
 AsyncCircuitBreaker relies on asyncio atomicity (no await inside a transition) plus a
