@@ -228,7 +228,7 @@ class AsyncClient:
         """Delegate request construction to the wrapped httpx2.AsyncClient."""
         return self._httpx2_client.build_request(method, url, **kwargs)
 
-    async def _request_with_body(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def _prepare_request(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
         method: str,
         url: str,
@@ -242,8 +242,7 @@ class AsyncClient:
         content: typing.Any | None = None,
         data: typing.Any | None = None,
         files: typing.Any | None = None,
-        response_model: type[T] | None = None,
-    ) -> httpx2.Response | T:
+    ) -> httpx2.Request:
         kwargs: dict[str, typing.Any] = {}
         if params is not None:
             kwargs["params"] = params
@@ -266,6 +265,37 @@ class AsyncClient:
         request = self._httpx2_client.build_request(method, url, **kwargs)
         if _is_streaming_body_async(content) or _is_streaming_body_async(data) or _is_streaming_body_async(files):
             request.extensions[STREAMING_BODY_MARKER] = True
+        return request
+
+    async def _request_with_body(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        request = self._prepare_request(
+            method,
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+        )
         return await self.send(request, response_model=response_model)
 
     @typing.overload
@@ -1003,7 +1033,7 @@ class Client:
         """Delegate request construction to the wrapped httpx2.Client."""
         return self._httpx2_client.build_request(method, url, **kwargs)
 
-    def _request_with_body(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def _prepare_request(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
         method: str,
         url: str,
@@ -1017,8 +1047,7 @@ class Client:
         content: typing.Any | None = None,
         data: typing.Any | None = None,
         files: typing.Any | None = None,
-        response_model: type[T] | None = None,
-    ) -> httpx2.Response | T:
+    ) -> httpx2.Request:
         kwargs: dict[str, typing.Any] = {}
         if params is not None:
             kwargs["params"] = params
@@ -1041,6 +1070,37 @@ class Client:
         request = self._httpx2_client.build_request(method, url, **kwargs)
         if _is_streaming_body_sync(content) or _is_streaming_body_sync(data) or _is_streaming_body_sync(files):
             request.extensions[STREAMING_BODY_MARKER] = True
+        return request
+
+    def _request_with_body(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T] | None = None,
+    ) -> httpx2.Response | T:
+        request = self._prepare_request(
+            method,
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+        )
         return self.send(request, response_model=response_model)
 
     @typing.overload
