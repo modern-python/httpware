@@ -74,6 +74,7 @@ _None._
 
 ### Archived (shipped)
 
+- **[circuit-breaker-rate-mode](changes/archive/2026-06-16.02-circuit-breaker-rate-mode/design.md)** (#69, 2026-06-16) — Added an opt-in time-based failure-rate trip mode to the circuit breaker (classic stays default). Shipped 0.13.0; closed deferred item "CircuitBreaker v2 (a)".
 - **[per-verb-with-response](changes/archive/2026-06-16.01-per-verb-with-response/design.md)** (#68, 2026-06-16) — Added `get_with_response` … `request_with_response` siblings (required `response_model`, returns `(Response, T)`) to both clients. Shipped 0.12.0; closed the deferred "Per-verb-with-response siblings" item.
 - **[custom-decoder-guide](changes/archive/2026-06-15.01-custom-decoder-guide/change.md)** (#67, 2026-06-15) — Docs: a "write your own `ResponseDecoder`" guide for Seam B, mirroring `docs/middleware.md`. Closed deferred item G6.
 - **[audit-doc-fixes](changes/archive/2026-06-14.06-audit-doc-fixes/change.md)** (#66, 2026-06-14) — Closed the [deep-audit](audits/2026-06-14-deep-audit.md) doc-accuracy findings: `Client.stream()` docs, terminal-call attribution, the four auto-raise sites, the pydantic upper bound, and root import paths.

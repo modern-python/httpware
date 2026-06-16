@@ -1,4 +1,4 @@
-"""CircuitBreaker + AsyncCircuitBreaker — classic consecutive-failure circuit breaker.
+"""CircuitBreaker + AsyncCircuitBreaker — consecutive-failure and failure-rate circuit breakers.
 
 See planning/specs/2026-06-13-circuit-breaker-and-timeout-design.md for the contract.
 
@@ -16,6 +16,15 @@ State machine (classic / consecutive-failure):
                 becomes the half-open probe.
     HALF_OPEN — admit exactly one probe at a time; success_threshold consecutive probe
                 successes close the circuit; one probe failure re-opens it.
+
+Trip modes:
+    Classic (default) — opens when consecutive counted-failures reach failure_threshold.
+        Set failure_threshold to use this mode; leave failure_rate_threshold unset.
+    Rate (opt-in) — opens when the failure rate over a rolling window_seconds window
+        meets or exceeds failure_rate_threshold, provided at least minimum_calls
+        outcomes have been observed in that window. Set failure_rate_threshold to
+        activate; failure_threshold is ignored in this mode.
+    Half-open recovery and event names are identical across both modes.
 
 The lock-free _CircuitBreakerState holds the transition logic, shared by both wrappers.
 AsyncCircuitBreaker relies on asyncio atomicity (no await inside a transition) plus a
@@ -42,6 +51,9 @@ from httpware.middleware import AsyncNext, Next
 _FAILURE_THRESHOLD_INVALID = "failure_threshold must be >= 1"
 _RESET_TIMEOUT_INVALID = "reset_timeout must be >= 0"
 _SUCCESS_THRESHOLD_INVALID = "success_threshold must be >= 1"
+_FAILURE_RATE_THRESHOLD_INVALID = "failure_rate_threshold must be in (0, 1]"
+_WINDOW_SECONDS_INVALID = "window_seconds must be > 0"
+_MINIMUM_CALLS_INVALID = "minimum_calls must be >= 1"
 _CROSS_LOOP_MSG = (
     "AsyncCircuitBreaker is bound to a single event loop. First seen on {first!r}; "
     "current request is on {current!r}. Use one AsyncCircuitBreaker per loop; "
@@ -49,6 +61,8 @@ _CROSS_LOOP_MSG = (
 )
 
 _DEFAULT_FAILURE_STATUS_CODES = frozenset(range(500, 600))
+
+_BUCKET_COUNT = 10
 
 _ROLE_CLOSED = "closed"
 _ROLE_PROBE = "probe"
@@ -62,6 +76,56 @@ class _CircuitState(enum.Enum):
     HALF_OPEN = "half_open"
 
 
+class _RollingWindow:
+    """Time-bucketed success/failure counters over a rolling window.
+
+    `window_seconds` is split into `_BUCKET_COUNT` buckets. Each bucket holds
+    [successes, failures] tagged with the integer time-slot it represents; a
+    bucket whose slot is stale is reset on write, and `totals` filters to the
+    live slot range so data older than the window never counts. Every method is
+    synchronous and reads `now` from its caller (so the breaker's critical
+    section owns the clock read).
+    """
+
+    def __init__(self, window_seconds: float) -> None:
+        self._bucket_width = window_seconds / _BUCKET_COUNT
+        self._slot = [-1] * _BUCKET_COUNT
+        self._success = [0] * _BUCKET_COUNT
+        self._failure = [0] * _BUCKET_COUNT
+
+    def _current_slot(self, now: float) -> int:
+        return int(now // self._bucket_width)
+
+    def record(self, now: float, *, failed: bool) -> None:
+        slot = self._current_slot(now)
+        index = slot % _BUCKET_COUNT
+        if self._slot[index] != slot:  # bucket reused for a new slot — evict
+            self._slot[index] = slot
+            self._success[index] = 0
+            self._failure[index] = 0
+        if failed:
+            self._failure[index] += 1
+        else:
+            self._success[index] += 1
+
+    def totals(self, now: float) -> tuple[int, int]:
+        """Return (total, failures) across buckets still inside the window at `now`."""
+        slot = self._current_slot(now)
+        oldest = slot - _BUCKET_COUNT + 1
+        total = 0
+        failures = 0
+        for i in range(_BUCKET_COUNT):
+            if oldest <= self._slot[i] <= slot:
+                total += self._success[i] + self._failure[i]
+                failures += self._failure[i]
+        return total, failures
+
+    def clear(self) -> None:
+        self._slot = [-1] * _BUCKET_COUNT
+        self._success = [0] * _BUCKET_COUNT
+        self._failure = [0] * _BUCKET_COUNT
+
+
 class _CircuitBreakerState:
     """Lock-free circuit-breaker state machine shared by the sync + async wrappers.
 
@@ -70,13 +134,16 @@ class _CircuitBreakerState:
     inside a transition); the sync wrapper wraps each call in a threading.Lock.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — breaker state has many orthogonal knobs; a dataclass would be worse
         self,
         *,
         failure_threshold: int,
         reset_timeout: float,
         success_threshold: int,
         failure_status_codes: Collection[int] | None,
+        failure_rate_threshold: float | None,
+        window_seconds: float,
+        minimum_calls: int,
         now: Callable[[], float],
     ) -> None:
         if failure_threshold < 1:
@@ -85,6 +152,12 @@ class _CircuitBreakerState:
             raise ValueError(_RESET_TIMEOUT_INVALID)
         if success_threshold < 1:
             raise ValueError(_SUCCESS_THRESHOLD_INVALID)
+        if failure_rate_threshold is not None and not (0.0 < failure_rate_threshold <= 1.0):
+            raise ValueError(_FAILURE_RATE_THRESHOLD_INVALID)
+        if window_seconds <= 0:
+            raise ValueError(_WINDOW_SECONDS_INVALID)
+        if minimum_calls < 1:
+            raise ValueError(_MINIMUM_CALLS_INVALID)
         self._failure_threshold = failure_threshold
         self._reset_timeout = reset_timeout
         self._success_threshold = success_threshold
@@ -93,6 +166,11 @@ class _CircuitBreakerState:
         self._failure_status_codes = (
             frozenset(failure_status_codes) if failure_status_codes is not None else _DEFAULT_FAILURE_STATUS_CODES
         )
+        self._failure_rate_threshold = failure_rate_threshold
+        self._minimum_calls = minimum_calls
+        self._rate_mode = failure_rate_threshold is not None
+        self._window = _RollingWindow(window_seconds) if self._rate_mode else None
+        self._window_seconds = window_seconds
         self._now = now
         self._state = _CircuitState.CLOSED
         self._consecutive_failures = 0
@@ -140,22 +218,30 @@ class _CircuitBreakerState:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
         if self._state is _CircuitState.CLOSED:
-            self._consecutive_failures = 0
+            if self._rate_mode:
+                self._record_outcome(request, failed=False)
+            else:
+                self._consecutive_failures = 0
         elif self._state is _CircuitState.HALF_OPEN:
             self._consecutive_successes += 1
             if self._consecutive_successes >= self._success_threshold:
                 self._state = _CircuitState.CLOSED
                 self._consecutive_failures = 0
                 self._consecutive_successes = 0
+                if self._rate_mode:
+                    self._window.clear()  # ty: ignore[unresolved-attribute]
                 self._emit(request, "circuit.closed", logging.INFO, "circuit closed — service recovered", {})
 
     def on_failure(self, role: str, request: httpx2.Request) -> None:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
         if self._state is _CircuitState.CLOSED:
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= self._failure_threshold:
-                self._open(request, failures=self._consecutive_failures)
+            if self._rate_mode:
+                self._record_outcome(request, failed=True)
+            else:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self._failure_threshold:
+                    self._open(request, failures=self._consecutive_failures)
         elif self._state is _CircuitState.HALF_OPEN:
             self._open(request, failures=1)  # 1 = the single probe failure that re-opened the circuit
 
@@ -164,18 +250,40 @@ class _CircuitBreakerState:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
 
-    def _open(self, request: httpx2.Request, *, failures: int) -> None:
+    def _enter_open(self, request: httpx2.Request, message: str, attributes: dict[str, typing.Any]) -> None:
         self._state = _CircuitState.OPEN
         self._opened_at = self._now()
         self._consecutive_failures = 0
         self._consecutive_successes = 0
-        self._emit(
+        self._emit(request, "circuit.opened", logging.WARNING, message, attributes)
+
+    def _open(self, request: httpx2.Request, *, failures: int) -> None:
+        self._enter_open(
             request,
-            "circuit.opened",
-            logging.WARNING,
             "circuit opened — failure threshold reached",
             {"failure_threshold": self._failure_threshold, "failures": failures},
         )
+
+    def _open_rate(self, request: httpx2.Request, *, total: int, failures: int) -> None:
+        self._enter_open(
+            request,
+            "circuit opened — failure rate threshold reached",
+            {
+                "failure_rate": failures / total,
+                "failure_rate_threshold": self._failure_rate_threshold,
+                "window_seconds": self._window_seconds,
+                "observed_calls": total,
+            },
+        )
+
+    def _record_outcome(self, request: httpx2.Request, *, failed: bool) -> None:
+        # Only reached in rate mode, where _window and _failure_rate_threshold are non-None.
+        now = self._now()
+        self._window.record(now, failed=failed)  # ty: ignore[unresolved-attribute]
+        total, failures = self._window.totals(now)  # ty: ignore[unresolved-attribute]
+        threshold = self._failure_rate_threshold
+        if threshold is not None and total >= self._minimum_calls and failures / total >= threshold:
+            self._open_rate(request, total=total, failures=failures)
 
     def _emit(
         self,
@@ -197,13 +305,16 @@ class _CircuitBreakerState:
 class AsyncCircuitBreaker:
     """Async classic circuit breaker middleware. See the module docstring for the contract."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
         self,
         *,
         failure_threshold: int = 5,
         reset_timeout: float = 30.0,
         success_threshold: int = 1,
         failure_status_codes: Collection[int] | None = None,
+        failure_rate_threshold: float | None = None,
+        window_seconds: float = 30.0,
+        minimum_calls: int = 20,
         _now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state = _CircuitBreakerState(
@@ -211,6 +322,9 @@ class AsyncCircuitBreaker:
             reset_timeout=reset_timeout,
             success_threshold=success_threshold,
             failure_status_codes=failure_status_codes,
+            failure_rate_threshold=failure_rate_threshold,
+            window_seconds=window_seconds,
+            minimum_calls=minimum_calls,
             now=_now,
         )
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -261,13 +375,16 @@ class CircuitBreaker:
     (one shared circuit); a sync instance cannot be shared with an AsyncClient.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
         self,
         *,
         failure_threshold: int = 5,
         reset_timeout: float = 30.0,
         success_threshold: int = 1,
         failure_status_codes: Collection[int] | None = None,
+        failure_rate_threshold: float | None = None,
+        window_seconds: float = 30.0,
+        minimum_calls: int = 20,
         _now: Callable[[], float] = time.monotonic,
     ) -> None:
         self._state = _CircuitBreakerState(
@@ -275,6 +392,9 @@ class CircuitBreaker:
             reset_timeout=reset_timeout,
             success_threshold=success_threshold,
             failure_status_codes=failure_status_codes,
+            failure_rate_threshold=failure_rate_threshold,
+            window_seconds=window_seconds,
+            minimum_calls=minimum_calls,
             now=_now,
         )
         self._lock = threading.Lock()

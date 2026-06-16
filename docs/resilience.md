@@ -191,6 +191,25 @@ Emitted on logger `httpware.circuit_breaker`:
 | `circuit.half_open` | Reset timeout elapsed; circuit transitions OPEN → HALF_OPEN |
 | `circuit.closed` | Success threshold reached; circuit transitions HALF_OPEN → CLOSED |
 
+### Time-based failure-rate mode
+
+By default the circuit breaker trips on `failure_threshold` *consecutive* counted failures. This can miss partial degradation: a downstream returning errors on exactly half of all requests will never form a consecutive streak long enough to trip — the circuit stays closed while the error rate sits at 50%.
+
+For that pattern, switch to rate mode by passing `failure_rate_threshold`:
+
+```python
+from httpware.middleware.resilience import AsyncCircuitBreaker
+
+
+breaker = AsyncCircuitBreaker(
+    failure_rate_threshold=0.5,  # open at ≥50% failures
+    window_seconds=30.0,         # over a rolling 30s window
+    minimum_calls=20,            # but only once 20+ calls are observed
+)
+```
+
+When `failure_rate_threshold` is set the breaker watches the rolling `window_seconds` window (default `30.0` s) and opens once the failure rate meets the threshold — provided at least `minimum_calls` (default `20`) outcomes have been observed in that window. Classic mode is the default; `failure_threshold` is ignored in rate mode. Half-open recovery works identically in both modes. The same `CircuitBreaker` constructor accepts the same parameters for sync clients.
+
 ### Sharing
 
 Pass the same instance to multiple clients to enforce one shared circuit across them. A `CircuitBreaker` (sync) cannot be shared with an `AsyncCircuitBreaker` — they use different concurrency primitives.

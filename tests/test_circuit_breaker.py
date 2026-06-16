@@ -6,7 +6,9 @@ httpx2.ConnectError surfaces as NetworkError.
 """
 
 import asyncio
+import contextlib
 import logging
+import re
 from collections.abc import Callable
 from http import HTTPStatus
 
@@ -23,7 +25,12 @@ from httpware import (
     ServiceUnavailableError,
     TimeoutError,  # noqa: A004 — intentional: httpware.TimeoutError shadows the builtin
 )
-from httpware.middleware.resilience.circuit_breaker import AsyncCircuitBreaker
+from httpware.middleware.resilience.circuit_breaker import (
+    _FAILURE_RATE_THRESHOLD_INVALID,
+    _MINIMUM_CALLS_INVALID,
+    _WINDOW_SECONDS_INVALID,
+    AsyncCircuitBreaker,
+)
 
 
 class _Clock:
@@ -503,3 +510,125 @@ def test_cross_loop_use_raises_runtimeerror() -> None:
     asyncio.run(_run_once())  # binds to loop L1
     with pytest.raises(RuntimeError, match="bound to a single event loop"):
         asyncio.run(_run_once())
+
+
+# ── rate-mode config validation ──
+
+
+@pytest.mark.parametrize("bad", [0.0, -0.1, 1.5])
+def test_rate_threshold_out_of_range_raises(bad: float) -> None:
+    with pytest.raises(ValueError, match=re.escape(_FAILURE_RATE_THRESHOLD_INVALID)):
+        AsyncCircuitBreaker(failure_rate_threshold=bad)
+
+
+def test_non_positive_window_seconds_raises() -> None:
+    with pytest.raises(ValueError, match=re.escape(_WINDOW_SECONDS_INVALID)):
+        AsyncCircuitBreaker(failure_rate_threshold=0.5, window_seconds=0.0)
+
+
+def test_minimum_calls_below_one_raises() -> None:
+    with pytest.raises(ValueError, match=re.escape(_MINIMUM_CALLS_INVALID)):
+        AsyncCircuitBreaker(failure_rate_threshold=0.5, minimum_calls=0)
+
+
+def test_classic_mode_is_default_when_rate_threshold_none() -> None:
+    breaker = AsyncCircuitBreaker()  # no failure_rate_threshold
+    assert breaker._state._rate_mode is False  # noqa: SLF001 — white-box assertion for internal mode flag
+
+
+# ── rate-mode trip behavior ──
+
+
+async def test_rate_mode_trips_on_partial_failure() -> None:
+    """Alternating 50% failures trip rate mode (classic never would)."""
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_rate_threshold=0.5, window_seconds=100.0, minimum_calls=10, _now=clock)
+    handler = _StatusSequence([500, 200, 500, 200, 500, 200, 500, 200, 500, 200])
+    client = _client(handler, breaker=breaker)
+    for _ in range(10):
+        with contextlib.suppress(InternalServerError):
+            await client.get("https://example.test/x")
+    with pytest.raises(CircuitOpenError):
+        await client.get("https://example.test/x")
+
+
+async def test_rate_mode_does_not_trip_below_minimum_calls() -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_rate_threshold=0.5, window_seconds=100.0, minimum_calls=10, _now=clock)
+    handler = _StatusSequence([500, 500, 500])  # 3 failures, below floor of 10
+    client = _client(handler, breaker=breaker)
+    for _ in range(3):
+        with pytest.raises(InternalServerError):
+            await client.get("https://example.test/x")
+    handler_ok = _StatusSequence([200])
+    client_ok = _client(handler_ok, breaker=breaker)
+    assert (await client_ok.get("https://example.test/x")).status_code == HTTPStatus.OK
+
+
+async def test_rate_mode_evicts_old_failures() -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_rate_threshold=0.5, window_seconds=10.0, minimum_calls=4, _now=clock)
+    fail = _client(_StatusSequence([500, 500, 500, 500, 500, 500, 500, 500]), breaker=breaker)
+    for _ in range(3):
+        with pytest.raises(InternalServerError):
+            await fail.get("https://example.test/x")
+    clock.advance(20.0)  # push them fully out of the 10s window
+    with pytest.raises(InternalServerError):
+        await fail.get("https://example.test/x")
+    ok = _client(_StatusSequence([200]), breaker=breaker)
+    assert (await ok.get("https://example.test/x")).status_code == HTTPStatus.OK
+
+
+async def test_rate_mode_clears_window_on_close() -> None:
+    """Closing from HALF_OPEN in rate mode clears the window — recovery starts fresh.
+
+    Discriminating: without the clear, the pre-open failures would still be inside the
+    window after recovery and a single post-close failure would re-cross the rate
+    threshold immediately. With the clear, the post-close failure is below minimum_calls
+    again, so the circuit stays CLOSED.
+    """
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(
+        failure_rate_threshold=0.5,
+        window_seconds=100.0,
+        minimum_calls=2,
+        reset_timeout=5.0,
+        success_threshold=1,
+        _now=clock,
+    )
+    open_client = _client(_StatusSequence([500, 500]), breaker=breaker)
+    for _ in range(2):
+        with pytest.raises(InternalServerError):
+            await open_client.get("https://example.test/x")
+    with pytest.raises(CircuitOpenError):  # 2/2 failures >= 0.5 -> OPEN
+        await open_client.get("https://example.test/x")
+    clock.advance(5.0)
+    probe_client = _client(_StatusSequence([200]), breaker=breaker)
+    await probe_client.get("https://example.test/x")  # probe 200 -> CLOSED, window cleared
+    # One fresh failure: total=1 < minimum_calls=2, so the circuit stays CLOSED.
+    fail_client = _client(_StatusSequence([500]), breaker=breaker)
+    with pytest.raises(InternalServerError):
+        await fail_client.get("https://example.test/x")
+    ok_client = _client(_StatusSequence([200]), breaker=breaker)
+    assert (await ok_client.get("https://example.test/x")).status_code == HTTPStatus.OK
+
+
+async def test_rate_mode_open_event_carries_rate_attributes(caplog: pytest.LogCaptureFixture) -> None:
+    """circuit.opened in rate mode carries rate attributes, not the classic ones."""
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_rate_threshold=0.5, window_seconds=100.0, minimum_calls=4, _now=clock)
+    # 2 failures then 2 successes → total 4 (meets minimum_calls), rate 2/4 = 0.5 → opens
+    client = _client(_StatusSequence([500, 500, 200, 200]), breaker=breaker)
+    with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
+        for _ in range(2):
+            with pytest.raises(InternalServerError):
+                await client.get("https://example.test/x")
+        for _ in range(2):
+            await client.get("https://example.test/x")
+    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[unresolved-attribute]
+    assert opened, "expected a circuit.opened record"
+    rec = opened[-1]
+    assert rec.failure_rate_threshold == 0.5  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert rec.observed_calls >= 4  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert hasattr(rec, "failure_rate")
+    assert not hasattr(rec, "failure_threshold")  # classic attribute absent in rate mode
