@@ -1313,6 +1313,37 @@ class Client:
         )
         return self.send(request, response_model=response_model)
 
+    def _request_with_body_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        request = self._prepare_request(
+            method,
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+        )
+        return self.send_with_response(request, response_model=response_model)
+
     @typing.overload
     def get(
         self,
@@ -1352,6 +1383,29 @@ class Client:
     ) -> httpx2.Response | T:
         """Send a GET request."""
         return self._request_with_body(
+            "GET",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            response_model=response_model,
+        )
+
+    def get_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send a GET request; return (response, decoded body)."""
+        return self._request_with_body_with_response(
             "GET",
             url,
             params=params,
@@ -1413,6 +1467,37 @@ class Client:
     ) -> httpx2.Response | T:
         """Send a POST request."""
         return self._request_with_body(
+            "POST",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
+    def post_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send a POST request; return (response, decoded body)."""
+        return self._request_with_body_with_response(
             "POST",
             url,
             params=params,
@@ -1492,6 +1577,37 @@ class Client:
             response_model=response_model,
         )
 
+    def put_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send a PUT request; return (response, decoded body)."""
+        return self._request_with_body_with_response(
+            "PUT",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
     @typing.overload
     def patch(
         self,
@@ -1557,6 +1673,37 @@ class Client:
             response_model=response_model,
         )
 
+    def patch_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send a PATCH request; return (response, decoded body)."""
+        return self._request_with_body_with_response(
+            "PATCH",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
     @typing.overload
     def delete(
         self,
@@ -1608,6 +1755,37 @@ class Client:
     ) -> httpx2.Response | T:
         """Send a DELETE request."""
         return self._request_with_body(
+            "DELETE",
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
+    def delete_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send a DELETE request; return (response, decoded body)."""
+        return self._request_with_body_with_response(
             "DELETE",
             url,
             params=params,
@@ -1774,6 +1952,38 @@ class Client:
     ) -> httpx2.Response | T:
         """Send a request with an arbitrary HTTP method."""
         return self._request_with_body(
+            method,
+            url,
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+            response_model=response_model,
+        )
+
+    def request_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+        self,
+        method: str,
+        url: str,
+        *,
+        params: typing.Any | None = None,
+        headers: typing.Any | None = None,
+        cookies: typing.Any | None = None,
+        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
+        extensions: typing.Any | None = None,
+        json: typing.Any | None = None,
+        content: typing.Any | None = None,
+        data: typing.Any | None = None,
+        files: typing.Any | None = None,
+        response_model: type[T],
+    ) -> tuple[httpx2.Response, T]:
+        """Send a request with an explicit method; return (response, decoded body)."""
+        return self._request_with_body_with_response(
             method,
             url,
             params=params,
