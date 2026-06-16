@@ -8,13 +8,14 @@ As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see the [change Index
 
 ### Resilience
 
-- **CircuitBreaker v2 — remaining axes** (`src/httpware/middleware/resilience/circuit_breaker.py`) — 0.13.0 shipped axis **(a)**, the opt-in **time-based** failure-rate trip mode (`failure_rate_threshold` + `window_seconds` + `minimum_calls`; classic stays default). Still open, each independent and demand-gated:
-
-  - **Count-based window variant** — a `window_type="count"` selector (ring buffer of the last N outcomes) alongside the shipped time-based window. Resilience4j offers both; we chose time-based first as the better HTTP-service fit. Additive: a new window-type knob, time-based remaining the default. Build if someone needs volume-relative (not time-relative) windows.
-  - **(b) Manual control + read-only `state`** — `force_open`/`force_closed` and a `state` introspection property (Resilience4j's registry, Polly's `StateProvider`/`ManualControl`). Parked as YAGNI in the 0.10.0 audit (decision 4: events-only control surface). Independent of the trip mode.
-  - **(c) Slow-call-rate dimension** — *don't*: Resilience4j-only, and redundant with `AsyncTimeout`. Recorded here only so a future reader doesn't re-propose it.
+- **CircuitBreaker v2 — manual control + read-only `state`** (`src/httpware/middleware/resilience/circuit_breaker.py`) — 0.13.0 shipped the opt-in **time-based** failure-rate trip mode (`failure_rate_threshold` + `window_seconds` + `minimum_calls`; classic stays default). The one remaining real axis is `force_open`/`force_closed` and a `state` introspection property (Resilience4j's registry, Polly's `StateProvider`/`ManualControl`). Parked as YAGNI in the 0.10.0 audit (decision 4: events-only control surface). Demand-gated; independent of the trip mode.
 
   **Don't regress:** httpware's HTTP-native failure classification (429/4xx = success out of the box) is already ahead of the generic-predicate breakers — preserve it in any v2 work.
+
+  **Decided against (don't re-propose):**
+
+  - **Count-based window variant** (`window_type="count"`) — time-based + `minimum_calls` already covers the fixed-sample-size rationale, and count-based adds a real staleness downside for HTTP health detection (a low-traffic "last N calls" window can reflect outcomes from minutes ago). Polly v8 *removed* count-based; Hystrix and Envoy are time-based. For a spiky low-volume backend, a longer `window_seconds` + `minimum_calls` is the better tool. Revisit only on concrete Resilience4j-parity demand.
+  - **Slow-call-rate dimension** — Resilience4j-only, and redundant with `AsyncTimeout`.
 
 ### Documentation
 
