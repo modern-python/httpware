@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-16
 slug: delta-audit-followups
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 71
+outcome: Closed the 2026-06-16 delta-audit Low findings — rate-mode probe-failure re-open test (async+sync) + document-as-intended note. No source behavior change.
 ---
 
 # Change: Close the 2026-06-16 delta-audit Low findings

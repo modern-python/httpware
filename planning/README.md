@@ -70,9 +70,11 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-- **[delta-audit-followups](changes/active/2026-06-16.04-delta-audit-followups/change.md)** (2026-06-16) — Close the [2026-06-16 delta audit](audits/2026-06-16-delta-audit.md) Low findings: lock + document the rate-mode HALF_OPEN probe-failure re-open attribute shape. Tests + doc only.
+_None._
 
 ### Archived (shipped)
+
+- **[delta-audit-followups](changes/archive/2026-06-16.04-delta-audit-followups/change.md)** (#71, 2026-06-16) — Closed the [2026-06-16 delta audit](audits/2026-06-16-delta-audit.md) Low findings: rate-mode HALF_OPEN probe-failure re-open test + document-as-intended note. Tests + doc only, no release.
 
 - **[circuit-breaker-state](changes/archive/2026-06-16.03-circuit-breaker-state/design.md)** (#70, 2026-06-16) — Read-only `state` property + public `CircuitState` enum on the circuit breaker. Shipped 0.14.0; closed the read-only-state half of the deferred CircuitBreaker introspection item.
 
