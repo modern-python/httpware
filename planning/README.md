@@ -70,10 +70,11 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-- **[per-verb-with-response](changes/active/2026-06-16.01-per-verb-with-response/design.md)** (2026-06-16) — Add `get_with_response` … `request_with_response` siblings (required `response_model`, returns `(Response, T)`) to both clients. Closes the deferred "Per-verb-with-response siblings" item. Targets 0.12.0.
+_None._
 
 ### Archived (shipped)
 
+- **[per-verb-with-response](changes/archive/2026-06-16.01-per-verb-with-response/design.md)** (#68, 2026-06-16) — Added `get_with_response` … `request_with_response` siblings (required `response_model`, returns `(Response, T)`) to both clients. Shipped 0.12.0; closed the deferred "Per-verb-with-response siblings" item.
 - **[custom-decoder-guide](changes/archive/2026-06-15.01-custom-decoder-guide/change.md)** (#67, 2026-06-15) — Docs: a "write your own `ResponseDecoder`" guide for Seam B, mirroring `docs/middleware.md`. Closed deferred item G6.
 - **[audit-doc-fixes](changes/archive/2026-06-14.06-audit-doc-fixes/change.md)** (#66, 2026-06-14) — Closed the [deep-audit](audits/2026-06-14-deep-audit.md) doc-accuracy findings: `Client.stream()` docs, terminal-call attribution, the four auto-raise sites, the pydantic upper bound, and root import paths.
 - **[audit-test-quality](changes/archive/2026-06-14.05-audit-test-quality/change.md)** (#65, 2026-06-14) — Closed 11 [deep-audit](audits/2026-06-14-deep-audit.md) test-quality findings: sync-terminal + CookieConflict coverage, the `StatusError.__init__` invariant, missing status constructions, sync mirrors, typing overloads, a deterministic bulkhead barrier, a pinned budget clock, an observability assertion, and the `TimeoutError` circuit trigger.

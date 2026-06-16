@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-16
 slug: per-verb-with-response
 spec: per-verb-with-response
-pr: null
+pr: 68
 ---
 
 # per-verb-with-response — implementation plan

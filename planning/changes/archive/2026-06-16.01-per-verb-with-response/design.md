@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-16
 slug: per-verb-with-response
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 68
+outcome: Shipped 0.12.0 — 6 per-verb *_with_response siblings (get/post/put/patch/delete/request) on both clients, returning (Response, T). Closed the deferred "Per-verb-with-response siblings" item.
 ---
 
 # Design: Per-verb `*_with_response` siblings
