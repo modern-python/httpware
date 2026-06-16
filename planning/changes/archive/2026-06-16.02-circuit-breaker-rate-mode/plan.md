@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-16
 slug: circuit-breaker-rate-mode
 spec: circuit-breaker-rate-mode
-pr: null
+pr: 69
 ---
 
 # circuit-breaker-rate-mode — implementation plan
