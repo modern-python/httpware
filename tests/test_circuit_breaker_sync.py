@@ -560,3 +560,32 @@ def test_state_half_open_while_probing() -> None:
     assert breaker.state is CircuitState.HALF_OPEN
     ok.get("https://example.test/x")  # 2nd consecutive success → CLOSED
     assert breaker.state is CircuitState.CLOSED
+
+
+def test_rate_mode_probe_failure_reopens_with_classic_attributes(caplog: pytest.LogCaptureFixture) -> None:
+    """Sync mirror: a failed HALF_OPEN probe re-opens a rate-mode circuit via the shared classic path.
+
+    Documented as intended (2026-06-16 delta audit, Low #1): the re-open's circuit.opened carries
+    the classic failure_threshold/failures shape (failures=1) in both modes.
+    """
+    clock = _Clock()
+    breaker = CircuitBreaker(
+        failure_rate_threshold=0.5, window_seconds=100.0, minimum_calls=2, reset_timeout=5.0, _now=clock
+    )
+    fail = _client(_StatusSequence([500, 500]), breaker=breaker)  # total=2, rate=1.0 → trip via rate
+    for _ in range(2):
+        with pytest.raises(InternalServerError):
+            fail.get("https://example.test/x")
+    assert breaker.state is CircuitState.OPEN
+    clock.advance(5.0)  # past reset_timeout → next request is admitted as the probe
+    with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
+        probe = _client(_StatusSequence([500]), breaker=breaker)
+        with pytest.raises(InternalServerError):
+            probe.get("https://example.test/x")
+    assert breaker.state is CircuitState.OPEN  # the failed probe re-opened it
+    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[unresolved-attribute]
+    assert opened
+    rec = opened[-1]
+    assert rec.failures == 1  # ty: ignore[unresolved-attribute]  # classic probe-failure shape
+    assert hasattr(rec, "failure_threshold")
+    assert not hasattr(rec, "failure_rate")  # NOT the rate shape
