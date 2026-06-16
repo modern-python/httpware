@@ -70,7 +70,7 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-_None._
+- **[circuit-breaker-state](changes/active/2026-06-16.03-circuit-breaker-state/design.md)** (2026-06-16) — Read-only `state` property + public `CircuitState` enum on the circuit breaker. Closes the cheap half of the deferred CircuitBreaker introspection item. Targets 0.14.0.
 
 ### Archived (shipped)
 
