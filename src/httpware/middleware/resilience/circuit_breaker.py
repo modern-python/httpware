@@ -209,22 +209,30 @@ class _CircuitBreakerState:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
         if self._state is _CircuitState.CLOSED:
-            self._consecutive_failures = 0
+            if self._rate_mode:
+                self._record_outcome(request, failed=False)
+            else:
+                self._consecutive_failures = 0
         elif self._state is _CircuitState.HALF_OPEN:
             self._consecutive_successes += 1
             if self._consecutive_successes >= self._success_threshold:
                 self._state = _CircuitState.CLOSED
                 self._consecutive_failures = 0
                 self._consecutive_successes = 0
+                if self._rate_mode:
+                    self._window.clear()  # ty: ignore[unresolved-attribute]
                 self._emit(request, "circuit.closed", logging.INFO, "circuit closed — service recovered", {})
 
     def on_failure(self, role: str, request: httpx2.Request) -> None:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
         if self._state is _CircuitState.CLOSED:
-            self._consecutive_failures += 1
-            if self._consecutive_failures >= self._failure_threshold:
-                self._open(request, failures=self._consecutive_failures)
+            if self._rate_mode:
+                self._record_outcome(request, failed=True)
+            else:
+                self._consecutive_failures += 1
+                if self._consecutive_failures >= self._failure_threshold:
+                    self._open(request, failures=self._consecutive_failures)
         elif self._state is _CircuitState.HALF_OPEN:
             self._open(request, failures=1)  # 1 = the single probe failure that re-opened the circuit
 
@@ -233,18 +241,40 @@ class _CircuitBreakerState:
         if role == _ROLE_PROBE:
             self._probe_in_flight = False
 
-    def _open(self, request: httpx2.Request, *, failures: int) -> None:
+    def _enter_open(self, request: httpx2.Request, message: str, attributes: dict[str, typing.Any]) -> None:
         self._state = _CircuitState.OPEN
         self._opened_at = self._now()
         self._consecutive_failures = 0
         self._consecutive_successes = 0
-        self._emit(
+        self._emit(request, "circuit.opened", logging.WARNING, message, attributes)
+
+    def _open(self, request: httpx2.Request, *, failures: int) -> None:
+        self._enter_open(
             request,
-            "circuit.opened",
-            logging.WARNING,
             "circuit opened — failure threshold reached",
             {"failure_threshold": self._failure_threshold, "failures": failures},
         )
+
+    def _open_rate(self, request: httpx2.Request, *, total: int, failures: int) -> None:
+        self._enter_open(
+            request,
+            "circuit opened — failure rate threshold reached",
+            {
+                "failure_rate": failures / total,
+                "failure_rate_threshold": self._failure_rate_threshold,
+                "window_seconds": self._window_seconds,
+                "observed_calls": total,
+            },
+        )
+
+    def _record_outcome(self, request: httpx2.Request, *, failed: bool) -> None:
+        # Only reached in rate mode, where _window and _failure_rate_threshold are non-None.
+        now = self._now()
+        self._window.record(now, failed=failed)  # ty: ignore[unresolved-attribute]
+        total, failures = self._window.totals(now)  # ty: ignore[unresolved-attribute]
+        threshold = self._failure_rate_threshold
+        if threshold is not None and total >= self._minimum_calls and failures / total >= threshold:
+            self._open_rate(request, total=total, failures=failures)
 
     def _emit(
         self,
