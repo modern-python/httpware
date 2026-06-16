@@ -74,6 +74,8 @@ _None._
 
 ### Archived (shipped)
 
+- **[delta-audit-followups](changes/archive/2026-06-16.04-delta-audit-followups/change.md)** (#71, 2026-06-16) — Closed the [2026-06-16 delta audit](audits/2026-06-16-delta-audit.md) Low findings: rate-mode HALF_OPEN probe-failure re-open test + document-as-intended note. Tests + doc only, no release.
+
 - **[circuit-breaker-state](changes/archive/2026-06-16.03-circuit-breaker-state/design.md)** (#70, 2026-06-16) — Read-only `state` property + public `CircuitState` enum on the circuit breaker. Shipped 0.14.0; closed the read-only-state half of the deferred CircuitBreaker introspection item.
 
 - **[circuit-breaker-rate-mode](changes/archive/2026-06-16.02-circuit-breaker-rate-mode/design.md)** (#69, 2026-06-16) — Added an opt-in time-based failure-rate trip mode to the circuit breaker (classic stays default). Shipped 0.13.0; closed deferred item "CircuitBreaker v2 (a)".
