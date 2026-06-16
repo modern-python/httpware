@@ -12,6 +12,12 @@ The sync and async surfaces are kept at parity. Shared state is thread-safe wher
 
 The async middleware surface uses the `Async*`/`async_*` prefix, aligning with httpx2's convention.
 
+## `send_with_response` and per-verb siblings
+
+`send_with_response(request, *, response_model)` returns `(httpx2.Response, T)` atomically — the decoded body and the raw response together. This is the building block for cases where response metadata (headers, status) is needed alongside the typed body, such as Link-header pagination.
+
+The per-verb `*_with_response` siblings — `get_with_response`, `post_with_response`, `put_with_response`, `patch_with_response`, `delete_with_response`, and `request_with_response` — are the one-call ergonomic form: `response_model` is required, they return `tuple[httpx2.Response, T]`, and they accept the same keyword arguments as their non-`_with_response` counterparts; there is no `head_with_response` or `options_with_response` — use `request_with_response` for those methods.
+
 ## Streaming
 
 Both `Client.stream()` (sync) and `AsyncClient.stream()` (async) provide a context-manager API for chunked response bodies. Both bypass the middleware chain by design.
