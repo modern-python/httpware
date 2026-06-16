@@ -70,7 +70,7 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-_None._
+- **[custom-decoder-guide](changes/active/2026-06-15.01-custom-decoder-guide/change.md)** (2026-06-15) — Docs: a "write your own `ResponseDecoder`" guide for Seam B, mirroring `docs/middleware.md`. Closes deferred item G6.
 
 ### Archived (shipped)
 
