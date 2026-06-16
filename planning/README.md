@@ -70,9 +70,11 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-- **[circuit-breaker-state](changes/active/2026-06-16.03-circuit-breaker-state/design.md)** (2026-06-16) — Read-only `state` property + public `CircuitState` enum on the circuit breaker. Closes the cheap half of the deferred CircuitBreaker introspection item. Targets 0.14.0.
+_None._
 
 ### Archived (shipped)
+
+- **[circuit-breaker-state](changes/archive/2026-06-16.03-circuit-breaker-state/design.md)** (#70, 2026-06-16) — Read-only `state` property + public `CircuitState` enum on the circuit breaker. Shipped 0.14.0; closed the read-only-state half of the deferred CircuitBreaker introspection item.
 
 - **[circuit-breaker-rate-mode](changes/archive/2026-06-16.02-circuit-breaker-rate-mode/design.md)** (#69, 2026-06-16) — Added an opt-in time-based failure-rate trip mode to the circuit breaker (classic stays default). Shipped 0.13.0; closed deferred item "CircuitBreaker v2 (a)".
 - **[per-verb-with-response](changes/archive/2026-06-16.01-per-verb-with-response/design.md)** (#68, 2026-06-16) — Added `get_with_response` … `request_with_response` siblings (required `response_model`, returns `(Response, T)`) to both clients. Shipped 0.12.0; closed the deferred "Per-verb-with-response siblings" item.

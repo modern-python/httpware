@@ -8,12 +8,9 @@ As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see the [change Index
 
 ### Resilience
 
-- **CircuitBreaker — manual control + read-only `state`** (`src/httpware/middleware/resilience/circuit_breaker.py`) — the trip-mode work is done (0.13.0 shipped the opt-in time-based failure-rate mode alongside classic). Two related, unequal pieces remain, both keyed off the 0.10.0 audit's events-only control-surface decision (decision 4):
+- **CircuitBreaker — manual control** (`src/httpware/middleware/resilience/circuit_breaker.py`) — the trip-mode work is done (0.13.0 shipped the opt-in time-based failure-rate mode) and 0.14.0 shipped the read-only `state` property + public `CircuitState` enum. The one remaining piece is `force_open`/`force_closed` (Polly's `ManualControl`) — the genuinely YAGNI half for an HTTP *client* (you'd usually just stop sending requests), keyed off the 0.10.0 audit's events-only control-surface decision (decision 4). Demand-gated.
 
-  - **Read-only `state`** — an `OPEN`/`CLOSED`/`HALF_OPEN` introspection property (Resilience4j's registry, Polly's `StateProvider`). Cheap and side-effect-free; useful for health endpoints, dashboards, and tests. Barely speculative — the kind of thing to build when convenient rather than park indefinitely.
-  - **Manual control** — `force_open`/`force_closed` (Polly's `ManualControl`). The genuinely YAGNI half for an HTTP *client* (you'd usually just stop sending requests). Demand-gated.
-
-  **Don't regress:** httpware's HTTP-native failure classification (429/4xx = success out of the box) is already ahead of the generic-predicate breakers — preserve it in any v2 work.
+  **Don't regress:** httpware's HTTP-native failure classification (429/4xx = success out of the box) is already ahead of the generic-predicate breakers — preserve it in any future work here.
 
   **Decided against (don't re-propose):**
 

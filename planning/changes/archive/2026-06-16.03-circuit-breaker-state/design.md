@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-16
 slug: circuit-breaker-state
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 70
+outcome: Shipped 0.14.0 — public CircuitState enum + read-only state property on both breakers (raw stored read). Closed the read-only-state half of the deferred CircuitBreaker introspection item; manual control (force_open/force_closed) remains deferred.
 ---
 
 # Design: Read-only `state` introspection on the circuit breaker
