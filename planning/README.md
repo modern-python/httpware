@@ -70,10 +70,11 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-- **[custom-decoder-guide](changes/active/2026-06-15.01-custom-decoder-guide/change.md)** (2026-06-15) — Docs: a "write your own `ResponseDecoder`" guide for Seam B, mirroring `docs/middleware.md`. Closes deferred item G6.
+_None._
 
 ### Archived (shipped)
 
+- **[custom-decoder-guide](changes/archive/2026-06-15.01-custom-decoder-guide/change.md)** (#67, 2026-06-15) — Docs: a "write your own `ResponseDecoder`" guide for Seam B, mirroring `docs/middleware.md`. Closed deferred item G6.
 - **[audit-doc-fixes](changes/archive/2026-06-14.06-audit-doc-fixes/change.md)** (#66, 2026-06-14) — Closed the [deep-audit](audits/2026-06-14-deep-audit.md) doc-accuracy findings: `Client.stream()` docs, terminal-call attribution, the four auto-raise sites, the pydantic upper bound, and root import paths.
 - **[audit-test-quality](changes/archive/2026-06-14.05-audit-test-quality/change.md)** (#65, 2026-06-14) — Closed 11 [deep-audit](audits/2026-06-14-deep-audit.md) test-quality findings: sync-terminal + CookieConflict coverage, the `StatusError.__init__` invariant, missing status constructions, sync mirrors, typing overloads, a deterministic bulkhead barrier, a pinned budget clock, an observability assertion, and the `TimeoutError` circuit trigger.
 - **[audit-correctness](changes/archive/2026-06-14.04-audit-correctness/change.md)** (#64, 2026-06-14) — Closed 8 [deep-audit](audits/2026-06-14-deep-audit.md) correctness + public-API findings: RetryBudget token ordering, two `OverflowError` crashes, the redaction triple-slash, the msgspec guard, streaming-body symmetry, the RetryBudget docstring caveat, and `middleware/__all__`.

@@ -1,11 +1,11 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-15
 slug: custom-decoder-guide
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 67
+outcome: Shipped docs/decoders.md (the Seam B "write your own ResponseDecoder" guide); closed deferred item G6.
 ---
 
 # Change: Add a "Writing a custom decoder" guide
