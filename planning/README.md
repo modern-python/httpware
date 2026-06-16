@@ -70,7 +70,7 @@ carry **no** frontmatter — living prose, dated by git.
 
 ### Active
 
-_None._
+- **[per-verb-with-response](changes/active/2026-06-16.01-per-verb-with-response/design.md)** (2026-06-16) — Add `get_with_response` … `request_with_response` siblings (required `response_model`, returns `(Response, T)`) to both clients. Closes the deferred "Per-verb-with-response siblings" item. Targets 0.12.0.
 
 ### Archived (shipped)
 
