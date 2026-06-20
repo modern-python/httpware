@@ -198,7 +198,7 @@
           "planning/changes/active/2026-06-14.01-deep-audit/plan.md": {"lines": 577, "purpose": "Implementation plan for the active 2026-06-14 deep-audit change bundle."}
         }
       },
-      "planning/changes/archive": {
+      "planning/changes": {
         "note": "Archived (shipped) per-change bundles; each bundle is a design.md+plan.md pair (or a single change.md for the lightweight lane). 60 bundles, 121 files total, listed individually below.",
         "files": {
           "planning/changes/2026-05-31.01-bmad-to-superpowers-transition/design.md": {"lines": 178, "purpose": "Design for migrating planning from BMAD to the superpowers convention."},
