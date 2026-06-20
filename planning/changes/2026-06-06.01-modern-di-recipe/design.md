@@ -1,0 +1,286 @@
+---
+status: shipped
+date: 2026-06-06
+slug: modern-di-recipe
+summary: modern-di DI recipe doc
+supersedes: null
+superseded_by: null
+pr: 29
+outcome: 'modern-di DI recipe doc'
+---
+
+# Spec: `modern-di` setup-friction recipe
+
+**Date:** 2026-06-06
+**Topic:** New docs recipe — wiring `httpware.AsyncClient` into a `modern-di` container — plus the minimal supporting code change to make the wiring clean.
+
+## What this is
+
+A new page in the httpware docs that shows how to register `httpware.AsyncClient` as a provider in a `modern-di` container so connection-pool teardown and middleware composition flow through the container's lifecycle. Both libraries ship under `modern-python`; users will reach for them together. The recipe documents the bridge between them — specifically the two non-obvious moments that real users will hit:
+
+1. **Lifecycle finalizer:** `AsyncClient` is a context manager; modern-di's `Factory.creator` runs synchronously. Bridging the two requires a finalizer that modern-di will await.
+2. **Multi-backend type collision:** two `Factory(creator=AsyncClient, ...)` providers both bind to `AsyncClient`. `modern-di` raises `DuplicateProviderTypeError` at container construction. The idiomatic fix is a per-backend wrapper subclass.
+
+This is a **setup-friction recipe**, not a speculative cookbook — it answers an exact question users in this ecosystem will ask, with the specific code that resolves it.
+
+## Why this lands as a single PR with a small library change
+
+While drafting, we found that `httpware.AsyncClient` exposes `__aenter__` / `__aexit__` but has no standalone `aclose()` method. The `httpware` CLAUDE.md naming convention says `aclose()` is the sole `a`-prefixed exception — i.e., it names this method as if it already exists. It doesn't.
+
+Without `aclose()`, the recipe's finalizer would have to call `__aexit__(None, None, None)` directly, which reads as a workaround and tells readers the library has a teardown gap. With `aclose()` added, the recipe's finalizer is the clean `finalizer=AsyncClient.aclose`. The library gains the missing teardown method for any non-context-manager scoping use case (DI containers, background workers, anything not request-shaped).
+
+So this work ships as one PR with two thin pieces:
+- A ~4-line `aclose()` method on `AsyncClient` + one or two tests.
+- The new `docs/recipes/modern-di.md` page + `mkdocs.yml` nav update + one back-link from `docs/index.md`.
+
+## Out of scope
+
+- A modern-di primer (scopes, registries, child containers, context providers). The recipe links to modern-di docs for this.
+- A Gateway/Repository worked example consuming the client via type-based DI. Rejected during brainstorming as "speculative cookbook" territory.
+- FastAPI / Litestar request-scoped client wiring. That's `modern-di-fastapi` / `modern-di-litestar` territory — separate packages, separate docs.
+- Back-links from `docs/resilience.md`, `docs/middleware.md`, `docs/errors.md`, `docs/testing.md`. They're topical reference pages and shouldn't fan into a recipe.
+- A back-link from `modern-di/docs/integrations/` to httpware. Possible follow-up in the `modern-di` repo; not this PR.
+- Automated tests for the recipe code samples. Other recipe-style pages on the org don't doctest-execute their samples; we rely on the underlying API tests. Snippets get a manual visual + local-run pass before the PR.
+
+## Library change — `AsyncClient.aclose()`
+
+**File:** `src/httpware/client.py`
+
+**Addition:** A standalone async teardown method, mirroring the body of `__aexit__`:
+
+```python
+async def aclose(self) -> None:
+    """Close the underlying httpx2 client if we own it.
+
+    Idempotent — safe to call after __aexit__ or another aclose() call.
+    Use this when the client is not managed by `async with` (e.g., wired
+    into a DI container's lifecycle).
+    """
+    if self._owns_client and not self._httpx2_client.is_closed:
+        await self._httpx2_client.aclose()
+```
+
+**Why this method, not `__aexit__` directly:** standalone `aclose()` is the idiomatic teardown method for async resources in modern Python (it's the convention used by `httpx`, `asyncpg`, `aiomysql`, the stdlib `contextlib.AsyncExitStack`, etc.). It matches the project's own stated naming convention. It makes the method discoverable for users who don't think to call dunders directly.
+
+**Behavior:**
+- No-op when called on a client whose `_httpx2_client` was provided externally (`_owns_client=False`) — same guard as `__aexit__`. The container that handed us the client owns its lifecycle.
+- No-op when `_httpx2_client.is_closed` is true. Idempotent.
+- Does not change `__aenter__` / `__aexit__` behavior in any way. Existing context-manager users are unaffected.
+
+**Tests** (in `tests/test_client.py`):
+- `test_aclose_closes_owned_client`: construct without `async with`, call `aclose()`, assert the underlying `httpx2.AsyncClient.is_closed` is `True`.
+- `test_aclose_is_idempotent`: call `aclose()` twice in succession; second call must not raise.
+- No new test for the `_owns_client=False` branch — the existing `__aexit__` test already exercises that line and `aclose()` shares it. Avoid duplication.
+
+**Public API surface:**
+- No change to `src/httpware/__init__.py` — `aclose` is a method on the existing `AsyncClient` class, not a new top-level export.
+- No change to `planning/engineering.md` — it documents seams and architecture, not method-by-method API enumeration.
+
+## Docs change — `docs/recipes/modern-di.md`
+
+**Location:** `docs/recipes/modern-di.md` (new folder `docs/recipes/`).
+
+**Page title:** `Wiring AsyncClient into modern-di`
+
+**Structure:** Linear narrative — the reader walks from "the minimal wire" through "the moment a second backend breaks it" to "the wrapper-subclass fix" — then a brief note on middleware composition.
+
+### Section 1 — What this is for
+
+~2 sentences. If you're using `modern-di` to wire your app's dependencies and you want connection-pool teardown and middleware composition to flow through the container, this is the bridge. Both libraries ship under `modern-python`.
+
+### Section 2 — The minimal wire-up
+
+~80 words of prose + a ~25-line code sample.
+
+```python
+from modern_di import Container, Group, Scope, providers
+from httpware import AsyncClient
+
+
+class ServiceClients(Group):
+    api = providers.Factory(
+        scope=Scope.APP,
+        creator=AsyncClient,
+        kwargs={"base_url": "https://api.example.com"},
+        cache_settings=providers.CacheSettings(finalizer=AsyncClient.aclose),
+    )
+
+
+async def main() -> None:
+    async with Container(scope=Scope.APP, groups=[ServiceClients]) as container:
+        client = await container.resolve(AsyncClient)
+        response = await client.get("/users/1")
+        print(response.status_code)
+```
+
+Prose covers:
+- `Scope.APP` → one client per app lifetime; connection pool reuse.
+- `cache_settings=providers.CacheSettings(...)` is what makes this a singleton.
+- `finalizer=AsyncClient.aclose` — the unbound async method. `modern-di` detects it as a coroutine function via `inspect.iscoroutinefunction` and awaits it on container teardown. A `lambda c: c.aclose()` would **not** work — the lambda itself is sync, so modern-di would call it synchronously and discard the returned coroutine unawaited.
+- One sentence linking out to `modern-di` factory docs for the broader `CacheSettings` story.
+
+### Section 3 — Adding a second backend hits a collision
+
+~60 words of prose + the exact error.
+
+If the application talks to more than one backend, the obvious move — registering a second `Factory(creator=AsyncClient, ...)` — fails immediately at container construction:
+
+```python
+class ServiceClients(Group):
+    user_api = providers.Factory(
+        scope=Scope.APP,
+        creator=AsyncClient,
+        kwargs={"base_url": "https://users.example.com"},
+        cache_settings=providers.CacheSettings(finalizer=AsyncClient.aclose),
+    )
+    billing_api = providers.Factory(
+        scope=Scope.APP,
+        creator=AsyncClient,
+        kwargs={"base_url": "https://billing.example.com"},
+        cache_settings=providers.CacheSettings(finalizer=AsyncClient.aclose),
+    )
+
+# At Container construction:
+# modern_di.exceptions.DuplicateProviderTypeError: AsyncClient is already registered
+```
+
+Prose explains why: `modern-di` resolves dependencies by `bound_type`, which defaults to the creator's return type. Two providers with the same `bound_type` collide.
+
+### Section 4 — Fix: per-backend wrapper subclass
+
+~60 words of prose + a ~30-line code sample.
+
+Give each provider a distinct `bound_type` by sub-classing `AsyncClient`:
+
+```python
+from httpware import AsyncClient
+
+
+class UserApi(AsyncClient):
+    """Typing handle for the User service backend."""
+
+
+class BillingApi(AsyncClient):
+    """Typing handle for the Billing service backend."""
+
+
+class ServiceClients(Group):
+    user_api = providers.Factory(
+        scope=Scope.APP,
+        creator=UserApi,
+        kwargs={"base_url": "https://users.example.com"},
+        cache_settings=providers.CacheSettings(finalizer=UserApi.aclose),
+    )
+    billing_api = providers.Factory(
+        scope=Scope.APP,
+        creator=BillingApi,
+        kwargs={"base_url": "https://billing.example.com"},
+        cache_settings=providers.CacheSettings(finalizer=BillingApi.aclose),
+    )
+
+
+async def main() -> None:
+    async with Container(scope=Scope.APP, groups=[ServiceClients]) as container:
+        users = await container.resolve(UserApi)
+        billing = await container.resolve(BillingApi)
+```
+
+Prose:
+- Subclasses are typing-only — empty body, no overrides. They inherit `__init__`, `aclose`, all HTTP methods unchanged.
+- Each `Factory` now has a distinct `bound_type`, so `container.resolve(UserApi)` and `container.resolve(BillingApi)` route to the right provider.
+- Bonus: `modern-di`'s error suggestions are subclass-aware (per `providers_registry.py:_hierarchy_hint`). If a caller tries `container.resolve(AsyncClient)` after registering only the subclasses, they'll be pointed at the right subclass to ask for.
+
+### Section 5 — Middleware in `kwargs=`
+
+~50 words of prose + a ~15-line code sample.
+
+```python
+from httpware import AsyncClient, Bulkhead, Retry
+
+
+class ServiceClients(Group):
+    user_api = providers.Factory(
+        scope=Scope.APP,
+        creator=UserApi,
+        kwargs={
+            "base_url": "https://users.example.com",
+            "middleware": [Bulkhead(max_concurrent=10), Retry()],
+        },
+        cache_settings=providers.CacheSettings(finalizer=UserApi.aclose),
+    )
+```
+
+Prose anchors the existing "chain is frozen at construction" invariant — middleware composes once at container build (when the cached singleton is created), not per call.
+
+### Section 6 — See also
+
+- httpware **Quick-Start** — base `AsyncClient` API.
+- httpware **Middleware guide** — what `Bulkhead` and `Retry` are doing in `kwargs[middleware]`.
+- httpware **Resilience reference** — every parameter on `Retry`, `RetryBudget`, `Bulkhead`.
+- `modern-di` **Factories** docs (https://modern-di.modern-python.org/providers/factories/) — `CacheSettings`, scopes, the broader provider story.
+
+## mkdocs.yml change
+
+Add a `Recipes` nav section between `Testing` and `Development`:
+
+```yaml
+nav:
+  - Quick-Start: index.md
+  - Resilience: resilience.md
+  - Middleware: middleware.md
+  - Errors: errors.md
+  - Testing: testing.md
+  - Recipes:
+      - modern-di: recipes/modern-di.md
+  - Development:
+      - Contributing: dev/contributing.md
+```
+
+The single-item folder is an honest representation of what we have — it doesn't pretend to a category before one exists. Future recipes (when warranted by real friction) drop into the same folder.
+
+## `docs/index.md` change
+
+In the "Where to go next" section, add one bullet between **Testing guide** and **Engineering Notes**:
+
+```markdown
+- **[Recipes](recipes/modern-di.md)** — wiring `AsyncClient` into a `modern-di` container.
+```
+
+No other changes to existing pages.
+
+## Acceptance criteria
+
+- `src/httpware/client.py` has an `aclose()` method on `AsyncClient`, idempotent, with the `_owns_client` guard.
+- `tests/test_client.py` has the two new tests (`test_aclose_closes_owned_client`, `test_aclose_is_idempotent`); both pass under `just test`.
+- `just lint` passes (ruff format + ruff check + ty check).
+- `docs/recipes/modern-di.md` exists with the six sections above, all four code samples present.
+- `mkdocs.yml` `nav` has the new `Recipes` section.
+- `docs/index.md` "Where to go next" has the new bullet.
+- `uv run --with mkdocs --with mkdocs-material mkdocs build --strict` produces a valid site with the new page rendered and no broken intra-site links.
+- A local run of the Section 2 minimal-wire sample (against a `httpx2.MockTransport`) executes cleanly and confirms `aclose()` is awaited on container teardown.
+
+## File-by-file change summary
+
+| File | Change | Approx. lines |
+|---|---|---|
+| `src/httpware/client.py` | Add `async def aclose(self)` method on `AsyncClient` | +6 |
+| `tests/test_client.py` | Add two tests covering `aclose()` | +30 |
+| `docs/recipes/modern-di.md` | NEW — full recipe page | +180 |
+| `mkdocs.yml` | Add `Recipes` nav section | +2 |
+| `docs/index.md` | Add one bullet to "Where to go next" | +1 |
+
+Total: ~5 files touched, ~220 lines added, 0 lines removed.
+
+## Risks and trade-offs
+
+**Risk: "Recipes" nav with one item looks underweight.**
+Trade-off: hiding the recipe inside an existing page (e.g., `testing.md` or `index.md`) avoids the empty-category appearance but buries the content. Picked the explicit nav section because the brainstorming conversation specifically confirmed `httpware docs — new short recipe page`. Future recipes (genuine setup-friction only, per the project's docs philosophy) accrete into the same folder.
+
+**Risk: `AsyncClient.aclose()` could be seen as scope creep on a docs PR.**
+Trade-off: deferring it to a separate PR (option C in the brainstorming) keeps the history cleaner but slows the docs work. The method is ~6 lines + 2 tests and is independently justified by the project's own naming convention. Net win to ship together; the PR title can name both pieces ("docs: modern-di recipe + AsyncClient.aclose").
+
+**Risk: the recipe documents a specific modern-di version's behavior (`DuplicateProviderTypeError`).**
+Trade-off: this error name and behavior are stable in `modern-di` as of the version of the source we inspected. If they change, the recipe gets a one-line edit. Worth the precision — vague language like "you'll get an error" is worse than naming the actual exception.
+
+**Risk: telling readers `lambda c: c.aclose()` does not work is a strong claim.**
+Trade-off: the claim is correct (verified against `modern_di/providers/factory.py:27` — `is_async_finalizer = inspect.iscoroutinefunction(self.finalizer)`, and a lambda is not a coroutine function regardless of what it returns). Calling it out explicitly saves users from a confusing "coroutine was never awaited" warning and a connection pool that quietly leaks. Worth the precision.

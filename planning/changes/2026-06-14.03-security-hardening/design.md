@@ -1,0 +1,192 @@
+---
+status: shipped
+date: 2026-06-14
+slug: security-hardening
+summary: Closed the [deep-audit](audits/2026-06-14-deep-audit.md) security cluster: URL secret redaction centralized at the `_emit_event` chokepoint (userinfo + sensitive query/fragment keys), opt-in `max_error_body_bytes` + `ResponseTooLargeError` bounding the `stream()` error pre-read, and `trust_env` + header-reachability docs. Non-streaming hard body cap deferred.
+supersedes: null
+superseded_by: null
+pr: 63
+outcome: Shipped via #63 — URL secret redaction centralized at the _emit_event chokepoint, opt-in max_error_body_bytes + ResponseTooLargeError bound the stream() error pre-read, trust_env + header-reachability docs. Non-streaming hard body cap deferred (planning/deferred.md).
+---
+
+# Design: Security hardening — URL secret redaction + bounded error-body reads
+
+## Summary
+
+Close the 2026-06-14 deep-audit **security cluster**: stop leaking
+query-string secrets into logs, telemetry, and exception messages; give
+callers an opt-in bound on the error-body that `stream()` pre-reads on
+4xx/5xx; and document the `trust_env` proxy default and the request-header
+reachability of `StatusError`. Report-only audit findings become a single
+Full-lane bundle with three independent sections. One finding (a true hard cap
+on non-streaming response bodies) is deferred because it needs a Seam-A
+dispatch rework; it is recorded in `planning/deferred.md`.
+
+## Motivation
+
+From [`audits/2026-06-14-deep-audit.md`](../../../audits/2026-06-14-deep-audit.md):
+
+- **Secret leakage (3 findings, Low):** every resilience middleware emits
+  `"url": str(request.url)` into log records and OTel span events, and
+  `StatusError.__str__`/`__repr__` compose `str(request.url)` after stripping
+  only `user:pass@` userinfo. `str(request.url)` includes the query string, so
+  `?api_key=…` / `?access_token=…` tokens land in logs, telemetry, exception
+  messages, `add_note(...)` text, and Sentry reports. A third, structural item:
+  `StatusError` holds the raw `httpx2.Response`, so `exc.response.request.headers`
+  exposes `Authorization`/`Cookie` to any handler.
+- **Unbounded error-body buffering (Medium/security):** `AsyncClient.stream()`
+  and `Client.stream()` call `response.aread()`/`response.read()` on any
+  4xx/5xx so `exc.response.content` is populated — with no size limit. A 500
+  with a 1 GB body buffers 1 GB even though the caller asked to stream.
+- **`trust_env=True` (Nit):** httpware inherits httpx2's default, silently
+  honoring `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`.netrc` — undocumented.
+
+## Non-goals
+
+- No hard cap on the **non-streaming** decode path. For a non-streaming
+  `send()`, httpx2 buffers the whole body before httpware reaches the decode
+  seam, so a true bound needs a streaming-with-capped-accumulator rework of the
+  Seam-A terminal — out of scope here, recorded in `planning/deferred.md`.
+- No configurable / caller-extensible sensitive-key set. The built-in set is
+  fixed (decided in brainstorming) to keep the public surface small.
+- No change to `trust_env` behavior — documentation only.
+- No stripping of request headers from the stored `Response` — that would break
+  the `StatusError` single-`response` contract; handled by a doc callout.
+
+## Design
+
+### 1. URL secret redaction
+
+New internal module **`src/httpware/_internal/redaction.py`** owning all URL
+sanitation. `_strip_userinfo` moves here from `errors.py` (its only current
+home) and gains a query-masking sibling, exposed as one helper:
+
+```python
+def redact_url(url: str) -> str:
+    """Return url safe for logs/telemetry/errors: strip user:pass@ userinfo
+    and mask the values of known-sensitive query parameters."""
+```
+
+- **Sensitive-key set** (fixed, case-insensitive), as a module-level
+  `frozenset` constant `SENSITIVE_QUERY_KEYS`:
+  `api_key`, `apikey`, `access_token`, `refresh_token`, `token`, `secret`,
+  `client_secret`, `password`, `passwd`, `pwd`, `auth`, `authorization`,
+  `sig`, `signature`, `key`, `private_key`, `session`, `sessionid`, `x-api-key`.
+- **Masking:** parse the query with `urllib.parse.parse_qsl(...,
+  keep_blank_values=True)`, replace the value of any sensitive key with the
+  literal `REDACTED` (key preserved), re-encode with `urlencode`, and
+  reassemble via `urlunsplit`. Non-sensitive params (`page`, `limit`) survive
+  verbatim for debugging. **Common-path guard:** if the query contains no
+  sensitive key, return the userinfo-stripped URL unchanged without re-encoding,
+  so the byte output is identical to today for the overwhelming majority of
+  URLs — only secret-bearing queries are rewritten. Userinfo stripping runs
+  first, reusing the existing IPv6-rewrap logic.
+- **Edge cases:** no `@` / no `?` → only the relevant step runs; empty query →
+  unchanged; repeated keys → each masked; values containing `=` survive via
+  `parse_qsl`. A URL with no scheme is returned untouched (mirrors
+  `_strip_userinfo`'s current guard).
+
+**Consumers:**
+
+- `errors.py`: `_summary` and `__repr__` call `redaction.redact_url(...)`
+  instead of `_strip_userinfo(...)`. The module docstring (currently "Query-
+  string secrets are NOT stripped here.") is corrected to: userinfo and
+  known-sensitive query values are masked; full request headers remain
+  reachable via `response.request`.
+- Resilience middleware: add a thin shared helper
+  `_observed_url(request) -> str` (returns `redact_url(str(request.url))`) in
+  the resilience package, and route **every** emit site through it —
+  `retry.py` (6 sites), `bulkhead.py` (2), `circuit_breaker.py` (1),
+  `timeout.py` (1). Routing through one helper (rather than inlining
+  `redact_url(...)` at each site) means a new emit site can't silently
+  reintroduce the leak.
+
+### 2. Bounded error-body read on `stream()`
+
+New public exception and opt-in knob:
+
+- **`ResponseTooLargeError(ClientError)`** in `errors.py`, keyword-only
+  `__init__` (`status_code: int`, `limit: int`, `content_length: int | None`),
+  following the non-`StatusError` `ClientError` convention (defines `__init__`,
+  carries a `__reduce__`). Exported from `httpware.__init__` and added to
+  `__all__`.
+- New client param **`max_error_body_bytes: int | None = None`** on both
+  `AsyncClient.__init__` and `Client.__init__`, stored on the instance.
+  `None` preserves today's unbounded behavior — fully backward-compatible.
+
+In both `stream()` implementations, replace the unconditional pre-read:
+
+```python
+if HTTPStatus.BAD_REQUEST <= response.status_code < 600:
+    if self._max_error_body_bytes is not None:
+        content_length = _parse_content_length(response.headers.get("content-length"))
+        if content_length is not None and content_length > self._max_error_body_bytes:
+            raise ResponseTooLargeError(
+                status_code=response.status_code,
+                limit=self._max_error_body_bytes,
+                content_length=content_length,
+            )
+    await response.aread()        # within cap, or no declared length, or no cap set
+    _raise_on_status_error(response)
+```
+
+**Honest scope of the bound:** this is a **Content-Length-gated refusal**, not
+a universal byte cap. It hard-bounds the common case (a server that declares an
+over-cap `Content-Length`) by refusing *before* reading. A hostile server that
+sends a large **chunked** body with no `Content-Length` is **not** bounded
+here, because truly stopping mid-read and still populating
+`exc.response.content` would require writing httpx2's private `_content`, which
+the repo's `no httpx2._` invariant forbids. This residual is documented in
+`architecture/client.md` and `architecture/errors.md`. `_parse_content_length`
+is a small local helper that returns `int` for a clean non-negative header or
+`None` for missing/garbage (never raises).
+
+### 3. `trust_env` documentation
+
+Add a short subsection to `architecture/client.md`: httpware wraps an
+`httpx2.Client`/`httpx2.AsyncClient`, which default to `trust_env=True`, so
+`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`.netrc` are honored by default. To opt
+out, construct the client with an explicit transport,
+`Client(httpx2_client=httpx2.Client(trust_env=False))`. No behavior change.
+
+## Out of scope
+
+- Non-streaming hard body cap (`planning/deferred.md`, revisit trigger: when
+  the Seam-A terminal is next reworked or a concrete large-response abuse is
+  reported).
+- Header redaction inside `StatusError` (contract-breaking; doc callout only).
+
+## Testing
+
+- **`redact_url` unit tests** (`tests/test_redaction.py`, new): userinfo strip
+  (incl. IPv6 literal, host-only, port), each sensitive key masked
+  case-insensitively, non-sensitive params preserved, repeated keys, blank
+  values, no-query / no-scheme passthrough.
+- **Leakage integration:** one resilience event (via `caplog`) and one
+  `StatusError` message assert that `?api_key=secret` becomes
+  `?api_key=REDACTED`; sync and async parity for the middleware assertion.
+- **Bounded read:** with `max_error_body_bytes` set, a 4xx/5xx whose
+  `Content-Length` exceeds the cap raises `ResponseTooLargeError` and does
+  **not** read the body; within-cap (or no cap) still populates
+  `exc.response.content`; chunked/no-length still reads (documented residual).
+  Sync `Client.stream()` and async `AsyncClient.stream()` both covered. Pickle
+  round-trip for `ResponseTooLargeError` (matches the other `ClientError`
+  `__reduce__` tests). Public-API test updated for the new export.
+- `just test` at 100% coverage; `just lint` clean (ruff + ty).
+
+## Risk
+
+- **Redaction allowlist gaps** (medium likelihood × low impact): a sensitive
+  param with an unlisted name still leaks. Accepted trade-off of the
+  known-key policy chosen in brainstorming; the set covers the common token
+  names and is one constant to extend later.
+- **Over-masking breaks a debugging workflow** (low × low): a non-secret param
+  that happens to be named `key`/`token` gets masked. Acceptable — these names
+  are sensitive often enough to default to masking.
+- **`redact_url` parsing divergence** (low × medium): `parse_qsl` +
+  `urlencode` can normalize encoding (e.g. `+` vs `%20`) and reorder nothing
+  but could alter exotic queries. Mitigation: only touch the query when a
+  sensitive key is present; otherwise return the userinfo-stripped URL
+  unchanged, so the common path is byte-identical to today.
+- **`ResponseTooLargeError` surprises callers** (low × low): only fires when a
+  caller opts in via `max_error_body_bytes`; default `None` changes nothing.
