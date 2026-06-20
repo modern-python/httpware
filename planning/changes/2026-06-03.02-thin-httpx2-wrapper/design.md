@@ -1,0 +1,341 @@
+---
+status: shipped
+date: 2026-06-03
+slug: thin-httpx2-wrapper
+summary: Shipped 0.2.0 — the thin-wrapper pivot
+supersedes: [2026-05-31.05-request-immutability-helpers, 2026-05-31.07-asyncclient, 2026-05-31.08-recordedtransport, 2026-06-01.01-auth-coercion]
+superseded_by: null
+pr: 20
+outcome: 'Shipped 0.2.0 — the thin-wrapper pivot'
+---
+
+# Design: thin httpx2 wrapper (v0.2 pivot)
+
+**Status:** spec — awaiting review
+**Author:** Artur Shiriev (with Claude)
+**Date:** 2026-06-03
+**Supersedes:** the 0.1.0 architecture documented in `planning/engineering.md` (sections 2, 3, 5, 8) — formerly at `docs/dev/engineering.md`, moved to `planning/` as part of this pivot
+
+## 1. Intent
+
+`httpware` 0.2 is a clean rewrite. The framework becomes a **thin opinionated wrapper around `httpx2`** that adds three things and nothing else:
+
+1. **Typed response decoding** via the existing `ResponseDecoder` protocol. Pydantic and msgspec adapters ship as opt-in extras.
+2. **A middleware chain** that operates directly on `httpx2.Request` / `httpx2.Response`. Reserved for retry, timeout, bulkhead, and observability work in later epics.
+3. **A status-keyed exception tree** (`NotFoundError`, `RateLimitedError`, ...) raised automatically on 4xx and 5xx. Each exception holds the raw `httpx2.Response`.
+
+Everything else delegates to `httpx2`: `base_url`, default headers, default params, default cookies, `Limits`, `Timeout`, `Auth`, URL building, content negotiation, streaming, pool management.
+
+The 0.1.0 release is treated as a false start. The "no httpx2 leakage" CI invariant is **retired** — exposing `httpx2.Request` / `httpx2.Response` is the explicit design.
+
+## 2. Why now
+
+The 0.1.0 surface duplicates substantial logic from `httpx2`: a custom `Request` / `Response` value type with its own validation and `with_*` helpers, a `ClientConfig` that re-implements default-header / default-query merging, our own `Limits` and `Timeout` dataclasses with bespoke defaults, an auth-coercion layer that mirrors `httpx2.Auth`, a `Transport` protocol that has exactly one production implementation, and a `RecordedTransport` that duplicates `httpx2.MockTransport`. Each abstraction was justified individually but the sum costs more than it returns: more code to test, two type systems to keep in sync with `httpx2` upgrades, and a steeper learning curve for users who already know `httpx`/`httpx2`.
+
+The pivot accepts `httpx2` as the de-facto interface and concentrates `httpware`'s value on the three additions above.
+
+## 3. Architectural invariants (CI-enforced)
+
+- **No `httpx2._` private API.** Public symbols only.
+- **No `from __future__ import annotations`.** Python 3.11+ floor.
+- **No `print()`.** Library code logs, never prints.
+- **No global logging config** (`logging.basicConfig()`, bare `logging.getLogger()`).
+- **Type suppressions use `# ty: ignore[<rule>]`**, never `# type: ignore` or `# mypy: ignore`.
+
+**Retired in 0.2:** the "no `httpx2` import outside `transports/httpx2.py`" rule. `httpx2` is now part of `httpware`'s public surface and may be imported anywhere it is needed.
+
+## 4. Protocol seams (three, down from five)
+
+### Seam A: `AsyncClient ↔ Middleware`
+
+- **Where:** `src/httpware/client.py` ↔ `src/httpware/middleware/`.
+- **Contract:** middleware chain is composed once at `AsyncClient.__init__` and frozen for the client's lifetime. Chain bottom (the "terminal") is internal; it calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx.
+- **Rule:** mutating the chain after construction is not supported. Per-request behavior goes through `httpx2.Request.extensions` or through `extensions=` kwargs at call sites.
+
+### Seam B: `AsyncClient ↔ ResponseDecoder`
+
+- **Where:** `src/httpware/client.py` ↔ `src/httpware/decoders/`.
+- **Contract:** `decode(content: bytes, model: type[T]) -> T`. The signature is unchanged from 0.1.0. Decoder errors (`pydantic.ValidationError`, `msgspec.ValidationError`) propagate unwrapped.
+- **Rule:** decoder is invoked only when the caller passes `response_model=`. Single parse pass; no intermediate `dict` allocation.
+
+### Seam C: `httpware ↔ optional extras`
+
+- **Where:** `pyproject.toml` `[project.optional-dependencies]` ↔ the adapter module that imports the extra.
+- **Contract:** each optional dependency is imported only inside its own dedicated module.
+- **Rule:** never import an extra at package top-level. `import httpware` must succeed without the extras installed.
+
+The seams formerly numbered 1 (Middleware↔Transport) and 4 (Transport↔httpx2) collapse into the AsyncClient terminal — there is no transport abstraction.
+
+## 5. Module layout
+
+```text
+src/httpware/
+├── __init__.py            # public exports
+├── py.typed
+├── client.py              # AsyncClient
+├── errors.py              # status-keyed exception tree (response: httpx2.Response)
+├── middleware/
+│   ├── __init__.py        # Middleware protocol, Next type, @before_request/@after_response/@on_error
+│   └── chain.py           # compose(middleware, terminal) -> Next
+├── decoders/
+│   ├── __init__.py        # ResponseDecoder protocol
+│   ├── pydantic.py        # PydanticDecoder (extra: pydantic)
+│   └── msgspec.py         # MsgspecDecoder (extra: msgspec)
+└── _internal/
+    └── import_checker.py  # is_msgspec_installed, is_pydantic_installed
+```
+
+**Deleted relative to 0.1.0:**
+
+- `request.py` — `Request` value type and `with_*` helpers.
+- `response.py` — `Response`, `StreamResponse`.
+- `config.py` — `Limits`, `Timeout`, `ClientConfig`.
+- `transports/__init__.py` — `Transport` protocol.
+- `transports/httpx2.py` — `Httpx2Transport`. Status→exception logic relocates into `client.py`'s terminal.
+- `transports/recorded.py` — `RecordedTransport`. Tests inject `httpx2.MockTransport` via `httpx2_client=`.
+- `_internal/auth.py` — auth coercion. Callers pass `httpx2.Auth` directly.
+- `_internal/chain.py` — relocates to `middleware/chain.py`.
+
+## 6. Public API
+
+### `AsyncClient.__init__`
+
+```python
+class AsyncClient:
+    def __init__(
+        self,
+        *,
+        # Forwarded to httpx2.AsyncClient if no httpx2_client is given.
+        base_url: str = "",
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
+        timeout: httpx2.Timeout | float | None = None,
+        limits: httpx2.Limits | None = None,
+        auth: httpx2.Auth | None = None,
+        # Caller-owned client. If given, all other forwarded kwargs above must be unset.
+        httpx2_client: httpx2.AsyncClient | None = None,
+        # httpware additions.
+        decoder: ResponseDecoder | None = None,
+        middleware: Sequence[Middleware] = (),
+    ) -> None: ...
+```
+
+Passing `httpx2_client=` together with any of the forwarded kwargs raises `TypeError`. When `httpx2_client=` is provided, `AsyncClient` does NOT close it on `__aexit__`; the caller owns the lifecycle.
+
+When `decoder` is `None`, the client falls back to `PydanticDecoder()` — same behavior as 0.1.0. (Pydantic is declared as an optional extra in `pyproject.toml`; in practice 0.1.0 imports `pydantic` at the top of `decoders/pydantic.py` and re-exports `PydanticDecoder` from the package root, so the "opt-in" framing is aspirational. Tightening that — guarding the `pydantic` import the same way `decoders/msgspec.py` guards `msgspec` — is a follow-up cleanup, not part of this pivot.)
+
+### Per-method surface
+
+Each method has two overloads — `response_model=None` returns `httpx2.Response`, `response_model=type[T]` returns `T`.
+
+```python
+async def get(    url, *, params=None, headers=None, cookies=None,
+                  timeout=..., extensions=None, response_model=None) -> httpx2.Response | T: ...
+async def post(   url, *, json=None, content=None, data=None, files=None,
+                  params=None, headers=None, cookies=None,
+                  timeout=..., extensions=None, response_model=None) -> httpx2.Response | T: ...
+# put / patch / delete / head / options / request follow the same pattern.
+```
+
+Body kwargs (`json`, `content`, `data`, `files`) are passed straight through to `httpx2.AsyncClient.build_request`. `httpx2` handles content-type negotiation and serialization.
+
+### Power-user entry points
+
+```python
+def build_request(self, method: str, url: str, **kw) -> httpx2.Request:
+    return self._httpx2_client.build_request(method, url, **kw)
+
+async def send(
+    self,
+    request: httpx2.Request,
+    *,
+    response_model: type[T] | None = None,
+) -> httpx2.Response | T: ...
+```
+
+`send()` is the seam through which everything (per-method calls and user code) ultimately funnels into the middleware chain.
+
+### Lifecycle
+
+```python
+async def __aenter__(self) -> Self: ...
+async def __aexit__(self, *exc) -> None: ...   # closes self._httpx2_client only if owned
+```
+
+A boolean `self._owns_client` records ownership. `__aexit__` is idempotent.
+
+### Streaming
+
+Deferred to Epic 4. The eventual API is `client.stream(request)` returning an async context manager that forwards to `httpx2.AsyncClient.stream`. No `StreamResponse` type — `httpx2.Response` in stream mode is the contract.
+
+## 7. Middleware
+
+```python
+import httpx2
+from collections.abc import Awaitable, Callable
+from typing import Protocol, TypeAlias, runtime_checkable
+
+type Next = Callable[[httpx2.Request], Awaitable[httpx2.Response]]
+
+@runtime_checkable
+class Middleware(Protocol):
+    async def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response: ...
+```
+
+Phase decorators retain their 0.1.0 names and semantics, retyped on `httpx2` types:
+
+- `@before_request` — `f: (httpx2.Request) -> Awaitable[httpx2.Request]`
+- `@after_response` — `f: (httpx2.Request, httpx2.Response) -> Awaitable[httpx2.Response]`
+- `@on_error` — `f: (httpx2.Request, Exception) -> Awaitable[httpx2.Response | None]`. Catches `Exception` (not `BaseException`), so `asyncio.CancelledError` propagates. Returning `None` re-raises.
+
+Composition lives in `middleware/chain.py`:
+
+```python
+def compose(middleware: Sequence[Middleware], terminal: Next) -> Next: ...
+```
+
+The chain is composed once at `AsyncClient.__init__` and cached as `self._dispatch`.
+
+## 8. Errors
+
+```python
+class ClientError(Exception): ...
+class TransportError(ClientError): ...
+class TimeoutError(ClientError, builtins.TimeoutError): ...   # shadows builtin intentionally
+
+class StatusError(ClientError):
+    response: httpx2.Response
+
+    def __init__(self, response: httpx2.Response) -> None:
+        self.response = response
+        super().__init__(self._summary())
+
+    def __repr__(self) -> str: ...  # strips userinfo from response.request.url
+    def _summary(self) -> str: ...  # short message: "<status> <method> <sanitized url>"
+
+class ClientStatusError(StatusError): ...       # base for 4xx
+class ServerStatusError(StatusError): ...       # base for 5xx
+
+class BadRequestError(ClientStatusError): ...           # 400
+class UnauthorizedError(ClientStatusError): ...         # 401
+class ForbiddenError(ClientStatusError): ...            # 403
+class NotFoundError(ClientStatusError): ...             # 404
+class ConflictError(ClientStatusError): ...             # 409
+class UnprocessableEntityError(ClientStatusError): ...  # 422
+class RateLimitedError(ClientStatusError): ...          # 429
+class InternalServerError(ServerStatusError): ...       # 500
+class ServiceUnavailableError(ServerStatusError): ...   # 503
+
+STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {...}
+```
+
+Notes:
+
+- `StatusError.__init__` accepts a single positional `response` argument. The 0.1.0 keyword-only signature with `status` / `body` / `headers` / `json` / `request_method` / `request_url` is dropped; all values are available via `exc.response.*`.
+- `StatusError.__repr__` and the summary message strip `user:pass@` userinfo from `response.request.url` to avoid leaking credentials in tracebacks. Query-string secrets are NOT stripped (`Redactor` middleware was on the 0.1 roadmap; it is dropped in this pivot — query-string sanitization is `httpx2`'s responsibility if anywhere).
+- `TimeoutError` continues to inherit from both `httpware.ClientError` and `builtins.TimeoutError` so `except builtins.TimeoutError` (the form `asyncio.wait_for` uses) catches httpware-raised timeouts.
+
+## 9. Data flow
+
+One `client.get(url, response_model=Foo)` call:
+
+```
+client.get(url, response_model=Foo)
+    │
+    ▼
+build_request("GET", url, headers, params, cookies, timeout, extensions)
+    │  delegates to self._httpx2_client.build_request →
+    │  httpx2 merges base_url, default headers/params/cookies, applies auth
+    ▼
+self.send(httpx2.Request, response_model=Foo)
+    │
+    ▼
+self._dispatch(httpx2.Request)         ◄── compose(user_middleware, terminal) — built once in __init__
+    │
+    ▼
+[middleware chain — user middleware wraps inner middleware wraps terminal]
+    │
+    ▼
+terminal(httpx2.Request) → httpx2.Response
+    │  - calls self._httpx2_client.send(request)
+    │  - maps httpx2.TimeoutException → httpware.TimeoutError
+    │  - maps httpx2.HTTPError + InvalidURL + CookieConflict → httpware.TransportError
+    │  - if 400 ≤ status < 600: raise STATUS_TO_EXCEPTION.get(status, ClientStatusError|ServerStatusError)(response)
+    ▼
+back through middleware — may transform Response, may catch and translate exceptions
+    │
+    ▼
+self.send: if response_model is None → return Response, else decoder.decode(response.content, Foo) → Foo
+```
+
+Key properties:
+
+- Status-raise lives at the **terminal**, not after the chain. Retry middleware therefore sees `ServerStatusError` and can react via `@on_error`.
+- Decoding happens **after** the chain. Decoder errors do not interact with middleware.
+- The `RuntimeError("...closed...")` that `httpx2.AsyncClient.send` raises when the client is closed externally is mapped to `TransportError`, matching the 0.1.0 special-case.
+
+## 10. Error-mapping table
+
+Single source of truth, lives in `client.py`'s terminal:
+
+| `httpx2` source | `httpware` exception |
+|---|---|
+| `httpx2.TimeoutException` (any subclass) | `httpware.TimeoutError` |
+| `httpx2.HTTPError` (other) | `httpware.TransportError` |
+| `httpx2.InvalidURL`, `httpx2.CookieConflict` | `httpware.TransportError` |
+| `RuntimeError` with `"closed"` in message from `client.send` | `httpware.TransportError` |
+| Response with status 400 ≤ status < 600 | `STATUS_TO_EXCEPTION.get(status, ClientStatusError if < 500 else ServerStatusError)(response)` |
+
+## 11. Testing pattern
+
+Transport-level tests inject `httpx2.MockTransport` via the `httpx2_client=` parameter:
+
+```python
+import httpx2
+from httpware import AsyncClient
+
+def handler(request: httpx2.Request) -> httpx2.Response:
+    return httpx2.Response(200, json={"ok": True})
+
+async def test_get_returns_response():
+    mock = httpx2.MockTransport(handler)
+    async with AsyncClient(httpx2_client=httpx2.AsyncClient(transport=mock)) as client:
+        resp = await client.get("https://example.test/x")
+        assert resp.status_code == 200
+```
+
+Property-based tests (Hypothesis) for `RetryBudget` and `Bulkhead` are unaffected — they test data structures, not request types.
+
+Coverage target remains 100% line coverage on shipped modules.
+
+## 12. Roadmap impact
+
+The 0.1 roadmap had 27 stories. After the pivot:
+
+**Deleted:** `1-8` `RecordedTransport`, `2-3` Request immutability helpers, `2-4` Auth coercion, `4-1` `StreamResponse` type, `4-2` transport stream impl, `5-3` `Redactor` middleware.
+
+**Rewritten:** `1-7` `AsyncClient` (the heart of v0.2), `2-5` wire middleware (now trivial — part of 1-7), `6-1` migration guide (extended with httpware 0.1 → 0.2 notes), `6-4` CI invariant gates (drop the "no `httpx2` leakage" rule).
+
+**Survives in shape:** `1-6` msgspec decoder, `2-1` Middleware protocol (retyped on `httpx2`), `2-2` phase decorators (retyped), `3-1` per-attempt timeout, `3-2` retry, `3-3` `RetryBudget`, `3-4` `RetryBudget` middleware integration, `3-5` `Bulkhead`, `3-6` extension-slot docs, `4-3` `AsyncClient.stream`, `5-1` Layer 1 observability, `5-2` wire into resilience middlewares, `5-4` OpenTelemetry middleware, `5-5` logging policy CI grep, `6-2` docs site, `6-3` benchmarks, `6-5` release flow.
+
+## 13. Cutover plan
+
+Per the project's clean-cutover convention, the pivot lands as a **single structural PR** that produces a working `0.2.0` baseline. Substantive follow-up (Epic 3 resilience, Epic 5 observability) lands afterward as ordinary PRs.
+
+Structural PR scope:
+
+1. Delete `request.py`, `response.py`, `config.py`, `transports/`, `_internal/auth.py`, `_internal/chain.py`.
+2. Rewrite `client.py`, `errors.py`, `middleware/__init__.py`. Move chain composition to `middleware/chain.py`.
+3. Leave `decoders/` intact.
+4. Rewrite tests against `httpx2.MockTransport` injection.
+5. Update `CLAUDE.md` (drop "no `httpx2` leakage"; update module layout) and `docs/dev/engineering.md` (rewrite sections 2, 3, 5, 8).
+6. Sweep `planning/deferred-work.md` — close items obsoleted by the pivot.
+7. Bump `pyproject.toml` version to `0.2.0`.
+8. Draft GitHub Release notes covering the migration from 0.1.0.
+
+CI must remain green at the end of the PR. Coverage at 100% on the new modules.
+
+## 14. Open questions
+
+None at spec-write time. If issues surface during plan-writing, this section will be updated.
