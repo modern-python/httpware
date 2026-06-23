@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-23
 slug: decoder-resolver-extraction
 spec: decoder-resolver-extraction
-pr: null
+pr: 77
 ---
 
 # decoder-resolver-extraction — implementation plan
