@@ -96,3 +96,17 @@ Three documented internal boundaries. AI agents must respect them — never cros
 
 - Check the relevant [`architecture/`](architecture/) capability file before adding a new module or extension point.
 - Surface ambiguity as a documentation gap rather than improvising.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`modern-python/httpware`), managed via the `gh` CLI; external PRs are not a triage surface. See `planning/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical defaults — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` (the last already exists). See `planning/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` at the repo root + ADRs under `planning/adr/`. See `planning/agents/domain.md`.
