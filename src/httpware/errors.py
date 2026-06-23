@@ -15,7 +15,7 @@ authors must redact those before logging.
 
 import builtins
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import httpx2
 
@@ -320,33 +320,51 @@ def _reconstruct_response_too_large(
     status_code: int,
     limit: int,
     content_length: int | None,
+    reason: 'Literal["declared", "streamed"]',
 ) -> "ResponseTooLargeError":
-    return cls(status_code=status_code, limit=limit, content_length=content_length)
+    return cls(status_code=status_code, limit=limit, content_length=content_length, reason=reason)
 
 
 class ResponseTooLargeError(ClientError):
-    """Raised when an error response body exceeds the client's max_error_body_bytes cap.
+    """Raised when a response body exceeds the client's max_response_body_bytes cap.
 
-    Fires from stream() on a 4xx/5xx whose declared Content-Length exceeds the
-    configured cap, BEFORE the body is read — so the oversized body is never
-    buffered. Only raised when max_error_body_bytes is set (opt-in).
+    Status-agnostic: fires on any non-streaming send() and on stream()'s internal
+    error pre-read, counting DECODED bytes. Only raised when
+    max_response_body_bytes is set (opt-in). `reason` discriminates the two trip
+    modes:
+
+    - "declared": the response's declared Content-Length already exceeds the cap,
+      so the body is rejected BEFORE a byte is read (`content_length` holds it).
+    - "streamed": the decoded body crossed the cap mid-read (the chunked or
+      compression-bomb case); `content_length` is whatever the server declared
+      and is unrelated to the cap. The true oversized size is unknown by design.
     """
 
     status_code: int
     limit: int
     content_length: int | None
+    reason: Literal["declared", "streamed"]
 
-    def __init__(self, *, status_code: int, limit: int, content_length: int | None) -> None:
+    def __init__(
+        self,
+        *,
+        status_code: int,
+        limit: int,
+        content_length: int | None,
+        reason: Literal["declared", "streamed"],
+    ) -> None:
         self.status_code = status_code
         self.limit = limit
         self.content_length = content_length
-        super().__init__(
-            f"error response body too large: status={status_code} "
-            f"content_length={content_length} exceeds max_error_body_bytes={limit}"
-        )
+        self.reason = reason
+        if reason == "declared":
+            detail = f"declared content_length={content_length} exceeds max_response_body_bytes={limit}"
+        else:
+            detail = f"decoded body exceeded max_response_body_bytes={limit}"
+        super().__init__(f"response body too large: status={status_code} {detail}")
 
     def __reduce__(self) -> tuple[Any, ...]:
         return (
             _reconstruct_response_too_large,
-            (type(self), self.status_code, self.limit, self.content_length),
+            (type(self), self.status_code, self.limit, self.content_length, self.reason),
         )

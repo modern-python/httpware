@@ -1022,6 +1022,7 @@ class AsyncClient:
                             status_code=response.status_code,
                             limit=self._max_error_body_bytes,
                             content_length=content_length,
+                            reason="declared",
                         )
                 await response.aread()  # pre-read body so exc.response.content works
                 _raise_on_status_error(response)
@@ -2010,6 +2011,7 @@ class Client:
                             status_code=response.status_code,
                             limit=self._max_error_body_bytes,
                             content_length=content_length,
+                            reason="declared",
                         )
                 response.read()  # pre-read body so exc.response.content works
                 _raise_on_status_error(response)
