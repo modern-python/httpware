@@ -31,8 +31,19 @@ Client(httpx2_client=httpx2.Client(trust_env=False))
 AsyncClient(httpx2_client=httpx2.AsyncClient(trust_env=False))
 ```
 
-## Bounded error bodies (`max_error_body_bytes`)
+## Bounded response bodies (`max_response_body_bytes`)
 
-Both `Client` and `AsyncClient` accept `max_error_body_bytes: int | None = None`. The default (`None`) is backward-compatible: error bodies are read without a size limit.
+Both `Client` and `AsyncClient` accept `max_response_body_bytes: int | None = None`. The default (`None`) is unbounded; a non-`None` value below `1` is rejected with `ValueError` at construction. The cap is **status-agnostic** (a `200` trips it the same as a `500`) and counts **decoded** bytes — the actual in-memory footprint, and the only measure that catches a compression bomb (a 133-byte gzip body decoding to 100 KB).
 
-When set, `stream()` raises `ResponseTooLargeError` on a 4xx/5xx response whose declared `Content-Length` header exceeds the cap — before the body is read. Responses without a declared `Content-Length` (chunked transfer) are still read unbounded: a hard mid-read cap would require httpx2 private API, which this project forbids.
+The cap bounds memory that httpware buffers on your behalf, at two sites:
+
+- **The non-streaming terminal** (`send()` and the per-verb helpers). When a cap is set, the terminal switches from `httpx2.send(request)` to `send(request, stream=True)` and accumulates decoded bytes through the shared `_read_capped` helper, failing fast with `ResponseTooLargeError` the moment the cap is crossed. When the cap is `None`, the terminal keeps the plain buffered `send()` fast path — zero streaming overhead.
+- **`stream()`'s internal error pre-read** — the 4xx/5xx body httpware reads so `exc.response.content` works is routed through the same `_read_capped`. **User-driven `stream()` iteration is never capped** — you chose streaming to own that memory.
+
+The declared `Content-Length` is used only as an *early reject* (if even the compressed size already exceeds the cap, fail before reading a byte); it is never an early accept, so the accumulator always runs — chunked and bomb bodies are caught, not waved through. `ResponseTooLargeError.reason` is `"declared"` or `"streamed"` accordingly. Entirely public httpx2 API — no private access.
+
+**Bodiless responses bypass the cap.** Responses that carry no message body — to a `HEAD` request, or with status `204`/`304` — buffer nothing, so the cap never applies to them even when they declare a large `Content-Length` (`HEAD` legitimately echoes the entity length). These are returned unchanged, preserving their original headers.
+
+**Rebuilt headers.** The accumulator yields the *decoded* body, so the rebuilt Response drops the wire-encoding headers (`Content-Encoding`, `Transfer-Encoding`, and the now-incorrect compressed `Content-Length`); httpx2 recomputes `Content-Length` from the buffered content. Carrying `Content-Encoding` forward would make httpx2 re-decode already-decoded bytes and raise.
+
+**Caveat:** on the capped path the buffered response is rebuilt via the public `httpx2.Response(content=...)` constructor, which does not carry `.elapsed` (httpx2 only sets it on its own buffered `send()`). Clients that set a cap and read `response.elapsed` will find it absent; the `None`-cap fast path preserves it.

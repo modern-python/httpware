@@ -2,7 +2,7 @@
 
 import contextlib
 import typing
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from http import HTTPStatus
 
 import httpx2
@@ -32,6 +32,15 @@ _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
 )
 
 
+_MAX_RESPONSE_BODY_BYTES_INVALID = "max_response_body_bytes must be >= 1"
+
+
+def _validate_max_response_body_bytes(cap: int | None) -> None:
+    """Reject a non-None cap below 1. None means unbounded (the default)."""
+    if cap is not None and cap < 1:
+        raise ValueError(_MAX_RESPONSE_BODY_BYTES_INVALID)
+
+
 def _parse_content_length(raw: str | None) -> int | None:
     """Return a non-negative int Content-Length, or None for missing/garbage. Never raises."""
     if raw is None:
@@ -41,6 +50,123 @@ def _parse_content_length(raw: str | None) -> int | None:
     except ValueError:
         return None
     return value if value >= 0 else None
+
+
+class _CapExceeded(Exception):  # noqa: N818 — internal control-flow signal, not a user-facing error
+    """Internal signal: decoded bytes crossed the cap mid-read. Carries bytes read so far."""
+
+    def __init__(self, *, read: int) -> None:
+        self.read = read
+        super().__init__(f"decoded body exceeded cap after {read} bytes")
+
+
+def _accumulate_capped(chunks: typing.Iterable[bytes], cap: int) -> bytes:
+    """Concatenate `chunks`, raising `_CapExceeded` the moment the running total exceeds `cap`.
+
+    Counts decoded bytes (the in-memory footprint). Grown in a single bytearray
+    so there is no transient list-plus-join double allocation.
+    """
+    buf = bytearray()
+    for chunk in chunks:
+        buf += chunk
+        if len(buf) > cap:
+            raise _CapExceeded(read=len(buf))
+    return bytes(buf)
+
+
+def _safe_extensions(extensions: Mapping[str, typing.Any]) -> dict[str, typing.Any]:
+    """Copy response extensions, dropping the now-stale `network_stream`.
+
+    The rebuilt buffered Response never touches its network stream, so carrying a
+    consumed/closed one wholesale is sloppy. `http_version`/`reason_phrase` and
+    any other keys are preserved.
+    """
+    return {key: value for key, value in extensions.items() if key != "network_stream"}
+
+
+# Headers describing the wire encoding of the body. The accumulator yields the
+# DECODED body, so these no longer apply; httpx2 recomputes content-length from
+# the buffered content. Carrying content-encoding forward makes httpx2 try to
+# re-decode already-decoded bytes and raise.
+_WIRE_BODY_HEADERS = ("content-encoding", "content-length", "transfer-encoding")
+_BODILESS_STATUS = frozenset({HTTPStatus.NO_CONTENT, HTTPStatus.NOT_MODIFIED})  # 204, 304
+
+
+def _buffered_headers(headers: httpx2.Headers) -> httpx2.Headers:
+    """Copy `headers`, stripping wire-encoding headers stale after decoding+buffering."""
+    out = httpx2.Headers(headers)
+    for name in _WIRE_BODY_HEADERS:
+        if name in out:
+            del out[name]
+    return out
+
+
+def _response_has_body(method: str, status_code: int) -> bool:
+    """Whether a response carries a message body (RFC 9110 §6.4.1).
+
+    HEAD responses and 204/304 never have a body regardless of a declared
+    Content-Length, so they must never trip the cap.
+    """
+    return method.upper() != "HEAD" and status_code not in _BODILESS_STATUS
+
+
+def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
+    """Buffer a streaming sync `response` under `cap` decoded bytes; return a buffered Response.
+
+    Raises `ResponseTooLargeError` (reason="declared") if the declared
+    Content-Length already exceeds `cap` — before any byte is read — and
+    (reason="streamed") if the decoded body crosses `cap` mid-read. Does not
+    close `response`; the caller owns the stream lifecycle.
+    """
+    if not _response_has_body(request.method, response.status_code):
+        response.read()  # empty body; preserve the original response (and its headers)
+        return response
+    content_length = _parse_content_length(response.headers.get("content-length"))
+    if content_length is not None and content_length > cap:
+        raise ResponseTooLargeError(
+            status_code=response.status_code, limit=cap, content_length=content_length, reason="declared"
+        )
+    try:
+        content = _accumulate_capped(response.iter_bytes(), cap)
+    except _CapExceeded:
+        raise ResponseTooLargeError(
+            status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
+        ) from None
+    return httpx2.Response(
+        status_code=response.status_code,
+        headers=_buffered_headers(response.headers),
+        content=content,
+        request=request,
+        extensions=_safe_extensions(response.extensions),
+        history=response.history,
+    )
+
+
+async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
+    """Async mirror of `_read_capped` (counts decoded bytes from `aiter_bytes`)."""
+    if not _response_has_body(request.method, response.status_code):
+        await response.aread()  # empty body; preserve the original response (and its headers)
+        return response
+    content_length = _parse_content_length(response.headers.get("content-length"))
+    if content_length is not None and content_length > cap:
+        raise ResponseTooLargeError(
+            status_code=response.status_code, limit=cap, content_length=content_length, reason="declared"
+        )
+    buf = bytearray()
+    async for chunk in response.aiter_bytes():
+        buf += chunk
+        if len(buf) > cap:
+            raise ResponseTooLargeError(
+                status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
+            )
+    return httpx2.Response(
+        status_code=response.status_code,
+        headers=_buffered_headers(response.headers),
+        content=bytes(buf),
+        request=request,
+        extensions=_safe_extensions(response.extensions),
+        history=response.history,
+    )
 
 
 def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
@@ -94,7 +220,7 @@ class AsyncClient:
     _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[AsyncMiddleware, ...]
     _dispatch: AsyncNext
-    _max_error_body_bytes: int | None
+    _max_response_body_bytes: int | None
 
     def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
@@ -109,8 +235,9 @@ class AsyncClient:
         httpx2_client: httpx2.AsyncClient | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[AsyncMiddleware] = (),
-        max_error_body_bytes: int | None = None,
+        max_response_body_bytes: int | None = None,
     ) -> None:
+        _validate_max_response_body_bytes(max_response_body_bytes)
         if httpx2_client is not None:
             forwarded = {
                 "base_url": base_url,
@@ -148,12 +275,20 @@ class AsyncClient:
         self._decoder_resolver = _DecoderResolver(self._decoders)
         self._user_middleware = tuple(middleware)
         self._dispatch = compose_async(self._user_middleware, self._terminal)
-        self._max_error_body_bytes = max_error_body_bytes
+        self._max_response_body_bytes = max_response_body_bytes
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
+        cap = self._max_response_body_bytes
         try:
             async with _httpx2_exception_mapper():
-                response = await self._httpx2_client.send(request)
+                if cap is None:
+                    response = await self._httpx2_client.send(request)
+                else:
+                    streaming = await self._httpx2_client.send(request, stream=True)
+                    try:
+                        response = await _read_capped_async(streaming, cap, request)
+                    finally:
+                        await streaming.aclose()
         except RuntimeError as exc:
             if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc
@@ -1015,16 +1150,13 @@ class AsyncClient:
 
         async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if self._max_error_body_bytes is not None:
-                    content_length = _parse_content_length(response.headers.get("content-length"))
-                    if content_length is not None and content_length > self._max_error_body_bytes:
-                        raise ResponseTooLargeError(
-                            status_code=response.status_code,
-                            limit=self._max_error_body_bytes,
-                            content_length=content_length,
-                        )
-                await response.aread()  # pre-read body so exc.response.content works
-                _raise_on_status_error(response)
+                cap = self._max_response_body_bytes
+                if cap is None:
+                    await response.aread()  # pre-read body so exc.response.content works
+                    _raise_on_status_error(response)
+                else:
+                    # Bound the error pre-read; raises ResponseTooLargeError when over cap.
+                    _raise_on_status_error(await _read_capped_async(response, cap, response.request))
             yield response
 
     async def __aenter__(self) -> typing.Self:
@@ -1060,7 +1192,7 @@ class Client:
     _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[Middleware, ...]
     _dispatch: Next
-    _max_error_body_bytes: int | None
+    _max_response_body_bytes: int | None
 
     def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
@@ -1075,8 +1207,9 @@ class Client:
         httpx2_client: httpx2.Client | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[Middleware] = (),
-        max_error_body_bytes: int | None = None,
+        max_response_body_bytes: int | None = None,
     ) -> None:
+        _validate_max_response_body_bytes(max_response_body_bytes)
         if httpx2_client is not None:
             forwarded = {
                 "base_url": base_url,
@@ -1114,12 +1247,20 @@ class Client:
         self._decoder_resolver = _DecoderResolver(self._decoders)
         self._user_middleware = tuple(middleware)
         self._dispatch = compose(self._user_middleware, self._terminal)
-        self._max_error_body_bytes = max_error_body_bytes
+        self._max_response_body_bytes = max_response_body_bytes
 
     def _terminal(self, request: httpx2.Request) -> httpx2.Response:
+        cap = self._max_response_body_bytes
         try:
             with _httpx2_exception_mapper_sync():
-                response = self._httpx2_client.send(request)
+                if cap is None:
+                    response = self._httpx2_client.send(request)
+                else:
+                    streaming = self._httpx2_client.send(request, stream=True)
+                    try:
+                        response = _read_capped(streaming, cap, request)
+                    finally:
+                        streaming.close()
         except RuntimeError as exc:
             if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc
@@ -2003,14 +2144,11 @@ class Client:
 
         with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if self._max_error_body_bytes is not None:
-                    content_length = _parse_content_length(response.headers.get("content-length"))
-                    if content_length is not None and content_length > self._max_error_body_bytes:
-                        raise ResponseTooLargeError(
-                            status_code=response.status_code,
-                            limit=self._max_error_body_bytes,
-                            content_length=content_length,
-                        )
-                response.read()  # pre-read body so exc.response.content works
-                _raise_on_status_error(response)
+                cap = self._max_response_body_bytes
+                if cap is None:
+                    response.read()  # pre-read body so exc.response.content works
+                    _raise_on_status_error(response)
+                else:
+                    # Bound the error pre-read; raises ResponseTooLargeError when over cap.
+                    _raise_on_status_error(_read_capped(response, cap, response.request))
             yield response
