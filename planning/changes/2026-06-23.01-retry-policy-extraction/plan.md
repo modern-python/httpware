@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-23
 slug: retry-policy-extraction
 spec: retry-policy-extraction
-pr: null
+pr: 76
 ---
 
 # retry-policy-extraction — implementation plan
