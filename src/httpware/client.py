@@ -1118,17 +1118,13 @@ class AsyncClient:
 
         async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if self._max_response_body_bytes is not None:
-                    content_length = _parse_content_length(response.headers.get("content-length"))
-                    if content_length is not None and content_length > self._max_response_body_bytes:
-                        raise ResponseTooLargeError(
-                            status_code=response.status_code,
-                            limit=self._max_response_body_bytes,
-                            content_length=content_length,
-                            reason="declared",
-                        )
-                await response.aread()  # pre-read body so exc.response.content works
-                _raise_on_status_error(response)
+                cap = self._max_response_body_bytes
+                if cap is None:
+                    await response.aread()  # pre-read body so exc.response.content works
+                    _raise_on_status_error(response)
+                else:
+                    # Bound the error pre-read; raises ResponseTooLargeError when over cap.
+                    _raise_on_status_error(await _read_capped_async(response, cap, response.request))
             yield response
 
     async def __aenter__(self) -> typing.Self:
@@ -2116,15 +2112,11 @@ class Client:
 
         with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if self._max_response_body_bytes is not None:
-                    content_length = _parse_content_length(response.headers.get("content-length"))
-                    if content_length is not None and content_length > self._max_response_body_bytes:
-                        raise ResponseTooLargeError(
-                            status_code=response.status_code,
-                            limit=self._max_response_body_bytes,
-                            content_length=content_length,
-                            reason="declared",
-                        )
-                response.read()  # pre-read body so exc.response.content works
-                _raise_on_status_error(response)
+                cap = self._max_response_body_bytes
+                if cap is None:
+                    response.read()  # pre-read body so exc.response.content works
+                    _raise_on_status_error(response)
+                else:
+                    # Bound the error pre-read; raises ResponseTooLargeError when over cap.
+                    _raise_on_status_error(_read_capped(response, cap, response.request))
             yield response

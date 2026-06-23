@@ -346,3 +346,28 @@ def test_stream_unbounded_by_default_reads_large_error_body_sync() -> None:
         pytest.fail("unreachable")
     assert caught.value.response.content == body
     client.close()
+
+
+def test_stream_error_pre_read_streamed_over_cap_sync() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(500, content=(c for c in (b"a" * 50, b"b" * 50)))  # chunked: no Content-Length
+
+    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=70)
+    with pytest.raises(ResponseTooLargeError) as caught, client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")
+    assert caught.value.reason == "streamed"
+    assert caught.value.content_length is None
+    client.close()
+
+
+def test_stream_user_driven_success_body_not_capped_sync() -> None:
+    body = b"x" * 100_000
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, content=body)
+
+    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=10)
+    with client.stream("GET", "https://example.test/x") as response:
+        chunks = list(response.iter_bytes())
+    assert b"".join(chunks) == body  # user-driven streaming is never capped
+    client.close()

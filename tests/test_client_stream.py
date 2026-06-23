@@ -387,6 +387,40 @@ async def test_stream_unbounded_by_default_reads_large_error_body() -> None:
     await client.aclose()
 
 
+async def test_stream_error_pre_read_streamed_over_cap() -> None:
+    async def body() -> typing.AsyncIterator[bytes]:
+        yield b"a" * 50
+        yield b"b" * 50
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(500, content=body())  # chunked: no Content-Length
+
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)), max_response_body_bytes=70
+    )
+    with pytest.raises(ResponseTooLargeError) as caught:
+        async with client.stream("GET", "https://example.test/x"):
+            pytest.fail("unreachable")
+    assert caught.value.reason == "streamed"
+    assert caught.value.content_length is None
+    await client.aclose()
+
+
+async def test_stream_user_driven_success_body_not_capped() -> None:
+    body = b"x" * 100_000
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, content=body)
+
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)), max_response_body_bytes=10
+    )
+    async with client.stream("GET", "https://example.test/x") as response:
+        chunks = [chunk async for chunk in response.aiter_bytes()]
+    assert b"".join(chunks) == body  # user-driven streaming is never capped
+    await client.aclose()
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [(None, None), ("123", 123), ("abc", None), ("-5", None), ("0", 0)],
