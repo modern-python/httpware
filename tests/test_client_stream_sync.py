@@ -314,10 +314,10 @@ def test_stream_raises_response_too_large_when_over_cap_sync() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
         return httpx2.Response(500, content=body)
 
-    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_error_body_bytes=10)
+    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=10)
     with pytest.raises(ResponseTooLargeError) as caught, client.stream("GET", "https://example.test/x"):
         pytest.fail("unreachable")
-    assert caught.value.limit == 10  # noqa: PLR2004 — mirrors max_error_body_bytes above
+    assert caught.value.limit == 10  # noqa: PLR2004 — mirrors max_response_body_bytes above
     assert caught.value.content_length == 200  # noqa: PLR2004 — len(body) above
     client.close()
 
@@ -328,7 +328,7 @@ def test_stream_reads_error_body_when_under_cap_sync() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
         return httpx2.Response(404, content=body)
 
-    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_error_body_bytes=1000)
+    client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=1000)
     with pytest.raises(NotFoundError) as caught, client.stream("GET", "https://example.test/x"):
         pytest.fail("unreachable")
     assert caught.value.response.content == body

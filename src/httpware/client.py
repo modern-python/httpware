@@ -32,6 +32,15 @@ _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
 )
 
 
+_MAX_RESPONSE_BODY_BYTES_INVALID = "max_response_body_bytes must be >= 1"
+
+
+def _validate_max_response_body_bytes(cap: int | None) -> None:
+    """Reject a non-None cap below 1. None means unbounded (the default)."""
+    if cap is not None and cap < 1:
+        raise ValueError(_MAX_RESPONSE_BODY_BYTES_INVALID)
+
+
 def _parse_content_length(raw: str | None) -> int | None:
     """Return a non-negative int Content-Length, or None for missing/garbage. Never raises."""
     if raw is None:
@@ -179,7 +188,7 @@ class AsyncClient:
     _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[AsyncMiddleware, ...]
     _dispatch: AsyncNext
-    _max_error_body_bytes: int | None
+    _max_response_body_bytes: int | None
 
     def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
@@ -194,8 +203,9 @@ class AsyncClient:
         httpx2_client: httpx2.AsyncClient | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[AsyncMiddleware] = (),
-        max_error_body_bytes: int | None = None,
+        max_response_body_bytes: int | None = None,
     ) -> None:
+        _validate_max_response_body_bytes(max_response_body_bytes)
         if httpx2_client is not None:
             forwarded = {
                 "base_url": base_url,
@@ -233,12 +243,20 @@ class AsyncClient:
         self._decoder_resolver = _DecoderResolver(self._decoders)
         self._user_middleware = tuple(middleware)
         self._dispatch = compose_async(self._user_middleware, self._terminal)
-        self._max_error_body_bytes = max_error_body_bytes
+        self._max_response_body_bytes = max_response_body_bytes
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
+        cap = self._max_response_body_bytes
         try:
             async with _httpx2_exception_mapper():
-                response = await self._httpx2_client.send(request)
+                if cap is None:
+                    response = await self._httpx2_client.send(request)
+                else:
+                    streaming = await self._httpx2_client.send(request, stream=True)
+                    try:
+                        response = await _read_capped_async(streaming, cap, request)
+                    finally:
+                        await streaming.aclose()
         except RuntimeError as exc:
             if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc
@@ -1100,12 +1118,12 @@ class AsyncClient:
 
         async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if self._max_error_body_bytes is not None:
+                if self._max_response_body_bytes is not None:
                     content_length = _parse_content_length(response.headers.get("content-length"))
-                    if content_length is not None and content_length > self._max_error_body_bytes:
+                    if content_length is not None and content_length > self._max_response_body_bytes:
                         raise ResponseTooLargeError(
                             status_code=response.status_code,
-                            limit=self._max_error_body_bytes,
+                            limit=self._max_response_body_bytes,
                             content_length=content_length,
                             reason="declared",
                         )
@@ -1146,7 +1164,7 @@ class Client:
     _decoders: tuple[ResponseDecoder, ...]
     _user_middleware: tuple[Middleware, ...]
     _dispatch: Next
-    _max_error_body_bytes: int | None
+    _max_response_body_bytes: int | None
 
     def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
         self,
@@ -1161,8 +1179,9 @@ class Client:
         httpx2_client: httpx2.Client | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[Middleware] = (),
-        max_error_body_bytes: int | None = None,
+        max_response_body_bytes: int | None = None,
     ) -> None:
+        _validate_max_response_body_bytes(max_response_body_bytes)
         if httpx2_client is not None:
             forwarded = {
                 "base_url": base_url,
@@ -1200,12 +1219,20 @@ class Client:
         self._decoder_resolver = _DecoderResolver(self._decoders)
         self._user_middleware = tuple(middleware)
         self._dispatch = compose(self._user_middleware, self._terminal)
-        self._max_error_body_bytes = max_error_body_bytes
+        self._max_response_body_bytes = max_response_body_bytes
 
     def _terminal(self, request: httpx2.Request) -> httpx2.Response:
+        cap = self._max_response_body_bytes
         try:
             with _httpx2_exception_mapper_sync():
-                response = self._httpx2_client.send(request)
+                if cap is None:
+                    response = self._httpx2_client.send(request)
+                else:
+                    streaming = self._httpx2_client.send(request, stream=True)
+                    try:
+                        response = _read_capped(streaming, cap, request)
+                    finally:
+                        streaming.close()
         except RuntimeError as exc:
             if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc
@@ -2089,12 +2116,12 @@ class Client:
 
         with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if self._max_error_body_bytes is not None:
+                if self._max_response_body_bytes is not None:
                     content_length = _parse_content_length(response.headers.get("content-length"))
-                    if content_length is not None and content_length > self._max_error_body_bytes:
+                    if content_length is not None and content_length > self._max_response_body_bytes:
                         raise ResponseTooLargeError(
                             status_code=response.status_code,
-                            limit=self._max_error_body_bytes,
+                            limit=self._max_response_body_bytes,
                             content_length=content_length,
                             reason="declared",
                         )
