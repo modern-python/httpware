@@ -11,13 +11,14 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 - [`architecture/`](architecture/) (repo root) — the per-capability living truth (overview, client, middleware, decoders, errors, resilience, optional extras, testing); the promotion target on every ship. **Read the relevant file before changing that capability.**
 - [`planning/README.md`](planning/README.md) — the planning conventions (two axes, change bundles, three lanes, frontmatter) + the change Index.
 - [`planning/changes/<YYYY-MM-DD.NN-slug>/`](planning/changes/) — per-change bundles (`design.md` + `plan.md`, or `change.md` for the lightweight lane).
+- [`planning/decisions/<YYYY-MM-DD>-<slug>.md`](planning/decisions/) — design decisions taken (esp. options rejected with a load-bearing reason), each with a Revisit trigger; listed by `just index`.
 - [`planning/audits/`](planning/audits/) — findings reports + `scripts/` tooling.
 - [`planning/retros/`](planning/retros/) — retrospectives.
 - [`planning/releases/`](planning/releases/) — per-version release notes (also published on GitHub Releases).
 - [`planning/deferred.md`](planning/deferred.md) — review-surfaced, not-yet-actionable items.
 - [`planning/_templates/`](planning/_templates/) — design/plan/change templates.
 
-**Per-feature workflow:** brainstorming → `design.md` in `planning/changes/<id>/` → writing-plans → `plan.md` in the same bundle → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. On ship, promote the conclusions into the affected `architecture/<capability>.md` by hand and set `status: shipped` + `pr` + `outcome` in the implementing PR — there is no folder move. The change listing is generated: run `just index`. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
+**Per-feature workflow:** brainstorming → `design.md` in `planning/changes/<id>/` → writing-plans → `plan.md` in the same bundle → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. On ship, promote the conclusions into the affected `architecture/<capability>.md` by hand and set `status: shipped` + `pr` + `outcome` in the implementing PR — there is no folder move. The change listing is generated: run `just index`. A design decision taken without a code change — especially a candidate rejected with a load-bearing reason — is recorded as `planning/decisions/YYYY-MM-DD-<slug>.md` (the `decision.md` template, frontmatter `status: accepted|superseded`), each with a **Revisit trigger** so future reviews don't re-litigate it; listed by `just index`. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
 
 ## Commands
 

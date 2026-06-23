@@ -53,6 +53,9 @@ into `design.md` + `plan.md`.
 - **`design.md`** — the spec: the *thinking* (why, design, trade-offs, scope).
 - **`plan.md`** — the plan: the *sequencing* (the executor's task checklist).
 - **`change.md`** — both, condensed, for the lightweight lane.
+- **`decisions/<YYYY-MM-DD>-<slug>.md`** — one file per design decision taken
+  (especially options *rejected*), each with a revisit trigger, so reviews don't
+  re-litigate them; listed by `just index`.
 - **`releases/<semver>.md`** — per-release user-facing notes.
 - **`audits/<date>-<slug>.md`** — findings from a code/docs/bug-hunt sweep;
   spawns fix changes.
@@ -65,15 +68,17 @@ Templates live in [`_templates/`](_templates/).
 
 `design.md` / `change.md`: `status` (draft|approved|shipped|superseded),
 `date`, `slug`, `summary` (single line), `supersedes`, `superseded_by`, `pr`,
-`outcome`. `plan.md`: `status`, `date`, `slug`, `spec`, `pr`. Files in
-`architecture/` carry **no** frontmatter — living prose, dated by git.
+`outcome`. `plan.md`: `status`, `date`, `slug`, `spec`, `pr`.
+`decisions/*.md`: `status` (accepted|superseded), `date`, `slug`, `summary`,
+`supersedes`, `superseded_by`, `pr`.
+Files in `architecture/` carry **no** frontmatter — living prose, dated by git.
 
 ## Index
 
-The change listing is **generated**, not maintained — run `just index` to
-print it (grouped by `status`: In progress / Shipped / Superseded). The
-frontmatter in each bundle is the single source of truth; there is no
-committed copy to drift.
+The listing is **generated**, not maintained — run `just index` to print it:
+changes grouped by `status` (In progress / Shipped / Superseded), then
+decisions newest-first. The frontmatter in each bundle / decision file is the
+single source of truth; there is no committed copy to drift.
 
 ## Other
 
@@ -81,6 +86,9 @@ committed copy to drift.
   per-capability truth (overview, client, middleware, decoders, errors,
   resilience, optional extras, testing). This is the promotion target on
   every ship.
+- **[decisions/](decisions/)** — design decisions taken (and alternatives
+  rejected), each with a revisit trigger, so reviews don't re-litigate them;
+  indexed by `just index`.
 - **[audits/](audits/)** — findings reports (deep audit + delta audits) and
   their `scripts/` tooling.
 - **[deferred.md](deferred.md)** — real-but-unscheduled items with revisit
