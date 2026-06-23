@@ -43,6 +43,28 @@ def _parse_content_length(raw: str | None) -> int | None:
     return value if value >= 0 else None
 
 
+class _CapExceeded(Exception):  # noqa: N818 — internal control-flow signal, not a user-facing error
+    """Internal signal: decoded bytes crossed the cap mid-read. Carries bytes read so far."""
+
+    def __init__(self, *, read: int) -> None:
+        self.read = read
+        super().__init__(f"decoded body exceeded cap after {read} bytes")
+
+
+def _accumulate_capped(chunks: typing.Iterable[bytes], cap: int) -> bytes:
+    """Concatenate `chunks`, raising `_CapExceeded` the moment the running total exceeds `cap`.
+
+    Counts decoded bytes (the in-memory footprint). Grown in a single bytearray
+    so there is no transient list-plus-join double allocation.
+    """
+    buf = bytearray()
+    for chunk in chunks:
+        buf += chunk
+        if len(buf) > cap:
+            raise _CapExceeded(read=len(buf))
+    return bytes(buf)
+
+
 def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
     """Construct the default decoder tuple based on installed extras.
 
