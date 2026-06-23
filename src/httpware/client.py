@@ -16,7 +16,8 @@ from httpware._internal.status import (
     _raise_on_status_error,
 )
 from httpware.decoders import ResponseDecoder
-from httpware.errors import DecodeError, MissingDecoderError, ResponseTooLargeError, TransportError
+from httpware.decoders._resolver import _DecoderResolver
+from httpware.errors import ResponseTooLargeError, TransportError
 from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
 from httpware.middleware.chain import compose, compose_async
 
@@ -144,16 +145,10 @@ class AsyncClient:
             self._owns_client = True
 
         self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()
+        self._decoder_resolver = _DecoderResolver(self._decoders)
         self._user_middleware = tuple(middleware)
         self._dispatch = compose_async(self._user_middleware, self._terminal)
         self._max_error_body_bytes = max_error_body_bytes
-
-    def _dispatch_decoder(self, model: type) -> ResponseDecoder | None:
-        """Walk `_decoders` and return the first decoder claiming `model`, or None."""
-        for decoder in self._decoders:
-            if decoder.can_decode(model):
-                return decoder
-        return None
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         try:
@@ -182,18 +177,9 @@ class AsyncClient:
         if response_model is None:
             return await self._dispatch(request)
 
-        decoder = self._dispatch_decoder(response_model)
-        if decoder is None:
-            raise MissingDecoderError(
-                model=response_model,
-                registered_names=tuple(type(d).__name__ for d in self._decoders),
-            )
-
+        bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
-        try:
-            return decoder.decode(response.content, response_model)
-        except Exception as exc:
-            raise DecodeError(response=response, model=response_model, original=exc) from exc
+        return bound.decode(response)
 
     async def send_with_response(
         self,
@@ -210,19 +196,9 @@ class AsyncClient:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
-        decoder = self._dispatch_decoder(response_model)
-        if decoder is None:
-            raise MissingDecoderError(
-                model=response_model,
-                registered_names=tuple(type(d).__name__ for d in self._decoders),
-            )
-
+        bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
-        try:
-            decoded = decoder.decode(response.content, response_model)
-        except Exception as exc:
-            raise DecodeError(response=response, model=response_model, original=exc) from exc
-        return response, decoded
+        return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.AsyncClient."""
@@ -1135,16 +1111,10 @@ class Client:
             self._owns_client = True
 
         self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()
+        self._decoder_resolver = _DecoderResolver(self._decoders)
         self._user_middleware = tuple(middleware)
         self._dispatch = compose(self._user_middleware, self._terminal)
         self._max_error_body_bytes = max_error_body_bytes
-
-    def _dispatch_decoder(self, model: type) -> ResponseDecoder | None:
-        """Walk `_decoders` and return the first decoder claiming `model`, or None."""
-        for decoder in self._decoders:
-            if decoder.can_decode(model):
-                return decoder
-        return None
 
     def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         try:
@@ -1197,18 +1167,9 @@ class Client:
         if response_model is None:
             return self._dispatch(request)
 
-        decoder = self._dispatch_decoder(response_model)
-        if decoder is None:
-            raise MissingDecoderError(
-                model=response_model,
-                registered_names=tuple(type(d).__name__ for d in self._decoders),
-            )
-
+        bound = self._decoder_resolver.resolve(response_model)
         response = self._dispatch(request)
-        try:
-            return decoder.decode(response.content, response_model)
-        except Exception as exc:
-            raise DecodeError(response=response, model=response_model, original=exc) from exc
+        return bound.decode(response)
 
     def send_with_response(
         self,
@@ -1225,19 +1186,9 @@ class Client:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
-        decoder = self._dispatch_decoder(response_model)
-        if decoder is None:
-            raise MissingDecoderError(
-                model=response_model,
-                registered_names=tuple(type(d).__name__ for d in self._decoders),
-            )
-
+        bound = self._decoder_resolver.resolve(response_model)
         response = self._dispatch(request)
-        try:
-            decoded = decoder.decode(response.content, response_model)
-        except Exception as exc:
-            raise DecodeError(response=response, model=response_model, original=exc) from exc
-        return response, decoded
+        return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.Client."""
