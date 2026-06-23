@@ -1,9 +1,9 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-23
 slug: response-body-cap
 spec: response-body-cap
-pr: null
+pr: 78
 ---
 
 # response-body-cap — implementation plan

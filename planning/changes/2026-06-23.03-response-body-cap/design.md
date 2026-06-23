@@ -1,12 +1,12 @@
 ---
-status: draft
+status: shipped
 date: 2026-06-23
 slug: response-body-cap
-summary: Replace error-only max_error_body_bytes with a status-agnostic, decoded-byte max_response_body_bytes cap enforced by a streaming capped-accumulator terminal. Fill at ship time.
+summary: Replace error-only max_error_body_bytes with a status-agnostic, decoded-byte max_response_body_bytes cap enforced by a streaming capped-accumulator terminal.
 supersedes: null
 superseded_by: null
-pr: null
-outcome: null
+pr: 78
+outcome: Shipped via #78 — max_error_body_bytes removed (breaking, pre-1.0) for status-agnostic max_response_body_bytes, enforced at the non-streaming terminal and stream()'s error pre-read via a shared _read_capped accumulator counting decoded bytes (catches compression bombs); Content-Length kept as early-reject only. ResponseTooLargeError gained a declared/streamed reason; >=1 validated. Not retried / not breaker-counted; cap-wins on over-cap retryable 5xx. None-cap keeps the plain send() fast path (.elapsed preserved). 756 tests, 100% coverage. Promoted into architecture/client.md + errors.md; release note 0.15.0.
 ---
 
 # Design: Status-agnostic response-body cap
