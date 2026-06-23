@@ -88,6 +88,30 @@ def test_sync_send_over_cap_streamed_gzip_bomb() -> None:
     client.close()
 
 
+def test_sync_send_within_cap_gzip_returns_decoded() -> None:
+    raw = gzip.compress(b"A" * 500)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, headers={"content-encoding": "gzip"}, content=raw)
+
+    client = _sync(handler, 1_000_000)
+    request = client.build_request("GET", "https://example.test/x")
+    assert client.send(request).content == b"A" * 500  # not re-decompressed/crashed
+    client.close()
+
+
+def test_sync_head_large_declared_length_not_rejected() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, headers={"content-length": "50000000"})
+
+    client = _sync(handler, 1000)
+    request = client.build_request("HEAD", "https://example.test/x")
+    response = client.send(request)
+    assert response.content == b""
+    assert response.headers["content-length"] == "50000000"
+    client.close()
+
+
 def test_sync_send_none_cap_unbounded() -> None:
     body = b"x" * 10_000
 
@@ -143,6 +167,30 @@ async def test_async_send_over_cap_streamed_chunked() -> None:
         await client.send(request)
     assert caught.value.reason == "streamed"
     assert caught.value.content_length is None
+    await client.aclose()
+
+
+async def test_async_send_within_cap_gzip_returns_decoded() -> None:
+    raw = gzip.compress(b"A" * 500)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, headers={"content-encoding": "gzip"}, content=raw)
+
+    client = _async(handler, 1_000_000)
+    request = client.build_request("GET", "https://example.test/x")
+    assert (await client.send(request)).content == b"A" * 500
+    await client.aclose()
+
+
+async def test_async_head_large_declared_length_not_rejected() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, headers={"content-length": "50000000"})
+
+    client = _async(handler, 1000)
+    request = client.build_request("HEAD", "https://example.test/x")
+    response = await client.send(request)
+    assert response.content == b""
+    assert response.headers["content-length"] == "50000000"
     await client.aclose()
 
 

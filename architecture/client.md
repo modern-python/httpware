@@ -42,4 +42,8 @@ The cap bounds memory that httpware buffers on your behalf, at two sites:
 
 The declared `Content-Length` is used only as an *early reject* (if even the compressed size already exceeds the cap, fail before reading a byte); it is never an early accept, so the accumulator always runs — chunked and bomb bodies are caught, not waved through. `ResponseTooLargeError.reason` is `"declared"` or `"streamed"` accordingly. Entirely public httpx2 API — no private access.
 
+**Bodiless responses bypass the cap.** Responses that carry no message body — to a `HEAD` request, or with status `204`/`304` — buffer nothing, so the cap never applies to them even when they declare a large `Content-Length` (`HEAD` legitimately echoes the entity length). These are returned unchanged, preserving their original headers.
+
+**Rebuilt headers.** The accumulator yields the *decoded* body, so the rebuilt Response drops the wire-encoding headers (`Content-Encoding`, `Transfer-Encoding`, and the now-incorrect compressed `Content-Length`); httpx2 recomputes `Content-Length` from the buffered content. Carrying `Content-Encoding` forward would make httpx2 re-decode already-decoded bytes and raise.
+
 **Caveat:** on the capped path the buffered response is rebuilt via the public `httpx2.Response(content=...)` constructor, which does not carry `.elapsed` (httpx2 only sets it on its own buffered `send()`). Clients that set a cap and read `response.elapsed` will find it absent; the `None`-cap fast path preserves it.

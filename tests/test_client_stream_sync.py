@@ -360,6 +360,23 @@ def test_stream_error_pre_read_streamed_over_cap_sync() -> None:
     client.close()
 
 
+def test_stream_error_pre_read_within_cap_gzip_decoded_sync() -> None:
+    import gzip  # noqa: PLC0415 — local to this regression test
+
+    raw = gzip.compress(b"boom" * 50)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(500, headers={"content-encoding": "gzip"}, content=raw)
+
+    client = Client(
+        httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=1_000_000
+    )
+    with pytest.raises(InternalServerError) as caught, client.stream("GET", "https://example.test/x"):
+        pytest.fail("unreachable")
+    assert caught.value.response.content == b"boom" * 50
+    client.close()
+
+
 def test_stream_user_driven_success_body_not_capped_sync() -> None:
     body = b"x" * 100_000
 

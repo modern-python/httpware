@@ -84,6 +84,32 @@ def _safe_extensions(extensions: Mapping[str, typing.Any]) -> dict[str, typing.A
     return {key: value for key, value in extensions.items() if key != "network_stream"}
 
 
+# Headers describing the wire encoding of the body. The accumulator yields the
+# DECODED body, so these no longer apply; httpx2 recomputes content-length from
+# the buffered content. Carrying content-encoding forward makes httpx2 try to
+# re-decode already-decoded bytes and raise.
+_WIRE_BODY_HEADERS = ("content-encoding", "content-length", "transfer-encoding")
+_BODILESS_STATUS = frozenset({HTTPStatus.NO_CONTENT, HTTPStatus.NOT_MODIFIED})  # 204, 304
+
+
+def _buffered_headers(headers: httpx2.Headers) -> httpx2.Headers:
+    """Copy `headers`, stripping wire-encoding headers stale after decoding+buffering."""
+    out = httpx2.Headers(headers)
+    for name in _WIRE_BODY_HEADERS:
+        if name in out:
+            del out[name]
+    return out
+
+
+def _response_has_body(method: str, status_code: int) -> bool:
+    """Whether a response carries a message body (RFC 9110 §6.4.1).
+
+    HEAD responses and 204/304 never have a body regardless of a declared
+    Content-Length, so they must never trip the cap.
+    """
+    return method.upper() != "HEAD" and status_code not in _BODILESS_STATUS
+
+
 def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
     """Buffer a streaming sync `response` under `cap` decoded bytes; return a buffered Response.
 
@@ -92,6 +118,9 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
     (reason="streamed") if the decoded body crosses `cap` mid-read. Does not
     close `response`; the caller owns the stream lifecycle.
     """
+    if not _response_has_body(request.method, response.status_code):
+        response.read()  # empty body; preserve the original response (and its headers)
+        return response
     content_length = _parse_content_length(response.headers.get("content-length"))
     if content_length is not None and content_length > cap:
         raise ResponseTooLargeError(
@@ -105,7 +134,7 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
         ) from None
     return httpx2.Response(
         status_code=response.status_code,
-        headers=response.headers,
+        headers=_buffered_headers(response.headers),
         content=content,
         request=request,
         extensions=_safe_extensions(response.extensions),
@@ -115,6 +144,9 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
 
 async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
     """Async mirror of `_read_capped` (counts decoded bytes from `aiter_bytes`)."""
+    if not _response_has_body(request.method, response.status_code):
+        await response.aread()  # empty body; preserve the original response (and its headers)
+        return response
     content_length = _parse_content_length(response.headers.get("content-length"))
     if content_length is not None and content_length > cap:
         raise ResponseTooLargeError(
@@ -129,7 +161,7 @@ async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx
             )
     return httpx2.Response(
         status_code=response.status_code,
-        headers=response.headers,
+        headers=_buffered_headers(response.headers),
         content=bytes(buf),
         request=request,
         extensions=_safe_extensions(response.extensions),
