@@ -29,6 +29,8 @@ from httpware.middleware.resilience.retry import (
 _URL = "https://example.test/x"
 _BASE_DELAY = 0.1
 _MAX_DELAY = 5.0
+_RETRY_AFTER_HEADER = "2"
+_RETRY_AFTER_SECONDS = 2.0
 
 
 def _policy(
@@ -49,7 +51,7 @@ def _policy(
 
 
 def _zero_budget() -> RetryBudget:
-    """A budget that always refuses withdrawal (floor=0, percent=0)."""
+    """Return a budget that always refuses withdrawal (floor=0, percent=0)."""
     return RetryBudget(ttl=10.0, min_retries_per_sec=0.0, percent_can_retry=0.0)
 
 
@@ -149,9 +151,9 @@ def test_retry_after_exceeding_max_delay_gives_up() -> None:
 
 def test_retry_after_within_max_delay_returned_exactly() -> None:
     request = _request("PUT")
-    exc = _status_exc(503, request, retry_after="2")  # <= max_delay
+    exc = _status_exc(503, request, retry_after=_RETRY_AFTER_HEADER)  # <= max_delay
     delay = _policy().decide(attempt=0, request=request, exc=exc)
-    assert delay == 2.0
+    assert delay == _RETRY_AFTER_SECONDS
 
 
 def test_respect_retry_after_false_ignores_header() -> None:

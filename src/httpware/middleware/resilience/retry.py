@@ -115,7 +115,7 @@ class _RetryPolicy:
         self.respect_retry_after = respect_retry_after
         self.budget = budget if budget is not None else RetryBudget()
 
-    def decide(  # noqa: C901, PLR0912 — complexity budget: classification + streaming-body refusal + exhaustion + Retry-After branch + budget gate + backoff
+    def decide(  # noqa: C901 — complexity budget: classification + streaming-body refusal + exhaustion + Retry-After branch + budget gate + backoff
         self,
         *,
         attempt: int,
