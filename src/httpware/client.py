@@ -2,7 +2,7 @@
 
 import contextlib
 import typing
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from http import HTTPStatus
 
 import httpx2
@@ -63,6 +63,69 @@ def _accumulate_capped(chunks: typing.Iterable[bytes], cap: int) -> bytes:
         if len(buf) > cap:
             raise _CapExceeded(read=len(buf))
     return bytes(buf)
+
+
+def _safe_extensions(extensions: Mapping[str, typing.Any]) -> dict[str, typing.Any]:
+    """Copy response extensions, dropping the now-stale `network_stream`.
+
+    The rebuilt buffered Response never touches its network stream, so carrying a
+    consumed/closed one wholesale is sloppy. `http_version`/`reason_phrase` and
+    any other keys are preserved.
+    """
+    return {key: value for key, value in extensions.items() if key != "network_stream"}
+
+
+def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
+    """Buffer a streaming sync `response` under `cap` decoded bytes; return a buffered Response.
+
+    Raises `ResponseTooLargeError` (reason="declared") if the declared
+    Content-Length already exceeds `cap` — before any byte is read — and
+    (reason="streamed") if the decoded body crosses `cap` mid-read. Does not
+    close `response`; the caller owns the stream lifecycle.
+    """
+    content_length = _parse_content_length(response.headers.get("content-length"))
+    if content_length is not None and content_length > cap:
+        raise ResponseTooLargeError(
+            status_code=response.status_code, limit=cap, content_length=content_length, reason="declared"
+        )
+    try:
+        content = _accumulate_capped(response.iter_bytes(), cap)
+    except _CapExceeded:
+        raise ResponseTooLargeError(
+            status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
+        ) from None
+    return httpx2.Response(
+        status_code=response.status_code,
+        headers=response.headers,
+        content=content,
+        request=request,
+        extensions=_safe_extensions(response.extensions),
+        history=response.history,
+    )
+
+
+async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
+    """Async mirror of `_read_capped` (counts decoded bytes from `aiter_bytes`)."""
+    content_length = _parse_content_length(response.headers.get("content-length"))
+    if content_length is not None and content_length > cap:
+        raise ResponseTooLargeError(
+            status_code=response.status_code, limit=cap, content_length=content_length, reason="declared"
+        )
+    buf = bytearray()
+    async for chunk in response.aiter_bytes():
+        buf += chunk
+        if len(buf) > cap:
+            raise ResponseTooLargeError(
+                status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
+            )
+    return httpx2.Response(
+        status_code=response.status_code,
+        headers=response.headers,
+        content=bytes(buf),
+        request=request,
+        extensions=_safe_extensions(response.extensions),
+        history=response.history,
+    )
 
 
 def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
