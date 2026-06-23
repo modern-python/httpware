@@ -16,7 +16,3 @@ As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see the [change Index
 
   - **Count-based window variant** (`window_type="count"`) — time-based + `minimum_calls` already covers the fixed-sample-size rationale, and count-based adds a real staleness downside for HTTP health detection (a low-traffic "last N calls" window can reflect outcomes from minutes ago). Polly v8 *removed* count-based; Hystrix and Envoy are time-based. For a spiky low-volume backend, a longer `window_seconds` + `minimum_calls` is the better tool. Revisit only on concrete Resilience4j-parity demand.
   - **Slow-call-rate dimension** — Resilience4j-only, and redundant with `AsyncTimeout`.
-
-### Documentation
-
-- **Non-streaming hard response-body cap** (2026-06-14 deep audit, Medium) — for a non-streaming `send()`, httpx2 buffers the whole body before httpware reaches the decode seam, so a true cap needs a streaming-with-capped-accumulator rework of the Seam-A terminal. The current `max_error_body_bytes` guard only applies at `stream()` entry and only when `Content-Length` is declared. Revisit trigger: the Seam-A terminal is next reworked, or a concrete large-response abuse is reported. (`src/httpware/client.py`)

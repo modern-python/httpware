@@ -18,7 +18,7 @@ The error-mapping table (what `httpx2` exception maps to which `httpware` except
 
 The "no `__init__` override" rule scopes only to `StatusError` subclasses. Non-status `ClientError` subclasses — `DecodeError`, `MissingDecoderError`, `BulkheadFullError`, `RetryBudgetExhaustedError`, `CircuitOpenError`, `ResponseTooLargeError` — deliberately define `__init__` with keyword-only fields.
 
-`ResponseTooLargeError` is raised from `stream()` when `max_error_body_bytes` is set and a 4xx/5xx response's declared `Content-Length` exceeds the cap. It is a non-status `ClientError`; it does not carry a `StatusError`-style positional `response` and is not in `STATUS_TO_EXCEPTION`.
+`ResponseTooLargeError` is raised when `max_response_body_bytes` is set and a response body would exceed the cap — status-agnostic (a `200` can trip it), counting **decoded** bytes. It fires from the non-streaming terminal (`send()`) and from `stream()`'s internal error pre-read; user-driven `stream()` iteration is never capped. The `reason` field discriminates the two trip modes: `"declared"` (the declared `Content-Length` already exceeds the cap, rejected before any byte is read — `content_length` holds it) and `"streamed"` (the decoded body crossed the cap mid-read, the chunked or compression-bomb case, where the true size is unknown by design). It is a non-status `ClientError`; it does not carry a `StatusError`-style positional `response` and is not in `STATUS_TO_EXCEPTION`. Because it is neither a `StatusError`, `NetworkError`, nor `TimeoutError`, it is not retried and does not count toward the circuit breaker.
 
 ## Security: request headers are reachable via `exc.response.request`
 
