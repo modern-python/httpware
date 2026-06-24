@@ -12,7 +12,7 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 
-**A Python HTTP client framework with sync and async clients for building resilient service clients.**
+**Typed, resilient HTTP clients for Python — typed errors, typed response bodies, and composable resilience (retry, bulkhead, circuit breaker), sync or async.**
 
 ## Why httpware
 
