@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-13
-slug: msgspec-nested-customtype-fix
 summary: Shipped 0.9.1 — nested-CustomType guard
-supersedes: null
-superseded_by: null
-pr: 43
-outcome: 'Shipped 0.9.1 — nested-CustomType guard'
 ---
 
 # Spec: Fix `MsgspecDecoder.can_decode` false-positive on nested CustomType

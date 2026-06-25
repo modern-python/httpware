@@ -8,90 +8,45 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 **Where to find what:**
 
-- [`architecture/`](architecture/) (repo root) — the per-capability living truth (overview, client, middleware, decoders, errors, resilience, optional extras, testing); the promotion target on every ship. **Read the relevant file before changing that capability.**
-- [`planning/README.md`](planning/README.md) — the planning conventions (two axes, change bundles, three lanes, frontmatter) + the change Index.
+- [`architecture/`](architecture/) (repo root) — the per-capability living truth, one file per capability ([`architecture/README.md`](architecture/README.md) is the index). The promotion target on every ship. **Read the relevant file before changing that capability.**
+- [`planning/README.md`](planning/README.md) — the planning convention (Quick path + the two-axis convention) and the generated change Index.
 - [`planning/changes/<YYYY-MM-DD.NN-slug>/`](planning/changes/) — per-change bundles (`design.md` + `plan.md`, or `change.md` for the lightweight lane).
-- [`planning/decisions/<YYYY-MM-DD>-<slug>.md`](planning/decisions/) — design decisions taken (esp. options rejected with a load-bearing reason), each with a Revisit trigger; listed by `just index`.
-- [`planning/audits/`](planning/audits/) — findings reports + `scripts/` tooling.
-- [`planning/retros/`](planning/retros/) — retrospectives.
-- [`planning/releases/`](planning/releases/) — per-version release notes (also published on GitHub Releases).
-- [`planning/deferred.md`](planning/deferred.md) — review-surfaced, not-yet-actionable items.
-- [`planning/_templates/`](planning/_templates/) — design/plan/change templates.
+- [`planning/decisions/`](planning/decisions/), [`planning/audits/`](planning/audits/), [`planning/retros/`](planning/retros/), [`planning/releases/`](planning/releases/), [`planning/deferred.md`](planning/deferred.md) — decisions, findings sweeps, retrospectives, release notes, and deferred items.
 
-**Per-feature workflow:** brainstorming → `design.md` in `planning/changes/<id>/` → writing-plans → `plan.md` in the same bundle → executing-plans (or subagent-driven-development) → requesting-code-review → finishing-a-development-branch. On ship, promote the conclusions into the affected `architecture/<capability>.md` by hand and set `status: shipped` + `pr` + `outcome` in the implementing PR — there is no folder move. The change listing is generated: run `just index`. A design decision taken without a code change — especially a candidate rejected with a load-bearing reason — is recorded as `planning/decisions/YYYY-MM-DD-<slug>.md` (the `decision.md` template, frontmatter `status: accepted|superseded`), each with a **Revisit trigger** so future reviews don't re-litigate it; listed by `just index`. Topic slugs are kebab-case descriptions (`msgspec-decoder-adapter`), not story IDs.
+## Workflow
+
+Planning follows the portable two-axis convention — `architecture/` (repo root) is the living **truth home** and promotion target; `planning/changes/` holds the per-change bundles. **Start at the [Quick path](planning/README.md#quick-path-start-here)** in `planning/README.md` to choose a lane (Full / Lightweight / Tiny), create a bundle, and ship — that file is the authoritative spec. Run `just check-planning` to validate bundles and `just index` to print the change listing.
 
 ## Commands
 
-This project uses `just` (task runner) and `uv` (package manager).
+This project uses `just` (task runner) and `uv` (package manager). `just --list` is the source of truth; non-obvious notes:
 
-```bash
-just install      # uv lock --upgrade && uv sync --all-extras --frozen --group lint
-just lint         # eof-fixer + ruff format + ruff check --fix + ty check
-just lint-ci      # same checks without auto-fixing (used in CI)
-just test         # uv run pytest (with coverage by default)
-just test-branch  # pytest with branch coverage
-```
+- `just lint` auto-fixes; `just lint-ci` is the read-only CI variant (and runs the planning validator).
+- `just test` runs pytest with coverage and forwards extra args: `just test tests/test_client.py -k test_name`.
+- Without `just`: `uv run ruff format . && uv run ruff check . --fix && uv run ty check && uv run pytest`.
 
-`just test` passes extra args to pytest:
+## Architecture
 
-```bash
-just test tests/test_client.py
-just test tests/test_client.py -k test_get_returns_typed_response
-```
+> Quick orientation. The authoritative, code-current account of each capability lives in [`architecture/`](architecture/). **When a change alters a capability's behavior, update the matching `architecture/<capability>.md` in the same PR** — that promotion is what keeps `architecture/` true; code that changes without it silently rots the truth home.
 
-Without `just`:
+`httpware` is a thin wrapper over `httpx2` (`httpx2.Request`/`httpx2.Response` are public surface, not abstracted away) built around three documented protocol seams. **Invariants that must not break:**
 
-```bash
-uv run ruff format . && uv run ruff check . --fix && uv run ty check
-uv run pytest
-```
+- **Three protocol seams, crossed only through their protocols.** Seam A: `Client`/`AsyncClient` ↔ middleware chain, composed at `__init__` and frozen for the client's lifetime; the internal terminal calls `httpx2.*.send`, maps exceptions, and raises `StatusError` on 4xx/5xx. Seam B: clients ↔ `decoders: Sequence[ResponseDecoder] | None` — first decoder whose `can_decode` is True runs; `MissingDecoderError` raises *before* the HTTP call if none claims the model; decoder failures wrap as `DecodeError`. Seam C: `httpware` ↔ optional extras — each opt-in dependency imported only inside its dedicated module.
+- **Sync/async parity.** `Client` and `AsyncClient` carry identical features (typed decoding, middleware, resilience, `stream()`); a change to one surface must mirror to the other.
+- **House invariants** (most review-only, not CI-checked): no `httpx2._` private API; no `from __future__ import annotations` (3.11+ floor); no `print()` (ruff `T201`); no global logging config (`logging.getLogger("httpware")` / namespaced children only); type suppressions use `# ty: ignore[<rule>]`, never `# type: ignore`.
+- **Errors.** Status-keyed `StatusError` subclasses take a single positional `response` and never override `__init__`; non-status `ClientError` subclasses (`DecodeError`, `MissingDecoderError`, `BulkheadFullError`, `RetryBudgetExhaustedError`, `CircuitOpenError`, `ResponseTooLargeError`) do.
 
-## Architecture invariants
-
-These are non-negotiable, but **most are NOT machine-checked — don't rely on CI to catch a violation.** Enforced by ruff: `print()` (`T201`) and a blanket `# type: ignore` (`PGH003`). Partially: `httpx2._` (ruff `SLF001` catches attribute access, not a *used* private import). Review-only: the future-import and global-logging bans.
-
-- **No `httpx2` private API**: `grep -rE 'httpx2\._' src/httpware/` should return zero matches (run in review — not wired into CI). Public symbols only.
-- **No `from __future__ import annotations`**: Python 3.11+ floor; PEP 604/585 syntax is native.
-- **No `print()`**: enforced by ruff.
-- **No global logging config**: no `logging.basicConfig()`, no bare `logging.getLogger()`. Acquire `logging.getLogger("httpware")` or `logging.getLogger(f"httpware.{module}")` only.
-- **Type suppressions**: use `# ty: ignore[<rule>]`, never `# type: ignore` or `# mypy: ignore`.
-
-## Code conventions
-
-- **Modules**: `snake_case` (`client.py`, `errors.py`, `middleware/chain.py`).
-- **Classes**: `PascalCase`. `Http` is two letters: `AsyncClient`, not `ASYNCClient`.
-- **Methods**: `snake_case`. No `a` prefix on async methods (match `httpx2`); `aclose()` is the sole exception.
-- **Private symbols**: `_leading_underscore`. Cross-module private code lives in `_internal/`.
-- **Imports**: absolute paths inside `src/httpware/`; relative imports only within the same subpackage.
-- **Docstrings**: PEP 257. Module/class/public-method required; `D1` (missing docstring) is ignored.
-- **Exception construction**: status-keyed `StatusError` subclasses (the 4xx/5xx tree) take a single positional `response: httpx2.Response` and do NOT override `__init__` — all fields via `exc.response.*`. This rule scopes to `StatusError` only; non-status `ClientError` subclasses such as `DecodeError`, `MissingDecoderError`, `BulkheadFullError`, `RetryBudgetExhaustedError`, and `CircuitOpenError` deliberately define `__init__` with keyword-only fields. See `architecture/errors.md`.
-
-## Module layout
-
-```
-src/httpware/
-├── __init__.py                    # public exports + __all__
-├── client.py                      # AsyncClient + Client (thin wrappers over httpx2.AsyncClient / httpx2.Client)
-├── errors.py                      # status-keyed exception hierarchy holding httpx2.Response
-├── middleware/                    # protocol, Next type, chain composition, phase decorators
-├── decoders/                      # ResponseDecoder protocol + Pydantic/msgspec adapters
-├── _internal/                     # private cross-module helpers
-└── py.typed
-```
-
-## Protocol seams
-
-Three documented internal boundaries. AI agents must respect them — never cross a seam except through its documented protocol.
-
-1. **Seam A** — `Client`/`AsyncClient` ↔ `Middleware`/`AsyncMiddleware` — middleware chain composed at `Client.__init__` and `AsyncClient.__init__`, frozen for the client's lifetime. Internal terminal calls `httpx2.Client.send` or `httpx2.AsyncClient.send`, maps exceptions, raises `StatusError` on 4xx/5xx. Sync and async surfaces are kept at parity.
-2. **Seam B** — `Client`/`AsyncClient` ↔ `ResponseDecoder` list — both clients take `decoders: Sequence[ResponseDecoder] | None` (a *list*, not a single decoder; `None` resolves against installed extras, pydantic-first). When `response_model` is provided, `send`/`send_with_response` (sync and async alike) walk the list and the first decoder whose `can_decode(model: type) -> bool` returns True runs `decode(content: bytes, model: type[T]) -> T`; if no decoder claims the model, `MissingDecoderError` is raised *before* the HTTP call. Decoder exceptions are wrapped as `DecodeError` at the seam. Full contract: [`architecture/decoders.md`](architecture/decoders.md).
-3. **Seam C** — `httpware` ↔ optional extras — each opt-in dependency imported only inside its dedicated module.
-
-## Testing
-
-- `pytest-asyncio` auto mode — async tests do NOT need `@pytest.mark.asyncio`.
-- Property-based tests (Hypothesis) for concurrency-sensitive code: `RetryBudget`, `Bulkhead`, retry interleaving. Files named `test_*_props.py`.
-- Tests inject `httpx2.MockTransport` via `AsyncClient(httpx2_client=httpx2.AsyncClient(transport=mock))` for async or `Client(httpx2_client=httpx2.Client(transport=mock))` for sync. No `respx`, no `RecordedTransport`.
+| Capability | File |
+|---|---|
+| What httpware is + architectural invariants + module layout | [`architecture/overview.md`](architecture/overview.md) |
+| Sync `Client` / async `AsyncClient` parity, `stream()` | [`architecture/client.md`](architecture/client.md) |
+| Seam A — middleware protocol, `Next`, chain composition | [`architecture/middleware.md`](architecture/middleware.md) |
+| Seam B — `ResponseDecoder` protocol, pydantic/msgspec resolution | [`architecture/decoders.md`](architecture/decoders.md) |
+| Status-keyed exception tree, construction invariant, redaction | [`architecture/errors.md`](architecture/errors.md) |
+| Resilience suite (retry, budget, bulkhead, circuit breaker, timeout) | [`architecture/resilience.md`](architecture/resilience.md) |
+| Seam C — optional extras isolation | [`architecture/extras.md`](architecture/extras.md) |
+| House code conventions (naming, imports, docstrings) | [`architecture/conventions.md`](architecture/conventions.md) |
+| Testing conventions | [`architecture/testing.md`](architecture/testing.md) |
 
 ## When in doubt
 
@@ -100,14 +55,6 @@ Three documented internal boundaries. AI agents must respect them — never cros
 
 ## Agent skills
 
-### Issue tracker
-
-Issues live in GitHub Issues (`modern-python/httpware`), managed via the `gh` CLI; external PRs are not a triage surface. See `planning/agents/issue-tracker.md`.
-
-### Triage labels
-
-Canonical defaults — `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix` (the last already exists). See `planning/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context — one `CONTEXT.md` at the repo root + ADRs under `planning/adr/`. See `planning/agents/domain.md`.
+- **Issue tracker** — Issues live in GitHub Issues (`modern-python/httpware`), managed via the `gh` CLI; external PRs are not a triage surface. See `planning/agents/issue-tracker.md`.
+- **Triage labels** — Canonical defaults: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `planning/agents/triage-labels.md`.
+- **Domain docs** — Single-context: one `CONTEXT.md` at the repo root + ADRs under `planning/adr/`. See `planning/agents/domain.md`.

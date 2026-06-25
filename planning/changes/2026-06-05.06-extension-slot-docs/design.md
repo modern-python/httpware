@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-05
-slug: extension-slot-docs
 summary: Shipped 0.7.0 — middleware docs
-supersedes: null
-superseded_by: null
-pr: 28
-outcome: 'Shipped 0.7.0 — middleware docs'
 ---
 
 # Spec: Extension-slot docs (Epic 3 story 3-6)

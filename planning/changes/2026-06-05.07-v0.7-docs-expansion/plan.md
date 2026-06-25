@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-05
-slug: v0.7-docs-expansion
-spec: v0.7-docs-expansion
-pr: 28
----
-
 # v0.7 docs expansion (Resilience + Errors + Testing + OTel wiring) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

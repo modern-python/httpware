@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-23
-slug: response-body-cap
-spec: response-body-cap
-pr: 78
----
-
 # response-body-cap — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

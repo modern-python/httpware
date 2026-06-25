@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-02
-slug: docs-reorg-and-mkdocs
 summary: Docs reorg + mkdocs scaffolding
-supersedes: null
-superseded_by: null
-pr: 17
-outcome: 'Docs reorg + mkdocs scaffolding'
 ---
 
 # Docs reorg and minimal mkdocs site (design)

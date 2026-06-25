@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: retry-budget-cluster
 summary: Shipped 0.8.3 — 7 RetryBudget findings
-supersedes: null
-superseded_by: null
-pr: 34
-outcome: 'Shipped 0.8.3 — 7 RetryBudget findings'
 ---
 
 # Spec: Retry/Budget cluster — close 7 audit findings (0.8.3)

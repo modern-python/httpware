@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-12
-slug: delta-audit
-spec: delta-audit
-pr: 43
----
-
 # 0.9.0 Delta Audit Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. **Task 2 must run inline in the main session** — the Workflow tool is a main-session orchestration tool and is not available to dispatched subagents.

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-13
-slug: portable-planning-convention
 summary: Adopt the portable two-axis convention: per-capability `architecture/` truth files + `changes/` bundles, full history backfill, byte-identical Conventions.
-supersedes: null
-superseded_by: null
-pr: 55
-outcome: 'Shipped via PR #55 — two-axis convention adopted: architecture/ truth + planning/changes/ bundles; engineering.md split into 8 files; 40 pairs archived.'
 ---
 
 # Design: Adopt the portable two-axis planning convention

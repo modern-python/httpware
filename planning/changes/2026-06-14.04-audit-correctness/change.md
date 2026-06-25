@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-14
-slug: audit-correctness
 summary: Closed 8 [deep-audit](audits/2026-06-14-deep-audit.md) correctness + public-API findings: RetryBudget token ordering, two `OverflowError` crashes, the redaction triple-slash, the msgspec guard, streaming-body symmetry, the RetryBudget docstring caveat, and `middleware/__all__`.
-supersedes: null
-superseded_by: null
-pr: 64
-outcome: Shipped via #64 - 8 correctness + public-API findings (RetryBudget token ordering, _parse_retry_after and full_jitter_delay OverflowError, redaction triple-slash, msgspec guard, streaming-body symmetry, RetryBudget docstring, middleware __all__).
 ---
 
 # Change: Deep-audit correctness + public-API fixes

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: post-080-doc-sweep
 summary: Post-0.8.0 doc sweep
-supersedes: null
-superseded_by: null
-pr: 34
-outcome: 'Post-0.8.0 doc sweep'
 ---
 
 # Spec: Post-0.8.0 doc-staleness sweep

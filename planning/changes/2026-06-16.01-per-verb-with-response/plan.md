@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-16
-slug: per-verb-with-response
-spec: per-verb-with-response
-pr: 68
----
-
 # per-verb-with-response — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

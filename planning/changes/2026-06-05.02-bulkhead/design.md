@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-05
-slug: bulkhead
 summary: Shipped 0.4.0 — Bulkhead
-supersedes: null
-superseded_by: null
-pr: 23
-outcome: 'Shipped 0.4.0 — Bulkhead'
 ---
 
 # Spec: Bulkhead middleware (0.4.0, Epic 3 slice 2)

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-05
-slug: streaming
 summary: Shipped 0.5.0 — stream()
-supersedes: null
-superseded_by: null
-pr: 26
-outcome: 'Shipped 0.5.0 — stream()'
 ---
 
 # Spec: AsyncClient.stream context manager (0.5.0, Epic 4 story 4-3)

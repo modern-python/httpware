@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-14
-slug: security-hardening
 summary: Closed the [deep-audit](audits/2026-06-14-deep-audit.md) security cluster: URL secret redaction centralized at the `_emit_event` chokepoint (userinfo + sensitive query/fragment keys), opt-in `max_error_body_bytes` + `ResponseTooLargeError` bounding the `stream()` error pre-read, and `trust_env` + header-reachability docs. Non-streaming hard body cap deferred.
-supersedes: null
-superseded_by: null
-pr: 63
-outcome: Shipped via #63 — URL secret redaction centralized at the _emit_event chokepoint, opt-in max_error_body_bytes + ResponseTooLargeError bound the stream() error pre-read, trust_env + header-reachability docs. Non-streaming hard body cap deferred (planning/deferred.md).
 ---
 
 # Design: Security hardening — URL secret redaction + bounded error-body reads

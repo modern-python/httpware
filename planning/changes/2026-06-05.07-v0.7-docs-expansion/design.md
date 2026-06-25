@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-05
-slug: v0.7-docs-expansion
 summary: Shipped 0.7.0 — first-cut user docs
-supersedes: null
-superseded_by: null
-pr: 28
-outcome: 'Shipped 0.7.0 — first-cut user docs'
 ---
 
 # Spec: v0.7 docs expansion (Middleware + Resilience + Errors + Testing)

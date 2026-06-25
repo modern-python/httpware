@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: otel-partial-install
 summary: Shipped 0.8.4 — OTel partial-install guards
-supersedes: null
-superseded_by: null
-pr: 35
-outcome: 'Shipped 0.8.4 — OTel partial-install guards'
 ---
 
 # Spec: OTel partial-install hardening (0.8.4)

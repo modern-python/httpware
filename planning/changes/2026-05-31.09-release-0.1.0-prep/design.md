@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: release-0.1.0-prep
 summary: 0.1.0 released
-supersedes: null
-superseded_by: null
-pr: 14
-outcome: '0.1.0 released'
 ---
 
 # Release 0.1.0 prep (design)

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-23
-slug: decoder-resolver-extraction
 summary: Extract a _DecoderResolver (+ generic _BoundDecoder) for Seam B, collapsing the 4-site resolve/raise/decode/wrap smear in client.py.
-supersedes: null
-superseded_by: null
-pr: 77
-outcome: Shipped via #77 — resolution + pre-flight MissingDecoderError + DecodeError wrapping moved into _DecoderResolver/_BoundDecoder (decoders/_resolver.py); the 4 send/send_with_response sites collapse to resolve→dispatch→bound.decode, both _dispatch_decoder methods removed, decoder+model sealed together. Behaviour byte-identical (723 tests, 100% coverage). New seam suite tests/test_decoder_resolver.py; promoted into architecture/decoders.md. Internal refactor — no release.
 ---
 
 # Design: Extract a `_DecoderResolver` for Seam B

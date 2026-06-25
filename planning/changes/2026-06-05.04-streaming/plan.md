@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-05
-slug: streaming
-spec: streaming
-pr: 26
----
-
 # AsyncClient.stream + Retry-refuses-streamed-body (0.5.0, Epic 4 story 4-3) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

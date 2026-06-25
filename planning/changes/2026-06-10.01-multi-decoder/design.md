@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-10
-slug: multi-decoder
 summary: Shipped 0.9.0 — multi-decoder routing
-supersedes: null
-superseded_by: null
-pr: 41
-outcome: 'Shipped 0.9.0 — multi-decoder routing'
 ---
 
 # Spec: multi-decoder routing — `decoders=[...]` with type-dispatched claim policy

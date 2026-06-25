@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: msgspec-decoder-via-extras
 summary: Shipped in 0.1.0; carry-forward decoder
-supersedes: null
-superseded_by: null
-pr: 11
-outcome: 'Shipped in 0.1.0; carry-forward decoder'
 ---
 
 # msgspec decoder via extras (design)

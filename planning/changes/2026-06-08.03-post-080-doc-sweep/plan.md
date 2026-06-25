@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-08
-slug: post-080-doc-sweep
-spec: post-080-doc-sweep
-pr: 34
----
-
 # Post-0.8.0 Doc-Staleness Sweep Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

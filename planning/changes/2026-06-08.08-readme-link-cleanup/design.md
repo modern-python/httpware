@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: readme-link-cleanup
 summary: README link cleanup
-supersedes: null
-superseded_by: null
-pr: 39
-outcome: 'README link cleanup'
 ---
 
 # Spec: README + top-level link cleanup, plus one-shot link audit

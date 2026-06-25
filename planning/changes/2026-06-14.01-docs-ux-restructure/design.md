@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-14
-slug: docs-ux-restructure
 summary: Thin README front-door + canonical `docs/index.md` (G3), why-httpware hook (G1), runnable jsonplaceholder example (G4), nav reorder + architecture links, base-client scrub. G2 dropped; G6 (decoder guide) still open.
-supersedes: null
-superseded_by: null
-pr: 60
-outcome: Shipped via #60 (squash 480cea8) — thin README front-door + canonical docs/index.md (G3), why-httpware hook (G1), runnable jsonplaceholder example (G4), nav reorder + architecture links, base-client scrub. G2 dropped; G6 (decoder guide) still open.
 ---
 
 # Design: Docs-UX restructure — thin README, canonical site, runnable first example

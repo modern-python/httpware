@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-16
-slug: circuit-breaker-rate-mode
-spec: circuit-breaker-rate-mode
-pr: 69
----
-
 # circuit-breaker-rate-mode — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

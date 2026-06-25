@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-03
-slug: thin-httpx2-wrapper
 summary: Shipped 0.2.0 — the thin-wrapper pivot
-supersedes: [2026-05-31.05-request-immutability-helpers, 2026-05-31.07-asyncclient, 2026-05-31.08-recordedtransport, 2026-06-01.01-auth-coercion]
-superseded_by: null
-pr: 20
-outcome: 'Shipped 0.2.0 — the thin-wrapper pivot'
 ---
 
 # Design: thin httpx2 wrapper (v0.2 pivot)

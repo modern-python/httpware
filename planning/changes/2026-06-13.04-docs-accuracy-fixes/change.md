@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-13
-slug: docs-accuracy-fixes
 summary: Fixed 5 verified factual errors from the [docs audit](audits/2026-06-13-docs-audit.md): RetryBudget formula, modern-di 2.x recipe, contributing-doc CI/grep claim, `just lint` comment, middleware stable-contracts list (+ AsyncTimeout non-finite wording).
-supersedes: null
-superseded_by: null
-pr: f203821
-outcome: Shipped — 5 verified doc-accuracy fixes (B1 RetryBudget formula, B2 modern-di 2.x recipe, I1/I2 contributing-doc, I3 middleware contracts, AsyncTimeout wording). Pushed directly to main (no PR).
 ---
 
 # Change: Fix verified doc-accuracy bugs from the docs audit

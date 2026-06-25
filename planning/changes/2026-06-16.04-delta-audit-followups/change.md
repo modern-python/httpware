@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-16
-slug: delta-audit-followups
 summary: Closed the [2026-06-16 delta audit](audits/2026-06-16-delta-audit.md) Low findings: rate-mode HALF_OPEN probe-failure re-open test + document-as-intended note. Tests + doc only, no release.
-supersedes: null
-superseded_by: null
-pr: 71
-outcome: Closed the 2026-06-16 delta-audit Low findings — rate-mode probe-failure re-open test (async+sync) + document-as-intended note. No source behavior change.
 ---
 
 # Change: Close the 2026-06-16 delta-audit Low findings

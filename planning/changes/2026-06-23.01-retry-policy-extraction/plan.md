@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-23
-slug: retry-policy-extraction
-spec: retry-policy-extraction
-pr: 76
----
-
 # retry-policy-extraction — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

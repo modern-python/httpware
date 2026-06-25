@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: mkdocs-gh-pages-migration
 summary: Docs host -> GitHub Pages
-supersedes: null
-superseded_by: null
-pr: 38
-outcome: 'Docs host -> GitHub Pages'
 ---
 
 # Spec: Migrate docs hosting from ReadTheDocs to GitHub Pages

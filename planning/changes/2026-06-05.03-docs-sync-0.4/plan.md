@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-05
-slug: docs-sync-0.4
-spec: docs-sync-0.4
-pr: 25
----
-
 # Docs-sync 0.4 (Epic 3 story 3-6) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

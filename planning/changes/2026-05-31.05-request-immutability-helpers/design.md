@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: request-immutability-helpers
 summary: Shipped in 0.1.0; removed by the v0.2 pivot *(superseded by thin-httpx2-wrapper)*
-supersedes: null
-superseded_by: 2026-06-03.02-thin-httpx2-wrapper
-pr: 10
-outcome: 'Shipped in 0.1.0; removed by the v0.2 pivot'
 ---
 
 # Request / Response immutability helper expansion (design)

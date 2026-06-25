@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-05
-slug: observability
-spec: observability
-pr: 27
----
-
 # Resilience observability (0.6.0, Epic 5 re-scoped) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

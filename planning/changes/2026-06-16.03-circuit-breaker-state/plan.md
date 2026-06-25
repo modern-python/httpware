@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-16
-slug: circuit-breaker-state
-spec: circuit-breaker-state
-pr: 70
----
-
 # circuit-breaker-state — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

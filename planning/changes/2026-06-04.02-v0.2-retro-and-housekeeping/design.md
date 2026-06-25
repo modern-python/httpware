@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-04
-slug: v0.2-retro-and-housekeeping
 summary: Post-0.2 retro + housekeeping
-supersedes: null
-superseded_by: null
-pr: 21
-outcome: 'Post-0.2 retro + housekeeping'
 ---
 
 # Spec: v0.2 retrospective and planning/ housekeeping
