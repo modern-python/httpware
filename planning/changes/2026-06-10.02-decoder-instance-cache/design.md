@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-10
-slug: decoder-instance-cache
 summary: Shipped 0.9.0 — per-instance decoder cache
-supersedes: null
-superseded_by: null
-pr: 42
-outcome: 'Shipped 0.9.0 — per-instance decoder cache'
 ---
 
 # Spec: decoder per-instance cache — drop module-level `@lru_cache`

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: shipped-work-review
 summary: 0.1.0-era review of shipped stories
-supersedes: null
-superseded_by: null
-pr: 7
-outcome: '0.1.0-era review of shipped stories'
 ---
 
 # Retrospective code review — stories 1-1 through 1-5

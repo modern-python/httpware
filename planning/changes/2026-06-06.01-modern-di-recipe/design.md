@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-06
-slug: modern-di-recipe
 summary: modern-di DI recipe doc
-supersedes: null
-superseded_by: null
-pr: 29
-outcome: 'modern-di DI recipe doc'
 ---
 
 # Spec: `modern-di` setup-friction recipe

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: small-fixes-mop-up
 summary: Shipped 0.8.5 — 4 small audit findings
-supersedes: null
-superseded_by: null
-pr: 36
-outcome: 'Shipped 0.8.5 — 4 small audit findings'
 ---
 
 # Spec: Small-fixes mop-up (0.8.5)

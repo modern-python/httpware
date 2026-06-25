@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: recordedtransport
 summary: Shipped in 0.1.0; removed by the v0.2 pivot *(superseded by thin-httpx2-wrapper)*
-supersedes: null
-superseded_by: 2026-06-03.02-thin-httpx2-wrapper
-pr: 13
-outcome: 'Shipped in 0.1.0; removed by the v0.2 pivot'
 ---
 
 # RecordedTransport (design)

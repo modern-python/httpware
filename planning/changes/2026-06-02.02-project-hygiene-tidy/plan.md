@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-02
-slug: project-hygiene-tidy
-spec: project-hygiene-tidy
-pr: 18
----
-
 # Project hygiene tidy implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

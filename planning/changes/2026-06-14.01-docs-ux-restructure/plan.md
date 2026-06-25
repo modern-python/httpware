@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-14
-slug: docs-ux-restructure
-spec: docs-ux-restructure
-pr: 60
----
-
 # docs-ux-restructure — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

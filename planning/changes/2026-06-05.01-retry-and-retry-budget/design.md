@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-05
-slug: retry-and-retry-budget
 summary: Shipped 0.4.0 — Retry + RetryBudget
-supersedes: null
-superseded_by: null
-pr: 22
-outcome: 'Shipped 0.4.0 — Retry + RetryBudget'
 ---
 
 # Spec: Retry middleware + RetryBudget (0.4.0, slice A of Epic 3)

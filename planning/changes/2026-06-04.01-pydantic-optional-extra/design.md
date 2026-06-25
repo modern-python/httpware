@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-04
-slug: pydantic-optional-extra
 summary: Shipped 0.3.0 — pydantic moves to an extra
-supersedes: null
-superseded_by: null
-pr: 21
-outcome: 'Shipped 0.3.0 — pydantic moves to an extra'
 ---
 
 # Spec: pydantic as an optional extra (0.3.0)

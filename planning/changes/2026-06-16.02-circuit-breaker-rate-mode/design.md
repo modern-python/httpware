@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-16
-slug: circuit-breaker-rate-mode
 summary: Added an opt-in time-based failure-rate trip mode to the circuit breaker (classic stays default). Shipped 0.13.0; closed deferred item "CircuitBreaker v2 (a)".
-supersedes: null
-superseded_by: null
-pr: 69
-outcome: Shipped 0.13.0 — opt-in time-based failure-rate trip mode (failure_rate_threshold + window_seconds + minimum_calls) on both breakers; classic stays default. Closed the "CircuitBreaker v2 (a)" deferred item; count-based windows, slow-call axis, and manual control + state remain deferred.
 ---
 
 # Design: CircuitBreaker v2 — time-based failure-rate trip mode

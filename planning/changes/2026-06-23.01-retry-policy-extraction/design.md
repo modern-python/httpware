@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-23
-slug: retry-policy-extraction
 summary: Extract a stateless _RetryPolicy decision module from the duplicated AsyncRetry/Retry __call__ loops.
-supersedes: null
-superseded_by: null
-pr: 76
-outcome: Shipped via #76 — decision logic moved into a stateless _RetryPolicy.decide; AsyncRetry/Retry are now thin loop drivers, the ~110-line sync/async duplication is gone, behaviour byte-identical (718 tests, 100% coverage). New seam suite tests/test_retry_policy.py; promoted into architecture/resilience.md. Internal refactor — no release.
 ---
 
 # Design: Extract a deep `_RetryPolicy` decision module

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: test-mop-up
 summary: Shipped 0.8.6 — test-only audit findings
-supersedes: null
-superseded_by: null
-pr: 37
-outcome: 'Shipped 0.8.6 — test-only audit findings'
 ---
 
 # Spec: Test mop-up (0.8.6)

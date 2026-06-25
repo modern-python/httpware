@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-14
-slug: security-hardening
-spec: security-hardening
-pr: 63
----
-
 # security-hardening — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-05
-slug: docs-sync-0.4
 summary: 0.4 docs sync
-supersedes: null
-superseded_by: null
-pr: 25
-outcome: '0.4 docs sync'
 ---
 
 # Spec: User-docs freshness pass for 0.4 (Epic 3 story 3-6)

@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-08
-slug: small-fixes-mop-up
-spec: small-fixes-mop-up
-pr: 36
----
-
 # Small-Fixes Mop-Up Implementation Plan (0.8.5)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

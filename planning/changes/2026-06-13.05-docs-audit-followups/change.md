@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-13
-slug: docs-audit-followups
 summary: Second docs-audit batch: corrected the overstated invariant-enforcement claims in `CLAUDE.md` + `architecture/overview.md` (only `print()`/blanket-`type: ignore` are machine-checked), readability findings R1–R3, and documented the public `STATUS_TO_EXCEPTION` (G5).
-supersedes: null
-superseded_by: null
-pr: 58
-outcome: Shipped via #58 (squash a132c1e) — invariant-enforcement claim corrected in CLAUDE.md + architecture/overview.md, plus readability findings R1/R2/R3 and STATUS_TO_EXCEPTION docs (G5).
 ---
 
 # Change: Docs-audit follow-ups — invariant-enforcement wording + readability

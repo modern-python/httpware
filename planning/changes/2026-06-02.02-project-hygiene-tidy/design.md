@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-02
-slug: project-hygiene-tidy
 summary: Repo hygiene pass
-supersedes: null
-superseded_by: null
-pr: 18
-outcome: 'Repo hygiene pass'
 ---
 
 # Project hygiene tidy (design)

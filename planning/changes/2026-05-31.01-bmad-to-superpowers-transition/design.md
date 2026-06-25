@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: bmad-to-superpowers-transition
 summary: Bootstrapped the planning workflow
-supersedes: null
-superseded_by: null
-pr: 6
-outcome: 'Bootstrapped the planning workflow'
 ---
 
 # bmad → superpowers transition (design)

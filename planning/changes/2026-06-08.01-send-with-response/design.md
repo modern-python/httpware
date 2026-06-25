@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-08
-slug: send-with-response
 summary: Shipped 0.8.2 — send_with_response
-supersedes: null
-superseded_by: null
-pr: 33
-outcome: 'Shipped 0.8.2 — send_with_response'
 ---
 
 # Spec: `send_with_response` — atomic (raw response, decoded body) pair

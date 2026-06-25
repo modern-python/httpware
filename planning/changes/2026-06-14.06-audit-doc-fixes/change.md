@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-14
-slug: audit-doc-fixes
 summary: Closed the [deep-audit](audits/2026-06-14-deep-audit.md) doc-accuracy findings: `Client.stream()` docs, terminal-call attribution, the four auto-raise sites, the pydantic upper bound, and root import paths.
-supersedes: null
-superseded_by: null
-pr: 66
-outcome: Shipped via #66 - 5 doc-accuracy findings (Client.stream docs, terminal attribution, errors auto-raise sites, pydantic upper bound, root import paths).
 ---
 
 # Change: Deep-audit documentation accuracy fixes

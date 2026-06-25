@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-12
-slug: delta-audit
 summary: 0.9.0 delta audit; closed via 0.9.1
-supersedes: null
-superseded_by: null
-pr: 43
-outcome: '0.9.0 delta audit; closed via 0.9.1'
 ---
 
 # Spec: Delta audit of the 0.9.0 multi-decoder epic — code + docs

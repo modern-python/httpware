@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-07
-slug: deep-audit
 summary: Deep audit; findings closed across 0.8.1-0.8.6
-supersedes: null
-superseded_by: null
-pr: 32
-outcome: 'Deep audit; findings closed across 0.8.1-0.8.6'
 ---
 
 # Spec: Deep audit of httpware — code + docs

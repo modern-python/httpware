@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-05
-slug: extension-slot-docs
-spec: extension-slot-docs
-pr: 28
----
-
 # Extension-slot docs (0.7.0, Epic 3 story 3-6) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

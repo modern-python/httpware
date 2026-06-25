@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-07
-slug: decoder-error
 summary: Shipped 0.8.1 — DecodeError at seam B
-supersedes: null
-superseded_by: null
-pr: 32
-outcome: 'Shipped 0.8.1 — DecodeError at seam B'
 ---
 
 # Spec: `DecodeError` — close the decoder-exception gap at Seam 3

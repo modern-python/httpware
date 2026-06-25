@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-03
-slug: input-validation-pass
 summary: Input-validation hardening
-supersedes: null
-superseded_by: null
-pr: 19
-outcome: 'Input-validation hardening'
 ---
 
 # Input-validation pass (design)

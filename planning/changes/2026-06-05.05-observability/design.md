@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-05
-slug: observability
 summary: Shipped 0.6.0 — logging + OTel events
-supersedes: null
-superseded_by: null
-pr: 27
-outcome: 'Shipped 0.6.0 — logging + OTel events'
 ---
 
 # Spec: Resilience observability — structured logging + opt-in OTel attribute enrichment (0.6.0, Epic 5)

@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-03
-slug: thin-httpx2-wrapper
-spec: thin-httpx2-wrapper
-pr: 20
----
-
 # Thin httpx2 wrapper (v0.2 pivot) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: middleware-protocol-and-chain
 summary: Shipped in 0.1.0; survived the v0.2 pivot
-supersedes: null
-superseded_by: null
-pr: 8
-outcome: 'Shipped in 0.1.0; survived the v0.2 pivot'
 ---
 
 # Middleware protocol and chain composition (design)

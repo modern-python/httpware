@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-14
-slug: deep-audit
-spec: deep-audit
-pr: null
----
-
 # deep-audit — implementation plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use

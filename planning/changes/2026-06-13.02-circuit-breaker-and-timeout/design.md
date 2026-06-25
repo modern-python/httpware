@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-13
-slug: circuit-breaker-and-timeout
 summary: Shipped 0.10.0 — CircuitBreaker + AsyncTimeout
-supersedes: null
-superseded_by: null
-pr: 51
-outcome: 'Shipped 0.10.0 — CircuitBreaker + AsyncTimeout'
 ---
 
 # Spec: CircuitBreaker + AsyncTimeout — completing the resilience suite

@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-07
-slug: sync-client
 summary: Shipped 0.8.0 — sync Client + Async* rename
-supersedes: null
-superseded_by: null
-pr: 31
-outcome: 'Shipped 0.8.0 — sync Client + Async* rename'
 ---
 
 # Spec: Sync `Client` + httpx2-aligned `Async*` rename

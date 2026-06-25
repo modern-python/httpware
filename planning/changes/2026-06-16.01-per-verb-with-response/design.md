@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-16
-slug: per-verb-with-response
 summary: Added `get_with_response` … `request_with_response` siblings (required `response_model`, returns `(Response, T)`) to both clients. Shipped 0.12.0; closed the deferred "Per-verb-with-response siblings" item.
-supersedes: null
-superseded_by: null
-pr: 68
-outcome: Shipped 0.12.0 — 6 per-verb *_with_response siblings (get/post/put/patch/delete/request) on both clients, returning (Response, T). Closed the deferred "Per-verb-with-response siblings" item.
 ---
 
 # Design: Per-verb `*_with_response` siblings

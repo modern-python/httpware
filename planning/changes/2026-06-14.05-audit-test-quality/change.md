@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-06-14
-slug: audit-test-quality
 summary: Closed 11 [deep-audit](audits/2026-06-14-deep-audit.md) test-quality findings: sync-terminal + CookieConflict coverage, the `StatusError.__init__` invariant, missing status constructions, sync mirrors, typing overloads, a deterministic bulkhead barrier, a pinned budget clock, an observability assertion, and the `TimeoutError` circuit trigger.
-supersedes: null
-superseded_by: null
-pr: 65
-outcome: Shipped via #65 - 11 test-quality findings (sync terminal + CookieConflict coverage, StatusError __init__ invariant, missing status constructions, sync mirrors, typing overloads, deterministic bulkhead barrier, pinned budget clock, observability assertion, TimeoutError circuit trigger).
 ---
 
 # Change: Deep-audit test-quality findings

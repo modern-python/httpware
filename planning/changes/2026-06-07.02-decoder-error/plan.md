@@ -1,11 +1,3 @@
----
-status: shipped
-date: 2026-06-07
-slug: decoder-error
-spec: decoder-error
-pr: 32
----
-
 # DecodeError Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

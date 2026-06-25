@@ -1,12 +1,5 @@
 ---
-status: shipped
-date: 2026-05-31
-slug: phase-shortcut-decorators
 summary: Shipped in 0.1.0; survived the v0.2 pivot
-supersedes: null
-superseded_by: null
-pr: 9
-outcome: 'Shipped in 0.1.0; survived the v0.2 pivot'
 ---
 
 # Phase-shortcut decorators (design)
