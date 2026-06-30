@@ -13,6 +13,7 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "**/pyproject.toml"
       - run: uv python install 3.11
+      - run: uv python pin 3.11
       - run: just install lint-ci
 
   pytest:
@@ -33,5 +34,6 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "**/pyproject.toml"
       - run: uv python install ${{ matrix.python-version }}
+      - run: uv python pin ${{ matrix.python-version }}
       - run: just install
       - run: just test --cov-report xml
