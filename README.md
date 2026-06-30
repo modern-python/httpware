@@ -8,7 +8,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/httpware.svg)](https://pypi.org/project/httpware/)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/httpware.svg)](https://pypi.org/project/httpware/)
-[![Downloads](https://img.shields.io/pypi/dm/httpware.svg)](https://pypistats.org/packages/httpware)
+[![Downloads](https://static.pepy.tech/badge/httpware/month)](https://pepy.tech/projects/httpware)
 [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/modern-python/httpware/actions/workflows/ci.yml)
 [![CI](https://github.com/modern-python/httpware/actions/workflows/ci.yml/badge.svg)](https://github.com/modern-python/httpware/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/modern-python/httpware.svg)](https://github.com/modern-python/httpware/blob/main/LICENSE)
