@@ -30,7 +30,7 @@ just test           # pytest with coverage
 ## Architecture invariants
 
 These are project invariants. The CI lint pass (`just lint-ci` — `ruff` + `ty`)
-catches what the linters can see (e.g. `print()` via ruff `T20`); the rest are
+catches what the linters can see (e.g. `print()` via ruff `T201`); the rest are
 enforced in code review. Do not break them in pull requests:
 
 - No `httpx2._*` (private API) usage anywhere in the library.

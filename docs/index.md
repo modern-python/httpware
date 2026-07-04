@@ -120,6 +120,10 @@ async def main() -> None:
 
 It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, and any custom middleware are bypassed. (AsyncRetry separately refuses to retry any request — stream or non-stream — whose body was an async-iterable, since streams can't replay across attempts.)
 
+### Capping response body size
+
+Both clients accept an opt-in `max_response_body_bytes: int | None = None`. When set, a decoded response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned; the default `None` is unbounded. See **[Errors](errors.md#responsetoolargeerror)** for the full trip conditions.
+
 ## Errors
 
 All errors inherit `httpware.ClientError`: 4xx/5xx responses raise a typed

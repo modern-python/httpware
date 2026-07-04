@@ -2,6 +2,8 @@
 
 `httpware`'s test seam is `httpx2`. Pass any `httpx2.AsyncClient` (including one built on `httpx2.MockTransport`) to `AsyncClient(httpx2_client=...)` — the middleware chain still runs end-to-end, only the wire is mocked. No special test mode, no monkey-patching, no `respx`.
 
+`httpx2_client=` is mutually exclusive with `base_url`, `headers`, `params`, `cookies`, `timeout`, `limits`, and `auth`: passing any of those alongside a pre-built `httpx2_client=` raises `TypeError`. Configure the `httpx2.AsyncClient`/`httpx2.Client` you pass instead.
+
 ## The basic pattern
 
 ```python
@@ -111,4 +113,4 @@ For middleware with state-keeping (counters, circuit-breaker state), assert on i
 
 - **[Middleware guide](middleware.md)** — write the middleware you're testing.
 - **[Resilience reference](resilience.md)** — testing `AsyncRetry`/`AsyncBulkhead` configurations.
-- **[`architecture/testing.md`](https://github.com/modern-python/httpware/blob/main/architecture/testing.md)** — the project's own testing patterns (Hypothesis property-based tests, `pytest-asyncio` auto-mode, the `RecordedTransport`-was-removed history).
+- **[`architecture/testing.md`](https://github.com/modern-python/httpware/blob/main/architecture/testing.md)** — the project's own testing conventions: `pytest-asyncio` auto-mode, `httpx2.MockTransport` over `respx`, Hypothesis property-based tests, and the 100%-coverage bar.

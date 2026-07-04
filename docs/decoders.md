@@ -1,4 +1,4 @@
-# Writing a custom decoder
+# Decoders
 
 `httpware`'s typed-response extension point is the **`ResponseDecoder` protocol**. A decoder turns raw response bytes into a typed object: when you pass `response_model=` to `send` / `send_with_response`, the client walks its decoder list, picks the first one that claims your model, and hands it the body.
 
@@ -39,7 +39,9 @@ Both clients take `decoders: Sequence[ResponseDecoder] | None = None`, composed 
 
 Unlike middleware, which has separate `AsyncMiddleware` and `Middleware` flavors, there is **one** `ResponseDecoder` protocol, shared by `AsyncClient` and `Client` alike. `decode` is a synchronous method: by the time it runs, the body has already been read off the wire, so decoding is pure CPU work with nothing to await. Write one decoder and pass it to either client.
 
-## Worked example: a CSV decoder
+## Writing your own
+
+### Worked example: a CSV decoder
 
 A decoder for `text/csv` endpoints that returns a `list` of dataclass rows. Both built-ins are JSON, so this is the case they can't cover — and it shows the seam's real shape: raw bytes in, typed object out, no JSON anywhere.
 
@@ -102,7 +104,7 @@ async def main() -> None:
 
 The same decoder instance works with a sync `Client(decoders=[CsvDecoder(), PydanticDecoder()])`.
 
-## A note on claiming the right models
+### A note on claiming the right models
 
 `can_decode` is a contract with the *rest of the list*. Claim too broadly and you steal models from decoders behind you; claim too narrowly and your decoder never runs. The rule of thumb: claim exactly the types you natively own, and reject another library's. An adapter for a third-party type system narrows its claim to that system — for example, a [`cattrs`](https://catt.rs)-backed decoder for `attrs` classes:
 
@@ -125,7 +127,7 @@ class CattrsDecoder:
 
 Note this decoder is **two-pass** (`json.loads`, then `structure`). The built-in adapters deliberately decode in a single bytes-in pass (`TypeAdapter.validate_json`, `msgspec.json.Decoder.decode`) to skip the intermediate `dict` allocation — but that's a *performance choice for the built-ins*, not a protocol obligation. A custom decoder may go two-pass when its underlying library only structures from native Python objects; you pay one extra allocation, nothing more.
 
-## When NOT to write a decoder
+### When NOT to write a decoder
 
 - **Your model is JSON.** Dataclasses, `TypedDict`s, primitives, pydantic models, and msgspec `Struct`s are all covered by the built-in `PydanticDecoder` / `MsgspecDecoder`. Install the extra (`httpware[pydantic]` or `httpware[msgspec]`) instead of writing a decoder.
 - **You only want raw bytes or text.** Don't pass `response_model=` at all — call `send` (or a verb method) without it and read `response.content` / `response.text` directly. Decoders are for *typed* bodies.
