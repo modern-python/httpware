@@ -122,7 +122,7 @@ It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, an
 
 ### Capping response body size
 
-Both clients accept an opt-in `max_response_body_bytes: int | None = None`. When set, a decoded response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned; the default `None` is unbounded. See **[Errors](errors.md#responsetoolargeerror)** for the full trip conditions.
+Both clients accept an opt-in `max_response_body_bytes: int | None = None`. When set, a response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned; the default `None` is unbounded. See **[Errors](errors.md#responsetoolargeerror)** for the full trip conditions.
 
 ## Errors
 

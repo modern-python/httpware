@@ -116,7 +116,7 @@ exc.response.request.url      # the failing URL (httpx2.URL)
 exc.response.request.method   # the HTTP method
 ```
 
-**Security note:** `__repr__` and the exception's summary message strip `user:pass@` userinfo and mask the values of known-sensitive query parameters (`api_key`, `apikey`, `access_token`, `refresh_token`, `token`, `secret`, `client_secret`, `password`, `passwd`, `pwd`, `auth`, `authorization`, `sig`, `signature`, `key`, `private_key`, `session`, `sessionid`, `x-api-key`) as `REDACTED`, preserving the keys. Query values under other names are **not** masked, so still avoid putting non-standard secrets in query strings. Note that request *headers* (`Authorization`, `Cookie`, etc.) are never redacted — see `exc.response.request.headers` above.
+**Security note:** `__repr__` and the exception's summary message strip `user:pass@` userinfo and mask the values of known-sensitive query and URL-fragment parameters (`api_key`, `apikey`, `access_token`, `refresh_token`, `token`, `secret`, `client_secret`, `password`, `passwd`, `pwd`, `auth`, `authorization`, `sig`, `signature`, `key`, `private_key`, `session`, `sessionid`, `x-api-key`) as `REDACTED`, preserving the keys. Query values under other names are **not** masked, so still avoid putting non-standard secrets in query strings. Note that request *headers* (`Authorization`, `Cookie`, etc.) are never redacted — see `exc.response.request.headers` above.
 
 ## Resilience-error payloads
 

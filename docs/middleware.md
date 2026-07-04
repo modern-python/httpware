@@ -13,7 +13,7 @@ Middleware is for *cross-cutting* concerns — behavior that should apply to eve
 - **Transform that doesn't need `httpware`'s exception mapping or chain ordering** (pure request/response side effects at the lowest level, including post-redirect hops): use `httpx2.event_hooks` on the wrapped `httpx2_client` instead. Phase decorators and middleware participate in the `httpware` chain (they see `httpware` exceptions and compose with `AsyncRetry`/`AsyncBulkhead`); `event_hooks` run a layer below, on every transport attempt.
 - **URL or header validation:** `httpx2` owns it — don't reimplement.
 - **HTTP-level span creation for tracing:** install `opentelemetry-instrumentation-httpx` instead of writing an OTel middleware in httpware. `opentelemetry-instrumentation-httpx` already covers transport-level tracing, so a separate httpware layer would duplicate it. See [Observability](observability.md).
-- **Redaction:** httpware redacts URLs before they reach logs, telemetry, and error messages — `user:pass@` userinfo is stripped and sensitive query-parameter values are masked (`_internal/redaction.py`). It does **not** inspect or redact headers or request/response bodies, so if your own middleware logs those, redact them yourself (e.g. with a `logging.Filter`).
+- **Redaction:** httpware redacts URLs before they reach logs, telemetry, and error messages — `user:pass@` userinfo is stripped and sensitive query- and fragment-parameter values are masked (`_internal/redaction.py`). It does **not** inspect or redact headers or request/response bodies, so if your own middleware logs those, redact them yourself (e.g. with a `logging.Filter`).
 
 ## Writing your own
 
