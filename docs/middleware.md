@@ -116,7 +116,7 @@ The example pairs naturally with the 0.6.0 observability events: a `httpware.ret
 
 ### Enriching the active span
 
-See **[Observability](observability.md)** for how to wire the OTel SDK and `opentelemetry-instrumentation-httpx` so `httpware` HTTP calls get a span at all. Once a span is active, your own middleware can attach to it the same way `httpware`'s built-in resilience middleware does — no additional setup needed:
+See **[Wiring OpenTelemetry](observability.md#wiring-opentelemetry)** for how to wire the OTel SDK and `opentelemetry-instrumentation-httpx` so `httpware` HTTP calls get a span at all. Once a span is active, your own middleware can attach to it the same way `httpware`'s built-in resilience middleware does — no additional setup needed:
 
 ```python
 import httpx2
