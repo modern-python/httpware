@@ -1,10 +1,23 @@
-# Writing custom middleware
+# Middleware
 
 `httpware`'s primary extension point is the **AsyncMiddleware protocol**. Middleware lets you add cross-cutting behavior — request-ID propagation, auth header injection, structured tracing, custom resilience policies, anything that wraps "send a request, get a response" — without subclassing `AsyncClient` or touching the transport.
 
-The built-in `AsyncRetry` and `AsyncBulkhead` middleware are themselves implementations of this protocol; nothing about them is privileged. If you want a circuit breaker, a rate limiter, or a header-injecting auth layer, write a middleware. If your need is per-call (not cross-cutting), pass it through `request.extensions=` instead.
+The built-in `AsyncRetry` and `AsyncBulkhead` middleware are themselves implementations of this protocol; nothing about them is privileged. If you want a circuit breaker, a rate limiter, or a header-injecting auth layer, write a middleware.
 
-## The protocol
+## Choosing where behavior lives
+
+Middleware is for *cross-cutting* concerns — behavior that should apply to every call through a client. For everything else, reach for a more specific tool:
+
+- **Per-call behavior that doesn't apply to other calls:** pass it through `request.extensions=` (or the `extensions=` kwarg at the call site) instead of a middleware.
+- **Instance state or two-sided inspection** (a counter, a CircuitBreaker's open/closed flag, timing that needs both the request and its response, or interleaving behavior around the `await next(...)` call): write a raw `AsyncMiddleware`/`Middleware` class rather than a phase decorator — decorators are a convenience for the cases where a single function suffices.
+- **Transform that doesn't need `httpware`'s exception mapping or chain ordering** (pure request/response side effects at the lowest level, including post-redirect hops): use `httpx2.event_hooks` on the wrapped `httpx2_client` instead. Phase decorators and middleware participate in the `httpware` chain (they see `httpware` exceptions and compose with `AsyncRetry`/`AsyncBulkhead`); `event_hooks` run a layer below, on every transport attempt.
+- **URL or header validation:** `httpx2` owns it — don't reimplement.
+- **HTTP-level span creation for tracing:** install `opentelemetry-instrumentation-httpx` instead of writing an OTel middleware in httpware. `opentelemetry-instrumentation-httpx` already covers transport-level tracing, so a separate httpware layer would duplicate it. See [Observability](observability.md).
+- **Redaction:** httpware redacts URLs before they reach logs, telemetry, and error messages — `user:pass@` userinfo is stripped and sensitive query-parameter values are masked (`_internal/redaction.py`). It does **not** inspect or redact headers or request/response bodies, so if your own middleware logs those, redact them yourself (e.g. with a `logging.Filter`).
+
+## Writing your own
+
+### The protocol
 
 Two symbols, both exported from `httpware.middleware`:
 
@@ -33,7 +46,7 @@ Calling `await next(request)` forwards to the next layer (or, eventually, to the
 
 Whatever you do, return an `httpx2.Response`. Raising an exception propagates up the chain (AsyncRetry catches retryable exceptions; everything else surfaces to the caller).
 
-## Phase decorators
+### Phase decorators
 
 For the common cases where you don't need state-keeping on `self` and don't need to wrap the full `await next(...)` call, `httpware.middleware` exports three decorators that turn a single async function into an `AsyncMiddleware`:
 
@@ -49,11 +62,7 @@ from httpware import async_before_request, async_after_response, async_on_error
 
 See the **[Phase decorator recipes](recipes/phase-decorator-patterns.md)** for worked examples covering each decorator: bearer-token injection, correlation-ID propagation from `contextvars`, status-class counter, and `NetworkError` fallback.
 
-**Reach for the raw `AsyncMiddleware` protocol when:** you need instance state (a counter, a CircuitBreaker's open/closed flag), you need to inspect both the request AND its response (e.g., timing), or you need to interleave behavior around the `await next(...)` call (e.g., emit one log line at the start and one at the end). The decorators are a convenience for the cases where a single function suffices.
-
-**Reach for `httpx2.event_hooks` instead when:** the transform doesn't need `httpware`'s exception mapping or chain ordering — pure request/response side effects at the lowest level. Phase decorators participate in the `httpware` middleware chain (they see `httpware` exceptions and compose with `AsyncRetry`/`AsyncBulkhead`); `event_hooks` run a layer below, on every transport attempt including post-redirect hops. For static header injection or response logging that doesn't care about either property, a hook installed on the wrapped `httpx2_client` is the simpler tool.
-
-## Worked example: request-ID propagation
+### Worked example: request-ID propagation
 
 A `RequestIdMiddleware` that assigns a per-call UUID, injects it as an outgoing header, and logs it alongside the response status. This is the canonical "trace every request through your distributed system" pattern.
 
@@ -105,38 +114,27 @@ A note on logger names: the example logs under `myapp.request_id`, NOT under `ht
 
 The example pairs naturally with the 0.6.0 observability events: a `httpware.retry` `retry.giving_up` log record carries a `url` attribute, and your `RequestIdMiddleware` set an `X-Request-Id` for that same call. Correlate the two in your log aggregator and you have end-to-end visibility from "this user's request" to "we gave up after N retries."
 
-## When NOT to write a middleware
+### Enriching the active span
 
-- **Redaction:** Use a `logging.Filter` on the consumer side. `httpware` deliberately does no redaction in-library (per the 0.6.0 observability design).
-- **URL or header validation:** `httpx2` owns it. Don't reimplement.
-- **Per-call behavior that doesn't apply to other calls:** Pass through `request.extensions=` (or the `extensions=` kwarg at the call site) instead. Middleware exists for *cross-cutting* concerns.
-- **HTTP-level span creation for tracing:** Install `opentelemetry-instrumentation-httpx` instead of writing an OTel middleware in httpware. We retired story `5-4` (standalone OTel middleware) for this reason — `opentelemetry-instrumentation-httpx` already covers transport-level tracing, and a separate httpware layer would duplicate it. See [`architecture/middleware.md`](https://github.com/modern-python/httpware/blob/main/architecture/middleware.md).
-
-## Wiring OpenTelemetry
-
-`httpware[otel]` only ships `opentelemetry-api`. To make the observability events emitted by `AsyncRetry` and `AsyncBulkhead` visible, you also need:
-
-- An **SDK** (`opentelemetry-sdk`) to actually collect spans
-- An **HTTP instrumentor** (`opentelemetry-instrumentation-httpx`) so each HTTP call creates a span — `httpware`'s events attach to that span via `trace.get_current_span().add_event(...)`
-
-Minimal setup (console exporter for development):
+See **[Observability](observability.md)** for how to wire the OTel SDK and `opentelemetry-instrumentation-httpx` so `httpware` HTTP calls get a span at all. Once a span is active, your own middleware can attach to it the same way `httpware`'s built-in resilience middleware does — no additional setup needed:
 
 ```python
+import httpx2
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-trace.set_tracer_provider(TracerProvider())
-trace.get_tracer_provider().add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-HTTPXClientInstrumentor().instrument()
+from httpware import AsyncNext
+
+
+class SpanEnrichingMiddleware:
+    async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
+        response = await next(request)
+        trace.get_current_span().set_attribute("myapp.tenant_id", request.headers.get("X-Tenant-Id", ""))
+        return response
 ```
 
-After this runs, every `httpware` HTTP call gets an `HTTP <method>` span from the instrumentor, and AsyncRetry/AsyncBulkhead observability events appear as span events on it (no extra configuration needed in `httpware` itself — the events fire whenever an active span is present).
+When no span is active, `get_current_span()` returns a `NonRecordingSpan` whose `set_attribute`/`add_event` are documented no-ops, so this is safe to call unconditionally.
 
-For production, swap `ConsoleSpanExporter` for your OTLP/Jaeger/Zipkin exporter. See the [OpenTelemetry Python docs](https://opentelemetry.io/docs/languages/python/) for the full SDK setup.
-
-## Sync middleware
+### Sync middleware
 
 The same protocol shape, sync flavor. Use these when wiring middleware into a sync `Client` instead of `AsyncClient`.
 
