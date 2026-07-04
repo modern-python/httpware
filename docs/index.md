@@ -1,6 +1,6 @@
 # httpware
 
-A Python HTTP client framework with sync and async clients for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry`/`Retry` + `RetryBudget`, `AsyncBulkhead`/`Bulkhead`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
+A Python HTTP client framework with sync and async clients for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry`/`Retry` + `RetryBudget`, `AsyncBulkhead`/`Bulkhead`, `AsyncCircuitBreaker`/`CircuitBreaker`, and `AsyncTimeout`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 
 ## Why httpware
 
@@ -76,31 +76,11 @@ Need the raw response **and** a decoded body from the same call (e.g., for heade
 ### Decoder dispatch
 
 When `response_model=` is set, the client walks `decoders` in order and picks
-the first decoder whose `can_decode(model)` returns `True`. Both built-in
-decoders claim broadly within their library; the ordering encodes your
-preference for shared shapes (`dict`, `list[Foo]`, dataclasses, primitives):
-
-```python
-from httpware import AsyncClient
-from httpware.decoders.msgspec import MsgspecDecoder
-from httpware.decoders.pydantic import PydanticDecoder
-
-# pydantic-first (the default when both extras are installed):
-# - BaseModel  -> pydantic
-# - Struct     -> msgspec
-# - dict, list -> pydantic (first in list)
-AsyncClient(decoders=[PydanticDecoder(), MsgspecDecoder()])
-
-# msgspec-first — same native routing, but shared shapes go to msgspec:
-# - BaseModel  -> pydantic
-# - Struct     -> msgspec
-# - dict, list -> msgspec
-AsyncClient(decoders=[MsgspecDecoder(), PydanticDecoder()])
-```
-
-If no registered decoder claims your `response_model`, the call raises
-`MissingDecoderError` *before* the HTTP request — see the
-[Errors reference](errors.md#missingdecodererror).
+the first decoder whose `can_decode` returns `True`; ordering encodes your
+preference for shapes more than one decoder could claim. If none claims your
+`response_model`, the call raises `MissingDecoderError` *before* the HTTP
+request. See **[Decoders](decoders.md)** for the resolution rules and
+pydantic/msgspec routing.
 
 ### With resilience middleware
 
@@ -142,14 +122,10 @@ It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, an
 
 ## Errors
 
-All errors inherit `httpware.ClientError`. The categories:
-
-- **Status errors** (4xx/5xx responses) — raised automatically, no `raise_for_status()` needed: `NotFoundError`, `RateLimitedError`, `ServiceUnavailableError`, and the rest. All subclass `StatusError`.
-- **Transport errors** — connection / network / protocol failures before a response arrived. `NetworkError` (transient) subclasses `TransportError`.
-- **Resilience refusals** — `RetryBudgetExhaustedError`, `BulkheadFullError`, and `CircuitOpenError`, raised by the resilience middleware.
-- **Decode errors** — `DecodeError`, raised when `response_model=` decoding fails (HTTP call itself succeeded). `MissingDecoderError`, raised when no registered decoder claims the `response_model=` type — fires *before* the HTTP call.
-
-See the [Errors reference](errors.md) for the full tree and catching strategies.
+All errors inherit `httpware.ClientError`: 4xx/5xx responses raise a typed
+`StatusError` subclass automatically, and `response_model=` decode failures
+raise `DecodeError`. See **[Errors](errors.md)** for the full tree and
+catching strategies.
 
 ## Observability
 
@@ -162,6 +138,7 @@ event names. See **[Observability](observability.md)** for the full contract.
 - **[Resilience reference](resilience.md)** — every parameter on `AsyncRetry`, `RetryBudget`, and `AsyncBulkhead`; the retry-rule matrix; Retry-After parsing; budget sharing.
 - **[Middleware guide](middleware.md)** — write your own middleware. Covers the AsyncMiddleware Protocol, the phase decorators, a worked Request-ID propagation example, and OpenTelemetry wiring.
 - **[Errors reference](errors.md)** — the full exception tree, catching strategies, `exc.response.*` access pattern.
+- **[Observability](observability.md)** — the stdlib-`logging` and OTel span-event contract emitted by the resilience middleware.
 - **[Testing guide](testing.md)** — mock-transport injection pattern for testing code that uses `httpware`.
 - **[Recipes](recipes/modern-di.md)** — wiring `AsyncClient` into a `modern-di` container.
 - **[Architecture Notes](https://github.com/modern-python/httpware/blob/main/architecture/overview.md)** — per-capability design notes — invariants, the three protocol seams, exception contract, module layout, testing patterns — under `architecture/`. Lives in the repo under `architecture/`.
