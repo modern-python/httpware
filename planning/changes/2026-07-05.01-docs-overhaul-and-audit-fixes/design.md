@@ -1,5 +1,5 @@
 ---
-summary: Reframe the "Why httpware" pitch benefit-first, boldly restructure the user docs for readability (real quickstart, promoted Observability page, trimmed resilience reference, usage-before-extension nav), and fix a batch of doc/code inconsistencies and incompletes surfaced by a paired audit.
+summary: Reframed the "Why httpware" pitch benefit-first, restructured the user docs (true quickstart, promoted Observability page with relocated OTel wiring, trimmed resilience reference, usage-before-extension nav), and fixed a batch of doc/docstring inconsistencies and incompletes from a paired audit (two security-relevant redaction reversals, Retry-After/streaming/breaker-table corrections, the undocumented response-body cap, six dead docstring refs) — docs + docstrings only, no API or runtime behavior change.
 ---
 
 # Design: Docs overhaul + audit fixes
