@@ -1,6 +1,6 @@
 """Finagle-style token-bucket retry budget.
 
-See planning/specs/2026-06-05-retry-and-retry-budget-design.md for the contract.
+See architecture/resilience.md (Retry + RetryBudget section) for the contract.
 
 Thread-safe and asyncio-safe: all mutations go through a threading.Lock,
 which ensures no torn state across concurrent accesses. When a RetryBudget

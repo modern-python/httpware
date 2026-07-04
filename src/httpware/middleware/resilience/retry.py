@@ -1,6 +1,6 @@
 """AsyncRetry + Retry middleware — automatic retry of transient failures with budget control.
 
-See planning/specs/2026-06-05-retry-and-retry-budget-design.md for the full contract.
+See architecture/resilience.md (Retry + RetryBudget section) for the full contract.
 
 Status-code retry: the client terminal raises StatusError subclasses on 4xx/5xx,
 so the retry middleware catches StatusError and inspects exc.response.status_code. The
