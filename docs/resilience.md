@@ -3,10 +3,17 @@
 `httpware` ships these resilience primitives under `httpware.middleware.resilience`, all composable through the standard [Middleware](middleware.md) / [AsyncMiddleware](middleware.md) chain:
 
 - **`Retry` / `AsyncRetry`** — automatic retry of transient failures with full-jitter exponential backoff
-- **`RetryBudget`** — Finagle-style token bucket; safe to share across sync `Client` and `AsyncClient` in the same process. (Finagle-style bounds the global retry rate to prevent retry storms when downstreams degrade.)
+- **`RetryBudget`** — Finagle-style token bucket bounding the global retry rate to prevent retry storms; safe to share across sync `Client` and `AsyncClient` in the same process
 - **`Bulkhead` / `AsyncBulkhead`** — concurrency limiter with bounded acquire-wait (`threading.Semaphore` and `asyncio.Semaphore` respectively)
 
 A key ordering constraint: `AsyncBulkhead` must sit outside `AsyncRetry` (before it in `middleware=`) so one slot covers all retry attempts of a single call. For the full recommended ordering across all four primitives, see [Composition](#composition). Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
+
+- [`AsyncRetry`](#asyncretry)
+- [`RetryBudget`](#retrybudget)
+- [`AsyncBulkhead`](#asyncbulkhead)
+- [`AsyncCircuitBreaker` / `CircuitBreaker`](#asynccircuitbreaker-circuitbreaker)
+- [`AsyncTimeout`](#asynctimeout)
+- [Sync `Retry` and `Bulkhead`](#sync-retry-and-bulkhead)
 
 ## `AsyncRetry`
 
@@ -29,10 +36,10 @@ For a whole-operation wall-clock bound across all retry attempts, compose `Async
 ### Retry-After parsing
 
 `Retry-After` is parsed as either:
-- **Integer seconds** — `Retry-After: 30` → sleep 30s (clamped to `max_delay`)
-- **HTTP-date** (RFC 5322) — `Retry-After: Wed, 21 Oct 2026 07:28:00 GMT` → sleep until that absolute time (clamped to `max_delay`, floored at 0)
+- **Integer seconds** — `Retry-After: 30` → sleep 30s
+- **HTTP-date** (RFC 5322) — `Retry-After: Wed, 21 Oct 2026 07:28:00 GMT` → sleep until that absolute time, computed delay floored at 0
 
-Negative integer values are clamped to 0. Malformed values are ignored, falling back to the jittered backoff.
+Either form triggers the same give-up-and-re-raise rule above if it exceeds `max_delay`. Negative integer values floor at 0; malformed values are ignored, falling back to the jittered backoff.
 
 ### Streaming-body refusal
 
@@ -42,7 +49,7 @@ If the request body was an async-iterable, `AsyncRetry` refuses to retry — the
 httpware: not retrying — request body is a stream that cannot replay across attempts
 ```
 
-The same refusal note is added at the non-idempotent early-exit sites (when streaming combines with a non-idempotent method). The observability event `httpware.retry` `retry.streaming_refused` fires only at the retryable-failure-path site — see [Observability](observability.md).
+A non-idempotent request that also carries a streaming body is refused first by the method-eligibility check — that early exit re-raises the original exception without the streaming-refusal note. The note (and the `httpware.retry` `retry.streaming_refused` observability event) is added only on the retryable-failure path, i.e. once the method and status are both eligible — see [Observability](observability.md).
 
 ### Exhaustion behavior
 
@@ -70,11 +77,7 @@ A Finagle-style token bucket bounding retry rate. Each request deposits a token;
 ceiling = ceil(len(deposits_in_window) * percent_can_retry) + int(min_retries_per_sec * ttl)
 ```
 
-The percent term rounds **up** (`math.ceil`), so even a handful of recent
-deposits permits at least one retry above the floor; the floor term truncates
-(`int`).
-
-A withdrawal fails when `len(withdrawn_in_window) >= ceiling`.
+The percent term rounds **up** (`math.ceil`); the floor term truncates (`int`). A withdrawal fails when `len(withdrawn_in_window) >= ceiling`.
 
 ### Why a floor matters
 
@@ -121,12 +124,7 @@ Concurrency limiter via `asyncio.Semaphore`. Acquires a slot before each request
 
 ### Slot release contract
 
-The slot is released in a `try/finally` around `await next(request)`, so all three exit paths release deterministically:
-- **Success** — slot released after the response returns
-- **Exception** — slot released before the exception propagates
-- **Cancellation** — slot released as the `CancelledError` propagates
-
-The slot cannot leak.
+The slot is released in a `try/finally` around `await next(request)`, so success, an exception propagating, or a `CancelledError` propagating all release it deterministically — it cannot leak.
 
 ### Sharing across clients
 
@@ -169,6 +167,9 @@ Classic consecutive-failure circuit breaker. Counts failures and prevents reques
 | `reset_timeout` | `30.0` (s) | Seconds to stay OPEN before admitting a probe. `<0` raises `ValueError`. |
 | `success_threshold` | `1` | Consecutive probe successes required to close. `<1` raises `ValueError`. |
 | `failure_status_codes` | `None` | Which status codes count as failures. `None` → all 5xx (`500`–`599`). |
+| `failure_rate_threshold` | `None` | Opts into time-based rate mode when set (see [below](#time-based-failure-rate-mode)). Fraction of failures in the rolling window that opens the circuit; `None` keeps classic consecutive-failure mode. |
+| `window_seconds` | `30.0` (s) | Rate mode only: width of the rolling window `failure_rate_threshold` is measured over. |
+| `minimum_calls` | `20` | Rate mode only: outcomes required in the window before the rate is evaluated. |
 
 ### Failure classification
 
@@ -195,7 +196,7 @@ Emitted on logger `httpware.circuit_breaker`:
 
 By default the circuit breaker trips on `failure_threshold` *consecutive* counted failures. This can miss partial degradation: a downstream returning errors on exactly half of all requests will never form a consecutive streak long enough to trip — the circuit stays closed while the error rate sits at 50%.
 
-For that pattern, switch to rate mode by passing `failure_rate_threshold`:
+Passing `failure_rate_threshold` switches to rate mode (params in the [constructor table](#constructor) above):
 
 ```python
 from httpware.middleware.resilience import AsyncCircuitBreaker
@@ -208,7 +209,7 @@ breaker = AsyncCircuitBreaker(
 )
 ```
 
-When `failure_rate_threshold` is set the breaker watches the rolling `window_seconds` window (default `30.0` s) and opens once the failure rate meets the threshold — provided at least `minimum_calls` (default `20`) outcomes have been observed in that window. Classic mode is the default; `failure_threshold` is ignored in rate mode. Half-open recovery works identically in both modes. The same `CircuitBreaker` constructor accepts the same parameters for sync clients.
+Classic mode is the default; `failure_threshold` is ignored once rate mode is active. Half-open recovery works identically in both modes. The same `CircuitBreaker` constructor accepts the same parameters for sync clients.
 
 ### State introspection
 
@@ -224,13 +225,13 @@ if breaker.state is CircuitState.OPEN:
     ...  # report the dependency as degraded
 ```
 
-`state` reflects the stored state at the moment of the call. It is read-only — writing to it raises `AttributeError`. The OPEN→HALF_OPEN transition is lazy: it fires on the next request admitted after `reset_timeout` elapses, not on a clock tick. So `state` will report `OPEN` until a request is actually admitted as the probe; reading it never triggers the transition. The same property exists on the sync `CircuitBreaker`.
+`state` reflects the stored state at the moment of the call and is read-only (writing raises `AttributeError`). The OPEN→HALF_OPEN transition is lazy — it fires only once a request is actually admitted after `reset_timeout` elapses, not on a clock tick — so `state` keeps reporting `OPEN` until that happens; reading it never triggers the transition. The same property exists on the sync `CircuitBreaker`.
 
 ### Sharing
 
 Pass the same instance to multiple clients to enforce one shared circuit across them. A `CircuitBreaker` (sync) cannot be shared with an `AsyncCircuitBreaker` — they use different concurrency primitives.
 
-### Async example
+### Example
 
 ```python
 from httpware import AsyncClient
@@ -246,21 +247,7 @@ async with AsyncClient(
     response = await client.get("/users/1")
 ```
 
-### Sync example
-
-```python
-from httpware import Client
-from httpware.middleware.resilience import CircuitBreaker
-
-
-breaker = CircuitBreaker(failure_threshold=3, reset_timeout=60.0)
-
-with Client(
-    base_url="https://api.example.com",
-    middleware=[breaker],
-) as client:
-    client.get("/users/1")
-```
+Sync usage is identical: `Client` + `CircuitBreaker`, no `await`.
 
 ## `AsyncTimeout`
 
@@ -278,22 +265,7 @@ Bounds total wall-clock time across the entire inner pipeline. Place it outermos
 
 **No sync `Timeout` exists.** Sync Python has no cancellation primitive that can interrupt a blocking httpx2 call mid-flight. For sync per-call bounds, configure `httpx2.Timeout` on the wrapped client or pass `timeout=` per request.
 
-Observability event: `timeout.exceeded` on logger `httpware.timeout`.
-
-```python
-from httpware import AsyncClient
-from httpware.middleware.resilience import AsyncCircuitBreaker, AsyncRetry, AsyncTimeout
-
-
-async with AsyncClient(
-    base_url="https://api.example.com",
-    middleware=[
-        AsyncTimeout(timeout=10.0),   # overall deadline across the whole chain
-        AsyncRetry(max_attempts=3),
-    ],
-) as client:
-    response = await client.get("/users/1")
-```
+Observability event: `timeout.exceeded` on logger `httpware.timeout`. See [Composition](#composition) below for a worked example placing `AsyncTimeout` outermost alongside the other primitives.
 
 ## Composition
 
@@ -334,7 +306,7 @@ Cross-cutting middleware that emit per-call state (e.g., the Request-ID middlewa
 
 ## Sync Retry and Bulkhead
 
-The sync flavors mirror the async ones for use with `Client`. Same parameter set, same defaults, same `RetryBudget` (which is safe to share across sync and async clients in the same process).
+The sync flavors mirror the async ones for use with `Client`.
 
 ### `Retry`
 
@@ -342,17 +314,7 @@ The sync flavors mirror the async ones for use with `Client`. Same parameter set
 from httpware.middleware.resilience import Retry
 ```
 
-| Parameter | Default | Effect |
-|---|---|---|
-| `max_attempts` | `3` | Total tries (including the first). `1` disables retries entirely; `<1` raises `ValueError`. |
-| `base_delay` | `0.1` (s) | Floor for the full-jitter exponential backoff. |
-| `max_delay` | `5.0` (s) | Ceiling for backoff. |
-| `retry_status_codes` | `frozenset({408, 429, 502, 503, 504})` | Status codes considered retryable. |
-| `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only by default. POST excluded; pass an explicit frozenset including `"POST"` to retry it. |
-| `respect_retry_after` | `True` | When the response carries a `Retry-After` header on a retryable status, sleep for the header value instead of the jittered backoff. If the header value exceeds `max_delay`, Retry gives up and re-raises the underlying `StatusError` with a PEP 678 note `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. Set `max_delay` higher (or `respect_retry_after=False`) to opt out. |
-| `budget` | `RetryBudget()` (default-configured) | The token bucket. Pass a shared `RetryBudget` instance to apply one budget across multiple clients — sync, async, or both. |
-
-`Retry` uses `time.sleep` between attempts. `Retry-After`, streaming-body refusal, exhaustion behavior, and `RetryBudgetExhaustedError` semantics are identical to `AsyncRetry`.
+`Retry` takes the identical parameters as `AsyncRetry` (table [above](#asyncretry)); it sleeps with `time.sleep` between attempts. `Retry-After`, streaming-body refusal, exhaustion behavior, and `RetryBudgetExhaustedError` semantics are identical to `AsyncRetry`.
 
 For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the wrapped client or pass `timeout=` per request. No sync `Timeout` middleware exists — sync Python has no cancellation primitive that can interrupt a blocking call mid-flight.
 
@@ -362,31 +324,13 @@ For a whole-attempt wall-clock bound, use `httpx2.Timeout` on the wrapped client
 from httpware.middleware.resilience import Bulkhead
 ```
 
-| Parameter | Default | Effect |
-|---|---|---|
-| `max_concurrent` | **REQUIRED** | Maximum in-flight requests. `<1` raises `ValueError`. |
-| `acquire_timeout` | `1.0` (s) | How long to wait for a slot before raising `BulkheadFullError`. `None` waits forever; `0` fails fast. `<0` raises `ValueError`. |
+`Bulkhead` mirrors `AsyncBulkhead` (table [above](#asyncbulkhead)) on a `threading.Semaphore`. Slot release follows the same `try/finally` contract — success, exception, and (in sync land) interrupt-style exceptions all release the slot.
 
-`Bulkhead` is backed by `threading.Semaphore`. Slot release follows the same `try/finally` contract as `AsyncBulkhead` — success, exception, and (in sync land) interrupt-style exceptions all release the slot.
-
-> **Per-world Bulkhead.** A `Bulkhead` (sync) and an `AsyncBulkhead` are separate primitives backed by `threading.Semaphore` and `asyncio.Semaphore` respectively. A single Bulkhead instance cannot enforce a joint cap across sync + async clients in the same process. If you need that, create both with the same `max_concurrent`; the OS will not coordinate the two but the policy intent is documented.
+> **Per-world Bulkhead.** `Bulkhead` and `AsyncBulkhead` are separate primitives (`threading.Semaphore` vs `asyncio.Semaphore`); one instance cannot cap sync + async clients jointly. For a shared cap across both, create one of each with matching `max_concurrent` — the OS won't coordinate them, but the policy intent is documented.
 
 ### Composition with sync `Client`
 
-```python
-from httpware import Client
-from httpware.middleware.resilience import Bulkhead, Retry
-
-
-with Client(
-    base_url="https://api.example.com",
-    middleware=[
-        Bulkhead(max_concurrent=10),
-        Retry(),
-    ],
-) as client:
-    client.get("/users/1")
-```
+The same ordering rationale from [Composition](#composition) applies — `Bulkhead` outside `Retry` — just without `AsyncTimeout` (no sync equivalent) and using `Client`, `Bulkhead`, and `Retry` in place of their async counterparts.
 
 ## See also
 
