@@ -101,7 +101,7 @@ async def main() -> None:
         await client.get("/users/1")
 ```
 
-A note on logger names: the example logs under `myapp.request_id`, NOT under `httpware.*`. The `httpware.*` namespace is reserved for events emitted by the library itself (see [Observability](index.md#observability) — `httpware.retry`, `httpware.bulkhead`, `httpware.circuit_breaker`, and `httpware.timeout` are stable contracts). Consumer middleware should use your application's own logger namespace.
+A note on logger names: the example logs under `myapp.request_id`, NOT under `httpware.*`. The `httpware.*` namespace is reserved for events emitted by the library itself (see [Observability](observability.md) — `httpware.retry`, `httpware.bulkhead`, `httpware.circuit_breaker`, and `httpware.timeout` are stable contracts). Consumer middleware should use your application's own logger namespace.
 
 The example pairs naturally with the 0.6.0 observability events: a `httpware.retry` `retry.giving_up` log record carries a `url` attribute, and your `RequestIdMiddleware` set an `X-Request-Id` for that same call. Correlate the two in your log aggregator and you have end-to-end visibility from "this user's request" to "we gave up after N retries."
 

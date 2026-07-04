@@ -42,7 +42,7 @@ If the request body was an async-iterable, `AsyncRetry` refuses to retry — the
 httpware: not retrying — request body is a stream that cannot replay across attempts
 ```
 
-The same refusal note is added at the non-idempotent early-exit sites (when streaming combines with a non-idempotent method). The observability event `httpware.retry` `retry.streaming_refused` fires only at the retryable-failure-path site — see [Observability](index.md#observability).
+The same refusal note is added at the non-idempotent early-exit sites (when streaming combines with a non-idempotent method). The observability event `httpware.retry` `retry.streaming_refused` fires only at the retryable-failure-path site — see [Observability](observability.md).
 
 ### Exhaustion behavior
 
@@ -144,7 +144,7 @@ async with (
 
 ### Rejection
 
-When `acquire_timeout` elapses without a slot opening, `AsyncBulkhead` raises `BulkheadFullError` (carries the configured `max_concurrent` and `acquire_timeout` for caller logging). See the [Errors reference](errors.md). The `httpware.bulkhead` `bulkhead.rejected` observability event fires at the same site — see [Observability](index.md#observability).
+When `acquire_timeout` elapses without a slot opening, `AsyncBulkhead` raises `BulkheadFullError` (carries the configured `max_concurrent` and `acquire_timeout` for caller logging). See the [Errors reference](errors.md). The `httpware.bulkhead` `bulkhead.rejected` observability event fires at the same site — see [Observability](observability.md).
 
 ## `AsyncCircuitBreaker` / `CircuitBreaker`
 
@@ -392,5 +392,5 @@ with Client(
 
 - **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `AsyncRetry` and `AsyncBulkhead` use.
 - **[Errors reference](errors.md)** — `RetryBudgetExhaustedError`, `BulkheadFullError`, `CircuitOpenError`, and the broader exception tree.
-- **[Observability](index.md#observability)** — the operational events these middleware emit.
+- **[Observability](observability.md)** — the operational events these middleware emit.
 - **[`architecture/middleware.md`](https://github.com/modern-python/httpware/blob/main/architecture/middleware.md)** — the formal Middleware/Seam-A contract.
