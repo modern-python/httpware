@@ -4,9 +4,11 @@ A Python HTTP client framework with sync and async clients for building resilien
 
 ## Why httpware
 
-- **Typed errors, no `raise_for_status()`** — 4xx/5xx automatically raise a status-keyed exception tree (`NotFoundError`, `RateLimitedError`, …), all under `httpware.StatusError`.
-- **Typed response bodies** — `response_model=YourType` decodes the body straight to your pydantic or msgspec model; a missing decoder fails fast, *before* the request goes out.
-- **Production resilience as composable middleware** — retry + retry-budget, bulkhead, circuit breaker, and timeout, composed at construction — all over standard `httpx2`.
+Typed exceptions per HTTP status, typed response bodies, and composable
+resilience (retry, bulkhead, circuit breaker, timeout) — a thin wrapper over
+`httpx2`, not a new HTTP abstraction. See the
+[project README](https://github.com/modern-python/httpware#why-httpware) for
+the full pitch.
 
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 

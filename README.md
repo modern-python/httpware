@@ -22,9 +22,15 @@
 
 ## Why httpware
 
-- **Typed errors, no `raise_for_status()`** — 4xx/5xx automatically raise a status-keyed exception tree (`NotFoundError`, `RateLimitedError`, …), all under `httpware.StatusError`.
-- **Typed response bodies** — `response_model=YourType` decodes the body straight to your pydantic or msgspec model; a missing decoder fails fast, *before* the request goes out.
-- **Production resilience as composable middleware** — retry + retry-budget, bulkhead, circuit breaker, and timeout, composed at construction — all over standard `httpx2`.
+- **Errors you can catch by name** — a 404 raises `NotFoundError`, a 429
+  `RateLimitedError`, automatically; everything else bubbles up under one
+  `httpware.StatusError` base. No `raise_for_status()`, no status-code
+  branching.
+- **Typed response bodies** — `response_model=User` decodes the body straight
+  to your pydantic or msgspec type; a missing decoder fails fast, *before* the
+  request goes out.
+- **Composable resilience** — retry + retry-budget, bulkhead, circuit breaker,
+  and timeout as middleware over standard `httpx2`.
 
 Built on `httpx2`: httpware re-exports `httpx2.Request`/`httpx2.Response` and stays a thin wrapper, not a new HTTP abstraction.
 
