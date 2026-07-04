@@ -29,7 +29,8 @@ ClientError                          (catch-all for anything httpware raises)
 ├── BulkheadFullError                (acquire_timeout elapsed before a slot opened)
 ├── CircuitOpenError                 (circuit is OPEN or HALF_OPEN probe slot taken; request not forwarded)
 ├── DecodeError                      (response_model= decoder failed; HTTP call itself succeeded)
-└── MissingDecoderError              (no registered decoder claims response_model=; fires before the HTTP call)
+├── MissingDecoderError              (no registered decoder claims response_model=; fires before the HTTP call)
+└── ResponseTooLargeError            (response body exceeds max_response_body_bytes; status-agnostic)
 ```
 
 ## Status-to-exception mapping
@@ -115,7 +116,7 @@ exc.response.request.url      # the failing URL (httpx2.URL)
 exc.response.request.method   # the HTTP method
 ```
 
-**Security note:** `__repr__` and the exception's summary message strip `user:pass@` userinfo from the URL to avoid leaking credentials in tracebacks. **Query-string secrets are NOT stripped** — keep secrets out of query strings.
+**Security note:** `__repr__` and the exception's summary message strip `user:pass@` userinfo and mask the values of known-sensitive query parameters (`api_key`, `apikey`, `access_token`, `refresh_token`, `token`, `secret`, `client_secret`, `password`, `passwd`, `pwd`, `auth`, `authorization`, `sig`, `signature`, `key`, `private_key`, `session`, `sessionid`, `x-api-key`) as `REDACTED`, preserving the keys. Query values under other names are **not** masked, so still avoid putting non-standard secrets in query strings. Note that request *headers* (`Authorization`, `Cookie`, etc.) are never redacted — see `exc.response.request.headers` above.
 
 ## Resilience-error payloads
 
@@ -186,6 +187,33 @@ The message reads `no decoder for response_model=<Model>: <hint>`, and the corre
         registered decoders (PydanticDecoder + MsgspecDecoder) all rejected it. Pass a custom decoder via decoders=[...].
 
 Unlike `DecodeError`, this error fires *before* the HTTP request — no traffic is sent.
+
+## `ResponseTooLargeError`
+
+Both `Client` and `AsyncClient` accept a `max_response_body_bytes: int | None = None` constructor argument. It's an opt-in cap — the default `None` means unbounded, matching current behavior. When set, a response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned. The check is status-agnostic (a `200` can trip it just as easily as a `4xx`/`5xx`), and it counts **decoded** bytes. It fires from the non-streaming terminal (`send()` / verb methods) and from `stream()`'s internal error pre-read; bytes you pull yourself via `stream()` iteration are never capped.
+
+`ResponseTooLargeError` carries:
+
+- `status_code: int` — the response's HTTP status code.
+- `limit: int` — the configured `max_response_body_bytes` value that was exceeded.
+- `content_length: int | None` — the server-declared `Content-Length`, when known.
+- `reason: Literal["declared", "streamed"]` — which trip mode fired:
+  - `"declared"` — the declared `Content-Length` already exceeded `limit`; the body was rejected before any byte was read, and `content_length` holds the offending value.
+  - `"streamed"` — the decoded body crossed `limit` mid-read (the chunked-transfer or compression-bomb case); the true oversized length is unknown by design, so `content_length` is whatever (possibly absent or understated) value the server declared.
+
+It is a non-status `ClientError` — it does not carry a `StatusError`-style positional `response` and is not in `STATUS_TO_EXCEPTION`. Because it's neither a `StatusError`, `NetworkError`, nor `TimeoutError`, it is not retried by `AsyncRetry` and does not count toward the circuit breaker.
+
+```python
+from httpware import AsyncClient, ResponseTooLargeError
+
+client = AsyncClient(base_url="https://api.example.com", max_response_body_bytes=1_000_000)
+
+try:
+    await client.get("/reports/huge")
+except ResponseTooLargeError as exc:
+    _LOGGER.error("response too large: limit=%d reason=%s content_length=%s", exc.limit, exc.reason, exc.content_length)
+    raise
+```
 
 ## See also
 
