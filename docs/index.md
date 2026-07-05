@@ -1,12 +1,14 @@
 # httpware
 
-A Python HTTP client framework with sync and async clients for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry`/`Retry` + `RetryBudget`, `AsyncBulkhead`/`Bulkhead`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
+A Python HTTP client framework with sync and async clients for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry`/`Retry` + `RetryBudget`, `AsyncBulkhead`/`Bulkhead`, `AsyncCircuitBreaker`/`CircuitBreaker`, and `AsyncTimeout`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 
 ## Why httpware
 
-- **Typed errors, no `raise_for_status()`** — 4xx/5xx automatically raise a status-keyed exception tree (`NotFoundError`, `RateLimitedError`, …), all under `httpware.StatusError`.
-- **Typed response bodies** — `response_model=YourType` decodes the body straight to your pydantic or msgspec model; a missing decoder fails fast, *before* the request goes out.
-- **Production resilience as composable middleware** — retry + retry-budget, bulkhead, circuit breaker, and timeout, composed at construction — all over standard `httpx2`.
+Typed exceptions per HTTP status, typed response bodies, and composable
+resilience (retry, bulkhead, circuit breaker, timeout) — a thin wrapper over
+`httpx2`, not a new HTTP abstraction. See the
+[project README](https://github.com/modern-python/httpware#why-httpware) for
+the full pitch.
 
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
@@ -74,31 +76,11 @@ Need the raw response **and** a decoded body from the same call (e.g., for heade
 ### Decoder dispatch
 
 When `response_model=` is set, the client walks `decoders` in order and picks
-the first decoder whose `can_decode(model)` returns `True`. Both built-in
-decoders claim broadly within their library; the ordering encodes your
-preference for shared shapes (`dict`, `list[Foo]`, dataclasses, primitives):
-
-```python
-from httpware import AsyncClient
-from httpware.decoders.msgspec import MsgspecDecoder
-from httpware.decoders.pydantic import PydanticDecoder
-
-# pydantic-first (the default when both extras are installed):
-# - BaseModel  -> pydantic
-# - Struct     -> msgspec
-# - dict, list -> pydantic (first in list)
-AsyncClient(decoders=[PydanticDecoder(), MsgspecDecoder()])
-
-# msgspec-first — same native routing, but shared shapes go to msgspec:
-# - BaseModel  -> pydantic
-# - Struct     -> msgspec
-# - dict, list -> msgspec
-AsyncClient(decoders=[MsgspecDecoder(), PydanticDecoder()])
-```
-
-If no registered decoder claims your `response_model`, the call raises
-`MissingDecoderError` *before* the HTTP request — see the
-[Errors reference](errors.md#missingdecodererror).
+the first decoder whose `can_decode` returns `True`; ordering encodes your
+preference for shapes more than one decoder could claim. If none claims your
+`response_model`, the call raises `MissingDecoderError` *before* the HTTP
+request. See **[Decoders](decoders.md)** for the resolution rules and
+pydantic/msgspec routing.
 
 ### With resilience middleware
 
@@ -138,55 +120,29 @@ async def main() -> None:
 
 It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, and any custom middleware are bypassed. (AsyncRetry separately refuses to retry any request — stream or non-stream — whose body was an async-iterable, since streams can't replay across attempts.)
 
+### Capping response body size
+
+Both clients accept an opt-in `max_response_body_bytes: int | None = None`. When set, a response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned; the default `None` is unbounded. See **[Errors](errors.md#responsetoolargeerror)** for the full trip conditions.
+
 ## Errors
 
-All errors inherit `httpware.ClientError`. The categories:
-
-- **Status errors** (4xx/5xx responses) — raised automatically, no `raise_for_status()` needed: `NotFoundError`, `RateLimitedError`, `ServiceUnavailableError`, and the rest. All subclass `StatusError`.
-- **Transport errors** — connection / network / protocol failures before a response arrived. `NetworkError` (transient) subclasses `TransportError`.
-- **Resilience refusals** — `RetryBudgetExhaustedError`, `BulkheadFullError`, and `CircuitOpenError`, raised by the resilience middleware.
-- **Decode errors** — `DecodeError`, raised when `response_model=` decoding fails (HTTP call itself succeeded). `MissingDecoderError`, raised when no registered decoder claims the `response_model=` type — fires *before* the HTTP call.
-
-See the [Errors reference](errors.md) for the full tree and catching strategies.
+All errors inherit `httpware.ClientError`: 4xx/5xx responses raise a typed
+`StatusError` subclass automatically, and `response_model=` decode failures
+raise `DecodeError`. See **[Errors](errors.md)** for the full tree and
+catching strategies.
 
 ## Observability
 
-All resilience middleware emit operational events via two channels — stdlib `logging` records (always on) and OpenTelemetry span events (when `opentelemetry-api` is installed). Event names and payloads are identical across sync and async; dashboards built against one class apply unchanged to the other.
-
-Logger names and event names are the stable public contract:
-
-| Logger | Events |
-|---|---|
-| `httpware.retry` | `retry.giving_up`, `retry.budget_refused`, `retry.streaming_refused` |
-| `httpware.bulkhead` | `bulkhead.rejected` |
-| `httpware.circuit_breaker` | `circuit.opened` (WARNING), `circuit.rejected` (WARNING), `circuit.half_open` (INFO), `circuit.closed` (INFO) |
-| `httpware.timeout` | `timeout.exceeded` (WARNING) |
-
-Each log record carries an `event` field with the event-name string (e.g. `event="circuit.opened"`), usable for log-aggregator filtering. See [resilience.md](resilience.md) for the full event tables per middleware.
-
-```python
-import logging
-
-# Enable visibility into resilience operational events
-logging.getLogger("httpware.retry").setLevel(logging.WARNING)
-logging.getLogger("httpware.bulkhead").setLevel(logging.WARNING)
-logging.getLogger("httpware.circuit_breaker").setLevel(logging.INFO)  # INFO for recovery events
-logging.getLogger("httpware.timeout").setLevel(logging.WARNING)
-```
-
-For OTel attribute enrichment on the active span — install the extra:
-
-```bash
-pip install httpware[otel]
-```
-
-When installed, `_emit_event` calls `trace.get_current_span().add_event(name, attributes=...)` automatically. We never create our own spans; for HTTP-level tracing install `opentelemetry-instrumentation-httpx` separately.
+Every resilience middleware emits stdlib-`logging` records (always) and OTel
+span events (when `opentelemetry-api` is installed), under stable logger and
+event names. See **[Observability](observability.md)** for the full contract.
 
 ## Where to go next
 
 - **[Resilience reference](resilience.md)** — every parameter on `AsyncRetry`, `RetryBudget`, and `AsyncBulkhead`; the retry-rule matrix; Retry-After parsing; budget sharing.
 - **[Middleware guide](middleware.md)** — write your own middleware. Covers the AsyncMiddleware Protocol, the phase decorators, a worked Request-ID propagation example, and OpenTelemetry wiring.
 - **[Errors reference](errors.md)** — the full exception tree, catching strategies, `exc.response.*` access pattern.
+- **[Observability](observability.md)** — the stdlib-`logging` and OTel span-event contract emitted by the resilience middleware.
 - **[Testing guide](testing.md)** — mock-transport injection pattern for testing code that uses `httpware`.
 - **[Recipes](recipes/modern-di.md)** — wiring `AsyncClient` into a `modern-di` container.
 - **[Architecture Notes](https://github.com/modern-python/httpware/blob/main/architecture/overview.md)** — per-capability design notes — invariants, the three protocol seams, exception contract, module layout, testing patterns — under `architecture/`. Lives in the repo under `architecture/`.

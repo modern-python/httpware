@@ -6,10 +6,11 @@ edit_uri: edit/main/docs/
 
 nav:
   - Quick-Start: index.md
-  - Middleware: middleware.md
-  - Decoders: decoders.md
   - Resilience: resilience.md
   - Errors: errors.md
+  - Observability: observability.md
+  - Decoders: decoders.md
+  - Middleware: middleware.md
   - Testing: testing.md
   - Recipes:
       - modern-di: recipes/modern-di.md

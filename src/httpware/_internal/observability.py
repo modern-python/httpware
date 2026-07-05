@@ -1,6 +1,6 @@
 """Observability emission helper — structured logging + opt-in OpenTelemetry span events.
 
-See planning/specs/2026-06-05-observability-design.md for the contract.
+See architecture/resilience.md (Observability section) for the contract.
 
 Logger names (``httpware.retry``, ``httpware.bulkhead``, ``httpware.circuit_breaker``,
 ``httpware.timeout``) and event names (``retry.giving_up``, ``bulkhead.rejected``,
