@@ -1,4 +1,11 @@
-# httpware
+<div class="mp-hero" markdown>
+
+<h1 class="mp-lockup">
+<img class="mp-logo mp-logo--light" src="assets/lockup-light.svg" alt="httpware">
+<img class="mp-logo mp-logo--dark" src="assets/lockup-dark.svg" alt="" aria-hidden="true">
+</h1>
+
+</div>
 
 A Python HTTP client framework with sync and async clients for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry`/`Retry` + `RetryBudget`, `AsyncBulkhead`/`Bulkhead`, `AsyncCircuitBreaker`/`CircuitBreaker`, and `AsyncTimeout`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
 
