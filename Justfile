@@ -21,7 +21,7 @@ lint-ci:
 index:
     uv run python planning/index.py
 
-# Validate planning bundles + decisions; CI runs this via lint-ci.
+# Validate planning changes + decisions; CI runs this via lint-ci.
 check-planning:
     uv run python planning/index.py --check
 
