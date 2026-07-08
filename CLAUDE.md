@@ -10,12 +10,12 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 - [`architecture/`](architecture/) (repo root) — the per-capability living truth, one file per capability ([`architecture/README.md`](architecture/README.md) is the index). The promotion target on every ship. **Read the relevant file before changing that capability.**
 - [`planning/README.md`](planning/README.md) — the planning convention (Quick path + the two-axis convention) and the generated change Index.
-- [`planning/changes/<YYYY-MM-DD.NN-slug>/`](planning/changes/) — per-change bundles (`design.md` + `plan.md`, or `change.md` for the lightweight lane).
+- [`planning/changes/<YYYY-MM-DD.NN-slug>.md`](planning/changes/) — flat change files, one per change (design template for the full lane, change template for the lightweight lane).
 - [`planning/decisions/`](planning/decisions/), [`planning/audits/`](planning/audits/), [`planning/retros/`](planning/retros/), [`planning/releases/`](planning/releases/), [`planning/deferred.md`](planning/deferred.md) — decisions, findings sweeps, retrospectives, release notes, and deferred items.
 
 ## Workflow
 
-Planning follows the portable two-axis convention — `architecture/` (repo root) is the living **truth home** and promotion target; `planning/changes/` holds the per-change bundles. **Start at the [Quick path](planning/README.md#quick-path-start-here)** in `planning/README.md` to choose a lane (Full / Lightweight / Tiny), create a bundle, and ship — that file is the authoritative spec. Run `just check-planning` to validate bundles and `just index` to print the change listing.
+Planning follows the portable two-axis convention — `architecture/` (repo root) is the living **truth home** and promotion target; `planning/changes/` holds the flat change files. **Start at the [Quick path](planning/README.md#quick-path-start-here)** in `planning/README.md` to choose a lane (Full / Lightweight / Tiny), create a change file, and ship — that file is the authoritative spec. Run `just check-planning` to validate changes and `just index` to print the change listing.
 
 ## Commands
 
