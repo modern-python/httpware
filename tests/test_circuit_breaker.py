@@ -311,8 +311,8 @@ async def test_reset_timeout_admits_probe_then_closes(caplog: pytest.LogCaptureF
     assert response.status_code == HTTPStatus.OK
     assert handler.calls == 3  # noqa: PLR2004 — 2 failures + 1 probe
     records = [r for r in caplog.records if r.name == "httpware.circuit_breaker"]
-    assert any(r.event == "circuit.half_open" for r in records)  # ty: ignore[unresolved-attribute]
-    assert any(r.event == "circuit.closed" for r in records)  # ty: ignore[unresolved-attribute]
+    assert any(r.event == "circuit.half_open" for r in records)
+    assert any(r.event == "circuit.closed" for r in records)
     messages = [r.message for r in records]
     assert any("half-open" in m for m in messages)
     assert any("closed" in m for m in messages)
