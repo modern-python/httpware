@@ -21,7 +21,6 @@ from httpware import (
 from httpware import (
     TimeoutError as HttpwareTimeoutError,
 )
-from httpware.client import _parse_content_length
 from httpware.middleware import AsyncMiddleware, AsyncNext
 
 
@@ -437,11 +436,3 @@ async def test_stream_user_driven_success_body_not_capped() -> None:
         chunks = [chunk async for chunk in response.aiter_bytes()]
     assert b"".join(chunks) == body  # user-driven streaming is never capped
     await client.aclose()
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [(None, None), ("123", 123), ("abc", None), ("-5", None), ("0", 0)],
-)
-def test_parse_content_length(raw: str | None, expected: int | None) -> None:
-    assert _parse_content_length(raw) == expected

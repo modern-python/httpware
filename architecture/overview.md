@@ -35,8 +35,9 @@ src/httpware/
 │       └── _backoff.py    # full-jitter helper (shared)
 ├── decoders/              # shared (ResponseDecoder + adapters)
 └── _internal/
-    ├── exception_mapping.py  # map_httpx2_exception (shared)
-    ├── import_checker.py     # is_*_installed flags
-    ├── observability.py      # _emit_event
-    └── status.py             # _raise_on_status_error, _is_streaming_body_*, STREAMING_BODY_MARKER
+    ├── body_cap.py            # max_response_body_bytes: validate, read-capped (sync+async)
+    ├── exception_mapping.py   # map_httpx2_exception + context-manager wrappers (shared)
+    ├── import_checker.py      # is_*_installed flags
+    ├── observability.py       # _emit_event
+    └── status.py              # _raise_on_status_error, _is_streaming_body_*, STREAMING_BODY_MARKER
 ```
