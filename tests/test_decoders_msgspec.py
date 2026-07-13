@@ -140,18 +140,17 @@ def test_can_decode_returns_false_when_decoder_build_raises() -> None:
 def test_unhashable_model_falls_back_to_uncached_decoder() -> None:
     """Unhashable `model` falls back to a direct uncached `msgspec.json.Decoder`.
 
-    Mirrors `PydanticDecoder`'s unhashable-fallback test: when `_get_msgspec_decoder`
-    raises `TypeError` (e.g., an unhashable parameterized type), `decode` bypasses
-    the cache so the user-visible error is `msgspec`'s own decode error, not a
-    `TypeError` from the cache lookup.
+    Mirrors `PydanticDecoder`'s unhashable-fallback test: when the decoder
+    cache lookup raises `TypeError` (e.g., an unhashable parameterized
+    type), `decode` bypasses the cache so the user-visible error is
+    `msgspec`'s own decode error, not a `TypeError` from the cache lookup.
     """
-    with patch.object(
-        MsgspecDecoder,
-        "_get_msgspec_decoder",
-        side_effect=TypeError("unhashable type"),
-    ):
-        result = MsgspecDecoder().decode(b"42", int)
-        assert result == 42  # noqa: PLR2004
+    decoder = MsgspecDecoder()
+    decoder._msgspec_decoders = MagicMock()  # noqa: SLF001
+    decoder._msgspec_decoders.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
+
+    result = decoder.decode(b"42", int)
+    assert result == 42  # noqa: PLR2004
 
 
 @pytest.mark.parametrize(

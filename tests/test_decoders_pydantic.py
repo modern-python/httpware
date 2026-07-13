@@ -125,7 +125,7 @@ def test_cache_invariance_concurrent_first_calls_threadpool() -> None:
 
         assert all(type(r) is User and r.id == 1 for r in results)
         # `dict` reads/writes are atomic in CPython but the get→set sequence in
-        # `_get_adapter` is not — concurrent first-callers may both build a
+        # `_get_or_build` is not — concurrent first-callers may both build a
         # TypeAdapter before one wins (idempotent; loser is GC'd). Bounded by
         # worker count.
         assert 1 <= spy.call_count <= n_workers
@@ -134,20 +134,19 @@ def test_cache_invariance_concurrent_first_calls_threadpool() -> None:
 def test_unhashable_model_falls_back_to_uncached_adapter() -> None:
     """Unhashable `model` falls back to a direct uncached `TypeAdapter`.
 
-    When `_get_adapter` raises `TypeError` (e.g., `Annotated[int, unhashable_metadata]`),
-    `decode` bypasses the cache so `pydantic.ValidationError` surfaces cleanly instead
-    of leaking a `TypeError` to the caller.
+    When the adapter cache lookup raises `TypeError` (e.g., an unhashable
+    model), `decode` bypasses the cache so `pydantic.ValidationError`
+    surfaces cleanly instead of leaking a `TypeError` to the caller.
     """
-    with patch.object(
-        PydanticDecoder,
-        "_get_adapter",
-        side_effect=TypeError("unhashable type"),
-    ):
-        result = PydanticDecoder().decode(b"42", int)
-        assert result == 42  # noqa: PLR2004
+    decoder = PydanticDecoder()
+    decoder._adapters = MagicMock()  # noqa: SLF001
+    decoder._adapters.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
 
-        with pytest.raises(pydantic.ValidationError):
-            PydanticDecoder().decode(b'"not-an-int"', int)
+    result = decoder.decode(b"42", int)
+    assert result == 42  # noqa: PLR2004
+
+    with pytest.raises(pydantic.ValidationError):
+        decoder.decode(b'"not-an-int"', int)
 
 
 @pytest.mark.parametrize(
