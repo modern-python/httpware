@@ -87,6 +87,28 @@ def _response_has_body(method: str, status_code: int) -> bool:
     return method.upper() != "HEAD" and status_code not in _BODILESS_STATUS
 
 
+def _reject_if_declared_length_exceeds_cap(response: httpx2.Response, cap: int) -> int | None:
+    """Return the parsed Content-Length, raising ResponseTooLargeError(reason="declared") if it already exceeds cap."""
+    content_length = _parse_content_length(response.headers.get("content-length"))
+    if content_length is not None and content_length > cap:
+        raise ResponseTooLargeError(
+            status_code=response.status_code, limit=cap, content_length=content_length, reason="declared"
+        )
+    return content_length
+
+
+def _build_buffered_response(response: httpx2.Response, content: bytes, request: httpx2.Request) -> httpx2.Response:
+    """Rebuild a buffered Response from the original streaming `response` and the final decoded `content`."""
+    return httpx2.Response(
+        status_code=response.status_code,
+        headers=_buffered_headers(response.headers),
+        content=content,
+        request=request,
+        extensions=_safe_extensions(response.extensions),
+        history=response.history,
+    )
+
+
 def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
     """Buffer a streaming sync `response` under `cap` decoded bytes; return a buffered Response.
 
@@ -98,25 +120,14 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
     if not _response_has_body(request.method, response.status_code):
         response.read()  # empty body; preserve the original response (and its headers)
         return response
-    content_length = _parse_content_length(response.headers.get("content-length"))
-    if content_length is not None and content_length > cap:
-        raise ResponseTooLargeError(
-            status_code=response.status_code, limit=cap, content_length=content_length, reason="declared"
-        )
+    content_length = _reject_if_declared_length_exceeds_cap(response, cap)
     try:
         content = _accumulate_capped(response.iter_bytes(), cap)
     except _CapExceeded:
         raise ResponseTooLargeError(
             status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
         ) from None
-    return httpx2.Response(
-        status_code=response.status_code,
-        headers=_buffered_headers(response.headers),
-        content=content,
-        request=request,
-        extensions=_safe_extensions(response.extensions),
-        history=response.history,
-    )
+    return _build_buffered_response(response, content, request)
 
 
 async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
@@ -124,11 +135,7 @@ async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx
     if not _response_has_body(request.method, response.status_code):
         await response.aread()  # empty body; preserve the original response (and its headers)
         return response
-    content_length = _parse_content_length(response.headers.get("content-length"))
-    if content_length is not None and content_length > cap:
-        raise ResponseTooLargeError(
-            status_code=response.status_code, limit=cap, content_length=content_length, reason="declared"
-        )
+    content_length = _reject_if_declared_length_exceeds_cap(response, cap)
     buf = bytearray()
     async for chunk in response.aiter_bytes():
         buf += chunk
@@ -136,11 +143,4 @@ async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx
             raise ResponseTooLargeError(
                 status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
             )
-    return httpx2.Response(
-        status_code=response.status_code,
-        headers=_buffered_headers(response.headers),
-        content=bytes(buf),
-        request=request,
-        extensions=_safe_extensions(response.extensions),
-        history=response.history,
-    )
+    return _build_buffered_response(response, bytes(buf), request)
