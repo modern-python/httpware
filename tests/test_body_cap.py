@@ -125,6 +125,7 @@ def test_read_capped_gzip_bomb_trips_on_decoded_bytes() -> None:
         with pytest.raises(ResponseTooLargeError) as caught:
             _read_capped(resp, 1000, resp.request)
         assert caught.value.reason == "streamed"  # compressed CL (small) passed; decoded tripped
+        assert caught.value.content_length == len(raw)  # the declared (compressed) length, threaded through
     finally:
         resp.close()
         client.close()
@@ -187,6 +188,23 @@ async def test_read_capped_async_within_cap_gzip_returns_decoded_content() -> No
         assert out.content == b"A" * 500
         assert "content-encoding" not in out.headers
         assert out.headers["content-length"] == "500"
+    finally:
+        await resp.aclose()
+        await client.aclose()
+
+
+async def test_read_capped_async_gzip_bomb_trips_on_decoded_bytes() -> None:
+    raw = gzip.compress(b"A" * 100_000)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, headers={"content-encoding": "gzip"}, content=raw)
+
+    client, resp = await _async_stream(handler)
+    try:
+        with pytest.raises(ResponseTooLargeError) as caught:
+            await _read_capped_async(resp, 1000, resp.request)
+        assert caught.value.reason == "streamed"  # compressed CL (small) passed; decoded tripped
+        assert caught.value.content_length == len(raw)  # the declared (compressed) length, threaded through
     finally:
         await resp.aclose()
         await client.aclose()
