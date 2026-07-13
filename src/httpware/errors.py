@@ -181,7 +181,7 @@ class RetryBudgetExhaustedError(_KeywordReduceMixin, ClientError):
 
 
 class BulkheadFullError(_KeywordReduceMixin, ClientError):
-    """Raised when ``acquire_timeout`` elapses before an AsyncBulkhead slot becomes available.
+    """Raised when ``acquire_timeout`` elapses before a bulkhead slot becomes available.
 
     Carries the configured caps for caller logging/alerting.
     """

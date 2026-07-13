@@ -1035,7 +1035,7 @@ class AsyncClient:
         is closed when the context exits.
 
         Bypasses the middleware chain (no AsyncRetry, no AsyncBulkhead, no user-installed
-        middleware) for v1 — see architecture/client.md for the contract.
+        middleware) — see architecture/client.md for the contract.
 
         Auto-raises StatusError subclasses on 4xx/5xx (NotFoundError,
         ServiceUnavailableError, etc.) — consistent with client.get()/post()/etc.
