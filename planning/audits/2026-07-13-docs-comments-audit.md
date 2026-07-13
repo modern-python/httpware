@@ -24,13 +24,15 @@ findings.
 **Verdict on your compaction/dedup question:** worth doing, but narrowly — the
 `src/` comment surface is already lean (the first-pass sweep found zero
 comments that just restate obvious code; every comment/docstring earns its
-keep). The dedup opportunity is entirely on the docs side, and it's
-concentrated: `ResponseTooLargeError`'s behavior is spelled out near-verbatim
-in **three** places (D1) and the "why not respx" paragraph in two (D2, tangled
-up with the `httpx`/`httpx2` slip in I4) — both good candidates for "full
-account in one place, cross-reference from the rest," the same pattern
-`architecture/` already uses elsewhere. The `CircuitBreaker` overlap (D3) is a
-lower-priority, mostly-intentional tutorial-vs-reference depth split.
+keep). The dedup opportunity was entirely on the docs side, and concentrated:
+`ResponseTooLargeError`'s behavior was spelled out near-verbatim in **three**
+places (D1, resolved `2026-07-13.09`) and the "why not respx" paragraph in two
+(D2, resolved `2026-07-13.09`) — both fixed as "full account in one place,
+cross-reference from the rest," the same pattern `architecture/` already uses
+elsewhere. Working D2 also surfaced and fixed a factual regression in I4's
+original mechanical fix (see I4's correction note). The `CircuitBreaker`
+overlap (D3) remains a lower-priority, mostly-intentional
+tutorial-vs-reference depth split, deferred.
 
 ## Findings
 
@@ -76,16 +78,18 @@ This is a fresh drift, not a re-flag of the 2026-06-13 audit's I1 (that finding 
 `"MockTransport is the public test seam in httpx — supported by the maintainers, stable across versions ... respx patches private internals and has historically broken across httpx major versions."`
 Every other reference in the same file (line 3) and in `architecture/testing.md:4` correctly says `httpx2` — a real, separate PyPI package (`httpx2>=2.0.0,<3.0`, maintained by Pydantic Services Inc.), not an alias for the original `httpx`. This line reads as a leftover phrase from before the `httpx2` rename, and as written it inaccurately implies `respx`'s breakage history is about `httpx2` specifically.
 *Fix:* change both `httpx` occurrences on that line to `httpx2` (verify against `respx`'s actual `httpx2` support status if this section is touched — it may be that `respx` doesn't support `httpx2` at all, which is a stronger reason to use `MockTransport` than "it breaks across versions").
-**Resolved** (`2026-07-13.07`) — both occurrences corrected to `httpx2`; the underlying "does respx support httpx2 at all" question is left as-is, not part of this mechanical fix.
+**Resolved** (`2026-07-13.07`) — both occurrences corrected to `httpx2`; the underlying "does respx support httpx2 at all" question is left as-is, not part of this mechanical fix. **Correction** (`2026-07-13.09`) — that fix itself was a factual regression: it applied the "breaks across major versions" claim to `httpx2`, but the claim (verified against `respx`'s own README and GitHub history) is actually about the original `httpx` package, which `respx` targets and `httpx2` is not. Reverted the breakage clause to `httpx`; see D2.
 
 ### Duplication / compaction candidates
 
 **D1 — `ResponseTooLargeError` behavior is spelled out near-verbatim in three files.**
 `docs/errors.md:193-204`, `architecture/errors.md:23`, and `architecture/client.md:36` all restate the same handful of facts (status-agnostic, counts decoded bytes, fires from the non-streaming terminal and `stream()`'s error pre-read but not user-driven iteration, the `"declared"`/`"streamed"` reason split, "neither StatusError, NetworkError, nor TimeoutError — not retried, doesn't count toward the circuit breaker") in matching or near-matching phrasing. `docs/errors.md` has the fullest account.
 *Suggest:* keep the full account in `docs/errors.md` (or `architecture/errors.md`, whichever is meant to be canonical for this fact), compress the other two to a one-line cross-reference.
+**Resolved** (`2026-07-13.09`) — `docs/errors.md` (fields) and `architecture/client.md` (mechanism) keep their full accounts; `architecture/errors.md` trimmed to the errors-tree-specific facts plus a cross-reference to both.
 
 **D2 — "why not respx" is duplicated between `docs/testing.md:108-110` and `architecture/testing.md:4`.**
 Same argument, ~3 near-identical sentences in each. Bundle this cleanup with the I4 fix (same lines) — reconcile the `httpx`/`httpx2` wording and de-duplicate the reasoning in the same edit, keeping the fuller version in one file.
+**Resolved** (`2026-07-13.09`) — while researching which side to keep, found `2026-07-13.07`'s I4 fix had regressed the underlying claim (see I4's correction note above). Researched `respx` against its own README and GitHub history: it requires `httpx 0.25+`, states no `httpx2` support, and has a documented history of breaking on `httpx` major-version bumps (patches `httpx`/`httpcore` internals directly) — `httpx2`'s own docs mentioning `respx` reads as inherited copy from its stewardship transfer, not a verified compatibility claim. `docs/testing.md` now carries the corrected full rationale (`MockTransport` is first-party `httpx2`; `respx` targets `httpx`, not `httpx2`, with no stated support); `architecture/testing.md` compresses to a cross-reference.
 
 **D3 — `CircuitBreaker` states/failure-classification/rate-mode overlap between `docs/resilience.md:158-212` and `architecture/resilience.md:17,21`.** Lower priority: this is mostly a legitimate tutorial-vs-compressed-reference depth split, not verbatim duplication, but several exact clauses ("4xx including 429 count as successes," the `window_seconds=30.0`/`minimum_calls=20` defaults) are copied rather than merely covering the same ground. Worth a light pass if `resilience.md` is next revised for another reason — not worth a dedicated change on its own.
 
@@ -103,10 +107,15 @@ Same argument, ~3 near-identical sentences in each. Bundle this cleanup with the
 - **`2026-07-13.08-contributing-docstring-ci-wording`** (lightweight) — fixes
   I2, I3 per maintainer ruling (unconditional docstrings; link instead of
   restate). Verified: `mkdocs build --strict`, `just lint-ci` clean.
+- **`2026-07-13.09-response-too-large-respx-compaction`** (lightweight) —
+  fixes D1, D2, plus a correction to I4's `2026-07-13.07` fix (the
+  `httpx`/`httpx2` breakage claim). Verified against `respx`'s own README and
+  GitHub history before writing the replacement text; `mkdocs build
+  --strict`, `just lint-ci`, `just test` (780 passed, 100% coverage) all
+  clean.
 
 ## Deferred / next steps
 
-- **Compaction:** D1 (`ResponseTooLargeError` triplication) and D2 (bundled
-  with I4's `httpx`/`httpx2` fix — the "why not respx" duplication itself
-  wasn't touched by `2026-07-13.07`, only the terminology slip within it) are
-  still open. D3 is a defer-until-touched item, not worth its own change.
+- D3 (`CircuitBreaker` docs/resilience.md ↔ architecture/resilience.md
+  overlap) is a defer-until-touched item, not worth its own change — see the
+  Duplication section above.
