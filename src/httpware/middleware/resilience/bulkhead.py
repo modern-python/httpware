@@ -40,6 +40,34 @@ _ASYNCBULKHEAD_CROSS_LOOP_MSG = (
 _LOGGER = logging.getLogger("httpware.bulkhead")
 
 
+def _validate_bulkhead_config(*, max_concurrent: int, acquire_timeout: float | None) -> None:
+    if max_concurrent < 1:
+        raise ValueError(_MAX_CONCURRENT_INVALID)
+    if acquire_timeout is not None and acquire_timeout < 0:
+        raise ValueError(_ACQUIRE_TIMEOUT_INVALID)
+
+
+def _emit_bulkhead_rejected(
+    request: httpx2.Request,
+    *,
+    max_concurrent: int,
+    acquire_timeout: float | None,
+) -> BulkheadFullError:
+    _emit_event(
+        _LOGGER,
+        "bulkhead.rejected",
+        level=logging.WARNING,
+        message="bulkhead rejected request — acquire_timeout exceeded",
+        attributes={
+            "max_concurrent": max_concurrent,
+            "acquire_timeout": acquire_timeout,
+            "method": request.method,
+            "url": str(request.url),
+        },
+    )
+    return BulkheadFullError(max_concurrent=max_concurrent, acquire_timeout=acquire_timeout)
+
+
 class AsyncBulkhead:
     """Async concurrency limiter middleware backed by ``asyncio.Semaphore``.
 
@@ -65,10 +93,7 @@ class AsyncBulkhead:
         max_concurrent: int,
         acquire_timeout: float | None = 1.0,
     ) -> None:
-        if max_concurrent < 1:
-            raise ValueError(_MAX_CONCURRENT_INVALID)
-        if acquire_timeout is not None and acquire_timeout < 0:
-            raise ValueError(_ACQUIRE_TIMEOUT_INVALID)
+        _validate_bulkhead_config(max_concurrent=max_concurrent, acquire_timeout=acquire_timeout)
         self._max_concurrent = max_concurrent
         self._acquire_timeout = acquire_timeout
         self._sem = asyncio.Semaphore(max_concurrent)
@@ -105,19 +130,8 @@ class AsyncBulkhead:
                 async with asyncio.timeout(self._acquire_timeout):
                     await self._sem.acquire()
         except TimeoutError as exc:
-            _emit_event(
-                _LOGGER,
-                "bulkhead.rejected",
-                level=logging.WARNING,
-                message="bulkhead rejected request — acquire_timeout exceeded",
-                attributes={
-                    "max_concurrent": self._max_concurrent,
-                    "acquire_timeout": self._acquire_timeout,
-                    "method": request.method,
-                    "url": str(request.url),
-                },
-            )
-            raise BulkheadFullError(
+            raise _emit_bulkhead_rejected(
+                request,
                 max_concurrent=self._max_concurrent,
                 acquire_timeout=self._acquire_timeout,
             ) from exc
@@ -146,10 +160,7 @@ class Bulkhead:
         max_concurrent: int,
         acquire_timeout: float | None = 1.0,
     ) -> None:
-        if max_concurrent < 1:
-            raise ValueError(_MAX_CONCURRENT_INVALID)
-        if acquire_timeout is not None and acquire_timeout < 0:
-            raise ValueError(_ACQUIRE_TIMEOUT_INVALID)
+        _validate_bulkhead_config(max_concurrent=max_concurrent, acquire_timeout=acquire_timeout)
         self._max_concurrent = max_concurrent
         self._acquire_timeout = acquire_timeout
         self._sem = threading.Semaphore(max_concurrent)
@@ -161,19 +172,8 @@ class Bulkhead:
         # False otherwise). Both match AsyncBulkhead's contract.
         acquired = self._sem.acquire(timeout=self._acquire_timeout)
         if not acquired:
-            _emit_event(
-                _LOGGER,
-                "bulkhead.rejected",
-                level=logging.WARNING,
-                message="bulkhead rejected request — acquire_timeout exceeded",
-                attributes={
-                    "max_concurrent": self._max_concurrent,
-                    "acquire_timeout": self._acquire_timeout,
-                    "method": request.method,
-                    "url": str(request.url),
-                },
-            )
-            raise BulkheadFullError(
+            raise _emit_bulkhead_rejected(
+                request,
                 max_concurrent=self._max_concurrent,
                 acquire_timeout=self._acquire_timeout,
             )

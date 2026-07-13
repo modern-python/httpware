@@ -148,6 +148,30 @@ async def test_raises_bulkhead_full_error_when_acquire_timeout_exceeded() -> Non
         await task
 
 
+async def test_bulkhead_full_error_chains_from_timeout() -> None:
+    """BulkheadFullError raised on the async timeout path chains from the TimeoutError."""
+    handler = _SlowHandler(delay=1.0)
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_FAST)
+    client = _client(handler, bulkhead=bulkhead)
+
+    async def _hold_slot() -> None:
+        await client.get("https://example.test/slow")
+
+    task = asyncio.create_task(_hold_slot())
+    # Yield to let the slow request acquire the semaphore.
+    await asyncio.sleep(0)
+
+    with pytest.raises(BulkheadFullError) as exc_info:
+        await client.get("https://example.test/fast")
+
+    assert isinstance(exc_info.value.__cause__, TimeoutError)
+
+    # Cancel the lingering slow task to avoid polluting the event loop.
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
 async def test_bounded_wait_raises_bulkhead_full_error() -> None:
     """With max_concurrent=1 and acquire_timeout=0.02, the second call raises after ~20ms.
 

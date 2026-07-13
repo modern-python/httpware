@@ -129,6 +129,26 @@ def test_acquire_timeout_rejects_when_no_slot_available() -> None:
         holder.join()
 
 
+def test_bulkhead_full_error_no_chaining() -> None:
+    """BulkheadFullError raised on the sync timeout path has no __cause__ (no active exception)."""
+    handler = _SlowHandler(delay=0.1)
+    client = _client(
+        handler,
+        bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_FAST),
+    )
+
+    holder = threading.Thread(target=client.get, args=("https://example.test/hold",))
+    holder.start()
+    # Give the holder time to acquire the only slot
+    time.sleep(0.01)
+    try:
+        with pytest.raises(BulkheadFullError) as exc_info:
+            client.get("https://example.test/blocked")
+        assert exc_info.value.__cause__ is None
+    finally:
+        holder.join()
+
+
 def test_releases_slot_on_exception() -> None:
     """A handler that raises must still cause the slot to be released."""
     calls = []
