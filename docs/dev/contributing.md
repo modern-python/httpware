@@ -25,13 +25,15 @@ just test           # pytest with coverage
 - `ruff format` enforces formatting; do not hand-format.
 - Type-check with `ty` (Astral). Use `# ty: ignore[<rule>]` for suppressions, not `# type: ignore`.
 - Do NOT use `from __future__ import annotations`. Python 3.11+ is the floor.
-- Module docstrings are required; per-method docstrings only when types alone are insufficient.
+- Module, class, and public-method docstrings are required (PEP 257); see
+  [`architecture/conventions.md`](https://github.com/modern-python/httpware/blob/main/architecture/conventions.md).
 
 ## Architecture invariants
 
-These are project invariants. The CI lint pass (`just lint-ci` — `ruff` + `ty`)
-catches what the linters can see (e.g. `print()` via ruff `T201`); the rest are
-enforced in code review. Do not break them in pull requests:
+These are project invariants — see
+[`architecture/overview.md`](https://github.com/modern-python/httpware/blob/main/architecture/overview.md) for exactly which
+ones CI machine-checks, partially checks, or leaves to review. Do not break
+them in pull requests:
 
 - No `httpx2._*` (private API) usage anywhere in the library.
 - No `from __future__ import annotations`.

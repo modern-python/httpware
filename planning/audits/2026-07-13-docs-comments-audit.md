@@ -63,12 +63,14 @@ Verified against source: the `try/except Exception: raise DecodeError(...)` live
 `contributing.md`: `"Module docstrings are required; per-method docstrings only when types alone are insufficient."` (conditional)
 `conventions.md`: `"Module / class / public-method docstrings are required ..."` (unconditional)
 *Fix:* pick one policy and make both files say it — recommend keeping `conventions.md`'s unconditional wording since it's the capability truth home, and updating `contributing.md` to match.
+**Resolved** (`2026-07-13.08`) — maintainer ruled unconditional; `contributing.md` now links to `conventions.md` instead of restating.
 
 **I3 — `docs/dev/contributing.md:32-34` understates what CI machine-checks, vs `architecture/overview.md:9`.**
 `contributing.md`: `"The CI lint pass (...) catches what the linters can see (e.g. print() via ruff T201); the rest are enforced in code review."` — reads as "only `print()` is machine-checked."
 `overview.md`: documents two more checks contributing.md omits — `PGH003` (blanket `# type: ignore`) is machine-checked, and `SLF001` partially checks the `httpx2._` ban (attribute access, not import).
 This is a fresh drift, not a re-flag of the 2026-06-13 audit's I1 (that finding was about a since-removed "CI grep gates" phrase, already fixed) — `overview.md`'s finer breakdown was apparently added after `contributing.md`'s wording was last touched.
 *Fix:* replace `contributing.md`'s "the rest are enforced in code review" with the same three-tier breakdown `overview.md` uses (machine-checked / partially-checked / review-only), or have it link to `overview.md` instead of restating.
+**Resolved** (`2026-07-13.08`) — maintainer ruled link-instead-of-restate, per the repo's truth-home principle.
 
 **I4 — `docs/testing.md:110` says `httpx` where it means `httpx2`.**
 `"MockTransport is the public test seam in httpx — supported by the maintainers, stable across versions ... respx patches private internals and has historically broken across httpx major versions."`
@@ -98,14 +100,12 @@ Same argument, ~3 near-identical sentences in each. Bundle this cleanup with the
 - **`2026-07-13.07-docs-comments-audit-fixes`** (lightweight) — fixes C1, C2,
   I1, I4. Verified against source; `just lint-ci`, `mkdocs build --strict`,
   and `just test` (780 passed, 100% coverage) all clean.
+- **`2026-07-13.08-contributing-docstring-ci-wording`** (lightweight) — fixes
+  I2, I3 per maintainer ruling (unconditional docstrings; link instead of
+  restate). Verified: `mkdocs build --strict`, `just lint-ci` clean.
 
 ## Deferred / next steps
 
-- **Needs your call:** I3's fix direction (restate the three-tier breakdown in
-  `contributing.md`, or replace it with a link to `overview.md`) and I2's
-  policy choice (unconditional vs conditional method-docstring requirement) —
-  both are wording contradictions where either side could be "the fix,"
-  not a clear code-vs-doc mismatch. Not yet scheduled.
 - **Compaction:** D1 (`ResponseTooLargeError` triplication) and D2 (bundled
   with I4's `httpx`/`httpx2` fix — the "why not respx" duplication itself
   wasn't touched by `2026-07-13.07`, only the terminology slip within it) are
