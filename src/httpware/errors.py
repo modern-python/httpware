@@ -136,16 +136,26 @@ STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {
 }
 
 
-def _reconstruct_budget_exhausted(
-    cls: "type[RetryBudgetExhaustedError]",
-    last_response: httpx2.Response | None,
-    last_exception: BaseException | None,
-    attempts: int,
-) -> "RetryBudgetExhaustedError":
-    return cls(last_response=last_response, last_exception=last_exception, attempts=attempts)
+def _reconstruct_kwonly(cls: type, kwargs: dict[str, Any]) -> Any:  # noqa: ANN401
+    return cls(**kwargs)
 
 
-class RetryBudgetExhaustedError(ClientError):
+class _KeywordReduceMixin:
+    """Shared __reduce__ for keyword-only ClientError subclasses.
+
+    For subclasses whose __init__ is keyword-only and whose instance
+    __dict__ exactly mirrors it. Do not add this mixin to a class that
+    stores any attribute beyond its __init__'s keyword parameters —
+    reconstruction replays self.__dict__ as keyword arguments, so an
+    extra/derived attribute would either be silently dropped or raise a
+    TypeError on unpickle.
+    """
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_reconstruct_kwonly, (type(self), self.__dict__))
+
+
+class RetryBudgetExhaustedError(_KeywordReduceMixin, ClientError):
     """Raised when a retry was needed but the RetryBudget refused to permit it.
 
     Carries the last response and/or exception observed before the budget refused,
@@ -168,22 +178,8 @@ class RetryBudgetExhaustedError(ClientError):
         self.attempts = attempts
         super().__init__(f"retry budget exhausted after {attempts} attempt(s)")
 
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (
-            _reconstruct_budget_exhausted,
-            (type(self), self.last_response, self.last_exception, self.attempts),
-        )
 
-
-def _reconstruct_bulkhead_full(
-    cls: "type[BulkheadFullError]",
-    max_concurrent: int,
-    acquire_timeout: float | None,
-) -> "BulkheadFullError":
-    return cls(max_concurrent=max_concurrent, acquire_timeout=acquire_timeout)
-
-
-class BulkheadFullError(ClientError):
+class BulkheadFullError(_KeywordReduceMixin, ClientError):
     """Raised when ``acquire_timeout`` elapses before an AsyncBulkhead slot becomes available.
 
     Carries the configured caps for caller logging/alerting.
@@ -197,21 +193,8 @@ class BulkheadFullError(ClientError):
         self.acquire_timeout = acquire_timeout
         super().__init__(f"bulkhead full (max_concurrent={max_concurrent}, acquire_timeout={acquire_timeout})")
 
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (
-            _reconstruct_bulkhead_full,
-            (type(self), self.max_concurrent, self.acquire_timeout),
-        )
 
-
-def _reconstruct_circuit_open(
-    cls: "type[CircuitOpenError]",
-    retry_after: float | None,
-) -> "CircuitOpenError":
-    return cls(retry_after=retry_after)
-
-
-class CircuitOpenError(ClientError):
+class CircuitOpenError(_KeywordReduceMixin, ClientError):
     """Raised when a CircuitBreaker refuses a request because the circuit is not closed.
 
     Fires when the circuit is OPEN, or when it is HALF_OPEN and the single probe
@@ -229,20 +212,8 @@ class CircuitOpenError(ClientError):
         else:
             super().__init__(f"circuit open (retry_after={retry_after:.3f}s)")
 
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (_reconstruct_circuit_open, (type(self), self.retry_after))
 
-
-def _reconstruct_decode_error(
-    cls: "type[DecodeError]",
-    response: httpx2.Response,
-    model: type,
-    original: BaseException,
-) -> "DecodeError":
-    return cls(response=response, model=model, original=original)
-
-
-class DecodeError(ClientError):
+class DecodeError(_KeywordReduceMixin, ClientError):
     """Raised when the active ResponseDecoder failed to decode response.content.
 
     The HTTP call itself succeeded — status was 2xx/3xx and the transport
@@ -268,12 +239,6 @@ class DecodeError(ClientError):
         self.original = original
         super().__init__(f"failed to decode response into {model.__name__}: {original}")
 
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (
-            _reconstruct_decode_error,
-            (type(self), self.response, self.model, self.original),
-        )
-
 
 def _missing_decoder_summary(model: type, registered_names: tuple[str, ...]) -> str:
     if not registered_names:
@@ -287,15 +252,7 @@ def _missing_decoder_summary(model: type, registered_names: tuple[str, ...]) -> 
     return f"no decoder for response_model={model!r}: {hint}"
 
 
-def _reconstruct_missing_decoder(
-    cls: "type[MissingDecoderError]",
-    model: type,
-    registered_names: tuple[str, ...],
-) -> "MissingDecoderError":
-    return cls(model=model, registered_names=registered_names)
-
-
-class MissingDecoderError(ClientError):
+class MissingDecoderError(_KeywordReduceMixin, ClientError):
     """Raised when response_model= is set but no registered decoder claims the model.
 
     Fires at .send() entry, BEFORE the HTTP call — no point sending a request
@@ -311,21 +268,8 @@ class MissingDecoderError(ClientError):
         self.registered_names = registered_names
         super().__init__(_missing_decoder_summary(model, registered_names))
 
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (_reconstruct_missing_decoder, (type(self), self.model, self.registered_names))
 
-
-def _reconstruct_response_too_large(
-    cls: "type[ResponseTooLargeError]",
-    status_code: int,
-    limit: int,
-    content_length: int | None,
-    reason: 'Literal["declared", "streamed"]',
-) -> "ResponseTooLargeError":
-    return cls(status_code=status_code, limit=limit, content_length=content_length, reason=reason)
-
-
-class ResponseTooLargeError(ClientError):
+class ResponseTooLargeError(_KeywordReduceMixin, ClientError):
     """Raised when a response body exceeds the client's max_response_body_bytes cap.
 
     Status-agnostic: fires on any non-streaming send() and on stream()'s internal
@@ -362,9 +306,3 @@ class ResponseTooLargeError(ClientError):
         else:
             detail = f"decoded body exceeded max_response_body_bytes={limit}"
         super().__init__(f"response body too large: status={status_code} {detail}")
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (
-            _reconstruct_response_too_large,
-            (type(self), self.status_code, self.limit, self.content_length, self.reason),
-        )
