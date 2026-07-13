@@ -144,11 +144,12 @@ class _KeywordReduceMixin:
     """Shared __reduce__ for keyword-only ClientError subclasses.
 
     For subclasses whose __init__ is keyword-only and whose instance
-    __dict__ exactly mirrors it. Do not add this mixin to a class that
-    stores any attribute beyond its __init__'s keyword parameters —
-    reconstruction replays self.__dict__ as keyword arguments, so an
-    extra/derived attribute would either be silently dropped or raise a
-    TypeError on unpickle.
+    __dict__ exactly mirrors it. Reconstruction replays self.__dict__ as
+    keyword arguments (cls(**kwargs)): an attribute stored beyond
+    __init__'s keyword parameters raises TypeError on unpickle (unexpected
+    keyword argument); a keyword parameter __init__ doesn't assign to self
+    is silently dropped if it has a default (unpickle reverts to it) or
+    raises TypeError if it doesn't (missing required argument).
     """
 
     def __reduce__(self) -> tuple[Any, ...]:
