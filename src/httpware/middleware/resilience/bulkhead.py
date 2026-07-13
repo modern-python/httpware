@@ -27,6 +27,7 @@ import httpx2
 from httpware._internal.observability import _emit_event
 from httpware.errors import BulkheadFullError
 from httpware.middleware import AsyncNext, Next
+from httpware.middleware.resilience._event_loop_guard import check_event_loop
 
 
 _MAX_CONCURRENT_INVALID = "max_concurrent must be >= 1"
@@ -101,24 +102,12 @@ class AsyncBulkhead:
         self._loop_lock = threading.Lock()
 
     def _check_loop(self) -> None:
-        current = asyncio.get_running_loop()
-        cached = self._loop
-        if cached is current:
-            return
-        if cached is not None:
-            raise RuntimeError(
-                _ASYNCBULKHEAD_CROSS_LOOP_MSG.format(first=cached, current=current),
-            )
-        with self._loop_lock:
-            if self._loop is None:
-                self._loop = current
-            # pragma below: inner double-check-with-lock race arm; only
-            # reachable when two threads simultaneously pass the outer
-            # cached-loop check, which single-threaded tests can't trigger.
-            elif self._loop is not current:  # pragma: no cover
-                raise RuntimeError(
-                    _ASYNCBULKHEAD_CROSS_LOOP_MSG.format(first=self._loop, current=current),
-                )
+        check_event_loop(
+            lambda: self._loop,
+            lambda loop: setattr(self, "_loop", loop),
+            self._loop_lock,
+            _ASYNCBULKHEAD_CROSS_LOOP_MSG,
+        )
 
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Acquire a slot (bounded by acquire_timeout), invoke next, release."""

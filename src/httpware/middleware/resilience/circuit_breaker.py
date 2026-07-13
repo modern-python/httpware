@@ -46,6 +46,7 @@ import httpx2
 from httpware._internal.observability import _emit_event
 from httpware.errors import CircuitOpenError, NetworkError, StatusError, TimeoutError  # noqa: A004
 from httpware.middleware import AsyncNext, Next
+from httpware.middleware.resilience._event_loop_guard import check_event_loop
 
 
 _FAILURE_THRESHOLD_INVALID = "failure_threshold must be >= 1"
@@ -338,20 +339,12 @@ class AsyncCircuitBreaker:
         self._loop_lock = threading.Lock()
 
     def _check_loop(self) -> None:
-        current = asyncio.get_running_loop()
-        cached = self._loop
-        if cached is current:
-            return
-        if cached is not None:
-            raise RuntimeError(_CROSS_LOOP_MSG.format(first=cached, current=current))
-        with self._loop_lock:
-            if self._loop is None:
-                self._loop = current
-            # pragma below: inner double-check-with-lock race arm; only reachable when
-            # two threads simultaneously pass the outer check, which single-threaded
-            # tests can't trigger.
-            elif self._loop is not current:  # pragma: no cover
-                raise RuntimeError(_CROSS_LOOP_MSG.format(first=self._loop, current=current))
+        check_event_loop(
+            lambda: self._loop,
+            lambda loop: setattr(self, "_loop", loop),
+            self._loop_lock,
+            _CROSS_LOOP_MSG,
+        )
 
     @property
     def state(self) -> CircuitState:

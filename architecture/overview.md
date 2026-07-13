@@ -32,7 +32,8 @@ src/httpware/
 │       ├── retry.py       # Retry + AsyncRetry
 │       ├── timeout.py     # AsyncTimeout
 │       ├── circuit_breaker.py  # CircuitBreaker + AsyncCircuitBreaker
-│       └── _backoff.py    # full-jitter helper (shared)
+│       ├── _backoff.py    # full-jitter helper (shared)
+│       └── _event_loop_guard.py  # single-event-loop guard (shared: AsyncBulkhead + AsyncCircuitBreaker)
 ├── decoders/              # shared (ResponseDecoder + adapters)
 └── _internal/
     ├── body_cap.py            # max_response_body_bytes: validate, read-capped (sync+async)
