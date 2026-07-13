@@ -4,7 +4,7 @@
 
 ## The internal terminal
 
-The bottom of the middleware chain (the "terminal") is internal. It calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx. The error-mapping table (what `httpx2` exception maps to which `httpware` exception) lives at the terminal in `src/httpware/client.py`; status-keyed exceptions are looked up via the `STATUS_TO_EXCEPTION` table in `src/httpware/errors.py`. The same terminal lifecycle holds in both worlds: `Client.send` / `AsyncClient.send` enter the middleware chain first, and it is the internal terminal — `Client._terminal` / `AsyncClient._terminal` — that calls `httpx2.Client.send` / `httpx2.AsyncClient.send`.
+The bottom of the middleware chain (the "terminal") is internal. It calls `self._httpx2_client.send(request)`, maps `httpx2` errors to `httpware` errors, and raises a `StatusError` subclass on 4xx/5xx. The error-mapping table (what `httpx2` exception maps to which `httpware` exception) lives in `src/httpware/_internal/exception_mapping.py` and fires at the terminal in `src/httpware/client.py`; status-keyed exceptions are looked up via the `STATUS_TO_EXCEPTION` table in `src/httpware/errors.py`. The same terminal lifecycle holds in both worlds: `Client.send` / `AsyncClient.send` enter the middleware chain first, and it is the internal terminal — `Client._terminal` / `AsyncClient._terminal` — that calls `httpx2.Client.send` / `httpx2.AsyncClient.send`.
 
 ## Sync/async parity
 

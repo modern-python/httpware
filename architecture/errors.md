@@ -10,7 +10,7 @@ exc.response.request.url               # URL of the failed request
 
 `__repr__` and the `str()` summary redact URL userinfo (`user:pass@`) and mask the values of known-sensitive query and fragment parameters (e.g. `token`, `api_key`, `secret`) to avoid leaking credentials in tracebacks.
 
-The error-mapping table (what `httpx2` exception maps to which `httpware` exception) lives at the terminal in `src/httpware/client.py`. Status-keyed exceptions are looked up via the `STATUS_TO_EXCEPTION` table in `src/httpware/errors.py`. Unknown 4xx falls back to `ClientStatusError`; unknown 5xx falls back to `ServerStatusError`.
+The error-mapping table (what `httpx2` exception maps to which `httpware` exception) lives in `src/httpware/_internal/exception_mapping.py` and fires at the terminal in `src/httpware/client.py`. Status-keyed exceptions are looked up via the `STATUS_TO_EXCEPTION` table in `src/httpware/errors.py`. Unknown 4xx falls back to `ClientStatusError`; unknown 5xx falls back to `ServerStatusError`.
 
 `TimeoutError` inherits from both `httpware.ClientError` and `builtins.TimeoutError` so `except builtins.TimeoutError` (the form `asyncio.wait_for` uses) also catches httpware-raised timeouts.
 
