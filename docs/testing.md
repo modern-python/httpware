@@ -107,7 +107,7 @@ For middleware with state-keeping (counters, circuit-breaker state), assert on i
 
 ## Why not `respx`?
 
-`httpware` deliberately uses `httpx2.MockTransport` instead of `respx` for its own tests. `MockTransport` is the public test seam in `httpx` — supported by the maintainers, stable across versions, lives in the public API surface. `respx` patches private internals and has historically broken across `httpx` major versions. Stick with `MockTransport` unless you have a specific reason not to.
+`httpware` deliberately uses `httpx2.MockTransport` instead of `respx` for its own tests. `MockTransport` is the public test seam in `httpx2` — supported by the maintainers, stable across versions, lives in the public API surface. `respx` patches private internals and has historically broken across `httpx2` major versions. Stick with `MockTransport` unless you have a specific reason not to.
 
 ## See also
 
