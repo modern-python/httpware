@@ -3,6 +3,7 @@
 import asyncio
 import concurrent.futures
 import dataclasses
+import typing
 from unittest.mock import MagicMock, patch
 
 import msgspec
@@ -238,3 +239,19 @@ def test_pydantic_can_decode_unhashable_model_does_not_raise() -> None:
     decoder._can_decode_results = MagicMock()  # noqa: SLF001
     decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
     assert decoder.can_decode(User) is True
+
+
+def test_can_decode_agrees_with_decode_for_unhashable_buildable_model() -> None:
+    """can_decode and decode must agree for a genuinely unhashable, schema-buildable model.
+
+    `typing.Annotated[int, []]` is unhashable (its metadata is a list) but
+    pydantic can still build a schema for it. Before this refactor,
+    can_decode incorrectly returned False for any unhashable model
+    regardless of buildability; decode() already worked correctly for
+    the same model via its own fallback. This test pins the fixed,
+    consistent behavior.
+    """
+    model = typing.Annotated[int, []]
+    decoder = PydanticDecoder()
+    assert decoder.can_decode(model) is True  # ty: ignore[invalid-argument-type]
+    assert decoder.decode(b"42", model) == 42  # noqa: PLR2004  # ty: ignore[invalid-argument-type]
