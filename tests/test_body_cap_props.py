@@ -10,7 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from httpware.client import _accumulate_capped, _CapExceeded
+from httpware._internal.body_cap import _accumulate_capped, _CapExceeded
 
 
 def _partition(body: bytes, sizes: list[int]) -> list[bytes]:

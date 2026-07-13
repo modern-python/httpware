@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 import httpx2
 import pytest
 
-from httpware.client import _read_capped, _read_capped_async
+from httpware._internal.body_cap import _parse_content_length, _read_capped, _read_capped_async
 from httpware.errors import ResponseTooLargeError
 
 
@@ -239,3 +239,14 @@ async def test_read_capped_async_streamed_over_cap() -> None:
     finally:
         await resp.aclose()
         await client.aclose()
+
+
+# ---- content-length parsing ----
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [(None, None), ("123", 123), ("abc", None), ("-5", None), ("0", 0)],
+)
+def test_parse_content_length(raw: str | None, expected: int | None) -> None:
+    assert _parse_content_length(raw) == expected
