@@ -11,6 +11,7 @@ import typing
 from typing import TypeVar
 
 from httpware._internal import import_checker
+from httpware.decoders._caching import _get_or_build
 
 
 if import_checker.is_pydantic_installed:
@@ -43,11 +44,7 @@ class PydanticDecoder:
         self._can_decode_results = {}
 
     def _get_adapter(self, model: type[T]) -> "TypeAdapter[T]":
-        adapter = self._adapters.get(model)
-        if adapter is None:
-            adapter = TypeAdapter(model)
-            self._adapters[model] = adapter
-        return adapter
+        return _get_or_build(self._adapters, model, lambda: TypeAdapter(model))
 
     def can_decode(self, model: type) -> bool:
         """Return True iff pydantic can build a schema for `model`.
@@ -56,15 +53,7 @@ class PydanticDecoder:
         `PydanticSchemaGenerationError` round-trip) is not re-probed on every
         dispatch. Unhashable models skip the cache and probe fresh.
         """
-        try:
-            cached = self._can_decode_results.get(model)
-        except TypeError:  # unhashable model — can't memoize, probe fresh
-            return self._probe_can_decode(model)
-        if cached is not None:
-            return cached
-        result = self._probe_can_decode(model)
-        self._can_decode_results[model] = result
-        return result
+        return _get_or_build(self._can_decode_results, model, lambda: self._probe_can_decode(model))
 
     def _probe_can_decode(self, model: type) -> bool:
         """Decide whether pydantic can build a schema for `model` (uncached).
@@ -82,8 +71,5 @@ class PydanticDecoder:
 
     def decode(self, content: bytes, model: type[T]) -> T:
         """Validate `content` as JSON against `model` in a single parse pass."""
-        try:
-            adapter = self._get_adapter(model)
-        except TypeError:
-            adapter = TypeAdapter(model)
+        adapter = self._get_adapter(model)
         return adapter.validate_json(content)

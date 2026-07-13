@@ -1,6 +1,7 @@
 """Unit tests for httpware.decoders.msgspec.MsgspecDecoder."""
 
 import dataclasses
+import typing
 from http import HTTPStatus
 from unittest.mock import MagicMock, patch
 
@@ -140,18 +141,17 @@ def test_can_decode_returns_false_when_decoder_build_raises() -> None:
 def test_unhashable_model_falls_back_to_uncached_decoder() -> None:
     """Unhashable `model` falls back to a direct uncached `msgspec.json.Decoder`.
 
-    Mirrors `PydanticDecoder`'s unhashable-fallback test: when `_get_msgspec_decoder`
-    raises `TypeError` (e.g., an unhashable parameterized type), `decode` bypasses
-    the cache so the user-visible error is `msgspec`'s own decode error, not a
-    `TypeError` from the cache lookup.
+    Mirrors `PydanticDecoder`'s unhashable-fallback test: when the decoder
+    cache lookup raises `TypeError` (e.g., an unhashable parameterized
+    type), `decode` bypasses the cache so the user-visible error is
+    `msgspec`'s own decode error, not a `TypeError` from the cache lookup.
     """
-    with patch.object(
-        MsgspecDecoder,
-        "_get_msgspec_decoder",
-        side_effect=TypeError("unhashable type"),
-    ):
-        result = MsgspecDecoder().decode(b"42", int)
-        assert result == 42  # noqa: PLR2004
+    decoder = MsgspecDecoder()
+    decoder._msgspec_decoders = MagicMock()  # noqa: SLF001
+    decoder._msgspec_decoders.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
+
+    result = decoder.decode(b"42", int)
+    assert result == 42  # noqa: PLR2004
 
 
 @pytest.mark.parametrize(
@@ -230,6 +230,22 @@ def test_msgspec_can_decode_unhashable_model_does_not_raise() -> None:
     decoder._can_decode_results = MagicMock()  # noqa: SLF001
     decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
     assert decoder.can_decode(_Item) is True
+
+
+def test_can_decode_agrees_with_decode_for_unhashable_buildable_model() -> None:
+    """can_decode and decode must agree for a genuinely unhashable, schema-buildable model.
+
+    `typing.Annotated[int, []]` is unhashable (its metadata is a list) but
+    msgspec can still build a decoder for it. Before this refactor,
+    can_decode incorrectly returned False for any unhashable model
+    regardless of buildability; decode() already worked correctly for
+    the same model via its own fallback. This test pins the fixed,
+    consistent behavior.
+    """
+    model = typing.Annotated[int, []]
+    decoder = MsgspecDecoder()
+    assert decoder.can_decode(model) is True  # ty: ignore[invalid-argument-type]
+    assert decoder.decode(b"42", model) == 42  # noqa: PLR2004  # ty: ignore[invalid-argument-type]
 
 
 def test_contains_custom_type_raises_import_error_when_msgspec_absent(

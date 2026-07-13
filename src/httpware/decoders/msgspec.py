@@ -4,6 +4,7 @@ import typing
 from typing import TypeVar
 
 from httpware._internal import import_checker
+from httpware.decoders._caching import _get_or_build
 
 
 if import_checker.is_msgspec_installed:
@@ -65,11 +66,7 @@ class MsgspecDecoder:
         self._can_decode_results = {}
 
     def _get_msgspec_decoder(self, model: type[T]) -> "msgspec.json.Decoder[T]":
-        decoder = self._msgspec_decoders.get(model)
-        if decoder is None:
-            decoder = msgspec.json.Decoder(model)
-            self._msgspec_decoders[model] = decoder
-        return decoder
+        return _get_or_build(self._msgspec_decoders, model, lambda: msgspec.json.Decoder(model))
 
     def can_decode(self, model: type) -> bool:
         """Return True iff msgspec natively understands `model` end-to-end.
@@ -78,15 +75,7 @@ class MsgspecDecoder:
         `type_info` call plus a recursive tree walk) runs once per type, not on
         every dispatch. Unhashable models skip the cache and probe fresh.
         """
-        try:
-            cached = self._can_decode_results.get(model)
-        except TypeError:  # unhashable model — can't memoize, probe fresh
-            return self._probe_can_decode(model)
-        if cached is not None:
-            return cached
-        result = self._probe_can_decode(model)
-        self._can_decode_results[model] = result
-        return result
+        return _get_or_build(self._can_decode_results, model, lambda: self._probe_can_decode(model))
 
     def _probe_can_decode(self, model: type) -> bool:
         """Decide whether msgspec natively decodes `model` (the uncached path).
@@ -111,8 +100,5 @@ class MsgspecDecoder:
 
     def decode(self, content: bytes, model: type[T]) -> T:
         """Validate `content` as JSON against `model` in a single parse pass."""
-        try:
-            decoder = self._get_msgspec_decoder(model)
-        except TypeError:
-            decoder = msgspec.json.Decoder(model)
+        decoder = self._get_msgspec_decoder(model)
         return decoder.decode(content)

@@ -3,6 +3,7 @@
 import asyncio
 import concurrent.futures
 import dataclasses
+import typing
 from unittest.mock import MagicMock, patch
 
 import msgspec
@@ -125,7 +126,7 @@ def test_cache_invariance_concurrent_first_calls_threadpool() -> None:
 
         assert all(type(r) is User and r.id == 1 for r in results)
         # `dict` reads/writes are atomic in CPython but the get→set sequence in
-        # `_get_adapter` is not — concurrent first-callers may both build a
+        # `_get_or_build` is not — concurrent first-callers may both build a
         # TypeAdapter before one wins (idempotent; loser is GC'd). Bounded by
         # worker count.
         assert 1 <= spy.call_count <= n_workers
@@ -134,20 +135,19 @@ def test_cache_invariance_concurrent_first_calls_threadpool() -> None:
 def test_unhashable_model_falls_back_to_uncached_adapter() -> None:
     """Unhashable `model` falls back to a direct uncached `TypeAdapter`.
 
-    When `_get_adapter` raises `TypeError` (e.g., `Annotated[int, unhashable_metadata]`),
-    `decode` bypasses the cache so `pydantic.ValidationError` surfaces cleanly instead
-    of leaking a `TypeError` to the caller.
+    When the adapter cache lookup raises `TypeError` (e.g., an unhashable
+    model), `decode` bypasses the cache so `pydantic.ValidationError`
+    surfaces cleanly instead of leaking a `TypeError` to the caller.
     """
-    with patch.object(
-        PydanticDecoder,
-        "_get_adapter",
-        side_effect=TypeError("unhashable type"),
-    ):
-        result = PydanticDecoder().decode(b"42", int)
-        assert result == 42  # noqa: PLR2004
+    decoder = PydanticDecoder()
+    decoder._adapters = MagicMock()  # noqa: SLF001
+    decoder._adapters.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
 
-        with pytest.raises(pydantic.ValidationError):
-            PydanticDecoder().decode(b'"not-an-int"', int)
+    result = decoder.decode(b"42", int)
+    assert result == 42  # noqa: PLR2004
+
+    with pytest.raises(pydantic.ValidationError):
+        decoder.decode(b'"not-an-int"', int)
 
 
 @pytest.mark.parametrize(
@@ -239,3 +239,19 @@ def test_pydantic_can_decode_unhashable_model_does_not_raise() -> None:
     decoder._can_decode_results = MagicMock()  # noqa: SLF001
     decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
     assert decoder.can_decode(User) is True
+
+
+def test_can_decode_agrees_with_decode_for_unhashable_buildable_model() -> None:
+    """can_decode and decode must agree for a genuinely unhashable, schema-buildable model.
+
+    `typing.Annotated[int, []]` is unhashable (its metadata is a list) but
+    pydantic can still build a schema for it. Before this refactor,
+    can_decode incorrectly returned False for any unhashable model
+    regardless of buildability; decode() already worked correctly for
+    the same model via its own fallback. This test pins the fixed,
+    consistent behavior.
+    """
+    model = typing.Annotated[int, []]
+    decoder = PydanticDecoder()
+    assert decoder.can_decode(model) is True  # ty: ignore[invalid-argument-type]
+    assert decoder.decode(b"42", model) == 42  # noqa: PLR2004  # ty: ignore[invalid-argument-type]
