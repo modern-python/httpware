@@ -57,6 +57,94 @@ def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
     return tuple(decoders)
 
 
+def _validate_httpx2_client_conflict(  # noqa: PLR0913 — 7 forwarded kwargs from caller's constructor
+    *,
+    base_url: str,
+    headers: dict[str, str] | None,
+    params: dict[str, str] | None,
+    cookies: dict[str, str] | None,
+    timeout: httpx2.Timeout | float | None,
+    limits: httpx2.Limits | None,
+    auth: httpx2.Auth | None,
+) -> None:
+    """Raise TypeError if httpx2_client=... is combined with a forwarded kwarg."""
+    forwarded = {
+        "base_url": base_url,
+        "headers": headers,
+        "params": params,
+        "cookies": cookies,
+        "timeout": timeout,
+        "limits": limits,
+        "auth": auth,
+    }
+    if any(value not in (None, "") for value in forwarded.values()):
+        raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE)
+
+
+def _assemble_httpx2_client_kwargs(  # noqa: PLR0913 — 7 forwarded kwargs from caller's constructor
+    *,
+    base_url: str,
+    headers: dict[str, str] | None,
+    params: dict[str, str] | None,
+    cookies: dict[str, str] | None,
+    timeout: httpx2.Timeout | float | None,
+    limits: httpx2.Limits | None,
+    auth: httpx2.Auth | None,
+) -> dict[str, typing.Any]:
+    """Build the kwargs dict for constructing the owned httpx2 client."""
+    kwargs: dict[str, typing.Any] = {}
+    if base_url:
+        kwargs["base_url"] = base_url
+    if headers is not None:
+        kwargs["headers"] = headers
+    if params is not None:
+        kwargs["params"] = params
+    if cookies is not None:
+        kwargs["cookies"] = cookies
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    if limits is not None:
+        kwargs["limits"] = limits
+    if auth is not None:
+        kwargs["auth"] = auth
+    return kwargs
+
+
+def _assemble_request_kwargs(  # noqa: PLR0913 — 9 per-request kwargs from httpx2 call signatures
+    *,
+    params: typing.Any | None,
+    headers: typing.Any | None,
+    cookies: typing.Any | None,
+    timeout: typing.Any,
+    extensions: typing.Any | None,
+    json: typing.Any | None,
+    content: typing.Any | None,
+    data: typing.Any | None,
+    files: typing.Any | None,
+) -> dict[str, typing.Any]:
+    """Build the kwargs dict for a per-request httpx2 call (build_request/stream)."""
+    kwargs: dict[str, typing.Any] = {}
+    if params is not None:
+        kwargs["params"] = params
+    if headers is not None:
+        kwargs["headers"] = headers
+    if cookies is not None:
+        kwargs["cookies"] = cookies
+    if timeout is not httpx2.USE_CLIENT_DEFAULT:
+        kwargs["timeout"] = timeout
+    if extensions is not None:
+        kwargs["extensions"] = extensions
+    if json is not None:
+        kwargs["json"] = json
+    if content is not None:
+        kwargs["content"] = content
+    if data is not None:
+        kwargs["data"] = data
+    if files is not None:
+        kwargs["files"] = files
+    return kwargs
+
+
 class AsyncClient:
     """Async HTTP client: thin wrapper around httpx2 with typed decoding and middleware."""
 
@@ -84,35 +172,27 @@ class AsyncClient:
     ) -> None:
         _validate_max_response_body_bytes(max_response_body_bytes)
         if httpx2_client is not None:
-            forwarded = {
-                "base_url": base_url,
-                "headers": headers,
-                "params": params,
-                "cookies": cookies,
-                "timeout": timeout,
-                "limits": limits,
-                "auth": auth,
-            }
-            if any(value not in (None, "") for value in forwarded.values()):
-                raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE)
+            _validate_httpx2_client_conflict(
+                base_url=base_url,
+                headers=headers,
+                params=params,
+                cookies=cookies,
+                timeout=timeout,
+                limits=limits,
+                auth=auth,
+            )
             self._httpx2_client = httpx2_client
             self._owns_client = False
         else:
-            kwargs: dict[str, typing.Any] = {}
-            if base_url:
-                kwargs["base_url"] = base_url
-            if headers is not None:
-                kwargs["headers"] = headers
-            if params is not None:
-                kwargs["params"] = params
-            if cookies is not None:
-                kwargs["cookies"] = cookies
-            if timeout is not None:
-                kwargs["timeout"] = timeout
-            if limits is not None:
-                kwargs["limits"] = limits
-            if auth is not None:
-                kwargs["auth"] = auth
+            kwargs = _assemble_httpx2_client_kwargs(
+                base_url=base_url,
+                headers=headers,
+                params=params,
+                cookies=cookies,
+                timeout=timeout,
+                limits=limits,
+                auth=auth,
+            )
             self._httpx2_client = httpx2.AsyncClient(**kwargs)
             self._owns_client = True
 
@@ -184,7 +264,7 @@ class AsyncClient:
         """Delegate request construction to the wrapped httpx2.AsyncClient."""
         return self._httpx2_client.build_request(method, url, **kwargs)
 
-    def _prepare_request(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
         method: str,
         url: str,
@@ -199,25 +279,17 @@ class AsyncClient:
         data: typing.Any | None = None,
         files: typing.Any | None = None,
     ) -> httpx2.Request:
-        kwargs: dict[str, typing.Any] = {}
-        if params is not None:
-            kwargs["params"] = params
-        if headers is not None:
-            kwargs["headers"] = headers
-        if cookies is not None:
-            kwargs["cookies"] = cookies
-        if timeout is not httpx2.USE_CLIENT_DEFAULT:
-            kwargs["timeout"] = timeout
-        if extensions is not None:
-            kwargs["extensions"] = extensions
-        if json is not None:
-            kwargs["json"] = json
-        if content is not None:
-            kwargs["content"] = content
-        if data is not None:
-            kwargs["data"] = data
-        if files is not None:
-            kwargs["files"] = files
+        kwargs = _assemble_request_kwargs(
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+        )
         request = self._httpx2_client.build_request(method, url, **kwargs)
         if _is_streaming_body_async(content) or _is_streaming_body_async(data) or _is_streaming_body_async(files):
             request.extensions[STREAMING_BODY_MARKER] = True
@@ -940,7 +1012,7 @@ class AsyncClient:
         )
 
     @contextlib.asynccontextmanager
-    async def stream(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    async def stream(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
         method: str,
         url: str,
@@ -973,25 +1045,17 @@ class AsyncClient:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions via _httpx2_exception_mapper.
         """
-        kwargs: dict[str, typing.Any] = {}
-        if params is not None:
-            kwargs["params"] = params
-        if headers is not None:
-            kwargs["headers"] = headers
-        if cookies is not None:
-            kwargs["cookies"] = cookies
-        if timeout is not httpx2.USE_CLIENT_DEFAULT:
-            kwargs["timeout"] = timeout
-        if extensions is not None:
-            kwargs["extensions"] = extensions
-        if json is not None:
-            kwargs["json"] = json
-        if content is not None:
-            kwargs["content"] = content
-        if data is not None:
-            kwargs["data"] = data
-        if files is not None:
-            kwargs["files"] = files
+        kwargs = _assemble_request_kwargs(
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+        )
 
         async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
@@ -1056,35 +1120,27 @@ class Client:
     ) -> None:
         _validate_max_response_body_bytes(max_response_body_bytes)
         if httpx2_client is not None:
-            forwarded = {
-                "base_url": base_url,
-                "headers": headers,
-                "params": params,
-                "cookies": cookies,
-                "timeout": timeout,
-                "limits": limits,
-                "auth": auth,
-            }
-            if any(value not in (None, "") for value in forwarded.values()):
-                raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE)
+            _validate_httpx2_client_conflict(
+                base_url=base_url,
+                headers=headers,
+                params=params,
+                cookies=cookies,
+                timeout=timeout,
+                limits=limits,
+                auth=auth,
+            )
             self._httpx2_client = httpx2_client
             self._owns_client = False
         else:
-            kwargs: dict[str, typing.Any] = {}
-            if base_url:
-                kwargs["base_url"] = base_url
-            if headers is not None:
-                kwargs["headers"] = headers
-            if params is not None:
-                kwargs["params"] = params
-            if cookies is not None:
-                kwargs["cookies"] = cookies
-            if timeout is not None:
-                kwargs["timeout"] = timeout
-            if limits is not None:
-                kwargs["limits"] = limits
-            if auth is not None:
-                kwargs["auth"] = auth
+            kwargs = _assemble_httpx2_client_kwargs(
+                base_url=base_url,
+                headers=headers,
+                params=params,
+                cookies=cookies,
+                timeout=timeout,
+                limits=limits,
+                auth=auth,
+            )
             self._httpx2_client = httpx2.Client(**kwargs)
             self._owns_client = True
 
@@ -1180,7 +1236,7 @@ class Client:
         """Delegate request construction to the wrapped httpx2.Client."""
         return self._httpx2_client.build_request(method, url, **kwargs)
 
-    def _prepare_request(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
         method: str,
         url: str,
@@ -1195,25 +1251,17 @@ class Client:
         data: typing.Any | None = None,
         files: typing.Any | None = None,
     ) -> httpx2.Request:
-        kwargs: dict[str, typing.Any] = {}
-        if params is not None:
-            kwargs["params"] = params
-        if headers is not None:
-            kwargs["headers"] = headers
-        if cookies is not None:
-            kwargs["cookies"] = cookies
-        if timeout is not httpx2.USE_CLIENT_DEFAULT:
-            kwargs["timeout"] = timeout
-        if extensions is not None:
-            kwargs["extensions"] = extensions
-        if json is not None:
-            kwargs["json"] = json
-        if content is not None:
-            kwargs["content"] = content
-        if data is not None:
-            kwargs["data"] = data
-        if files is not None:
-            kwargs["files"] = files
+        kwargs = _assemble_request_kwargs(
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+        )
         request = self._httpx2_client.build_request(method, url, **kwargs)
         if _is_streaming_body_sync(content) or _is_streaming_body_sync(data) or _is_streaming_body_sync(files):
             request.extensions[STREAMING_BODY_MARKER] = True
@@ -1936,7 +1984,7 @@ class Client:
         )
 
     @contextlib.contextmanager
-    def stream(  # noqa: PLR0913, C901 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def stream(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
         method: str,
         url: str,
@@ -1967,25 +2015,17 @@ class Client:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions via _httpx2_exception_mapper_sync.
         """
-        kwargs: dict[str, typing.Any] = {}
-        if params is not None:
-            kwargs["params"] = params
-        if headers is not None:
-            kwargs["headers"] = headers
-        if cookies is not None:
-            kwargs["cookies"] = cookies
-        if timeout is not httpx2.USE_CLIENT_DEFAULT:
-            kwargs["timeout"] = timeout
-        if extensions is not None:
-            kwargs["extensions"] = extensions
-        if json is not None:
-            kwargs["json"] = json
-        if content is not None:
-            kwargs["content"] = content
-        if data is not None:
-            kwargs["data"] = data
-        if files is not None:
-            kwargs["files"] = files
+        kwargs = _assemble_request_kwargs(
+            params=params,
+            headers=headers,
+            cookies=cookies,
+            timeout=timeout,
+            extensions=extensions,
+            json=json,
+            content=content,
+            data=data,
+            files=files,
+        )
 
         with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
