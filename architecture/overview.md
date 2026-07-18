@@ -4,6 +4,10 @@
 
 `httpx2` is part of the public surface. Exposing `httpx2.Request`/`httpx2.Response` is the design — `httpware` does not own a full abstraction over the underlying HTTP client.
 
+## Supported versions
+
+`httpware` requires Python 3.11+ and is tested on the standard (GIL) builds of 3.11–3.14 in CI. It also carries Beta-tier free-threading support (`Free Threading :: 2 - Beta` classifier): a dedicated `pytest-freethreaded` CI job runs the full suite on free-threaded CPython `3.14t` with the GIL disabled. `3.13t` is deferred pending an msgspec cp313t wheel (see `planning/deferred.md`); see [Testing](testing.md) for the `stress` marker convention and [Resilience](resilience.md) for what free-threading correctness covers.
+
 ## Architectural invariants
 
 These are non-negotiable, but **enforcement varies — do not assume CI will catch a violation.** Machine-checked: `print()` (ruff `T201`) and a blanket `# type: ignore` (ruff `PGH003`). Partially checked: the `httpx2._` ban — ruff `SLF001` flags private *attribute* access (`httpx2._foo`) but not a *used* private import (`from httpx2._internal import …`). Review-only: the future-import and global-logging bans, and `# type: ignore[<code>]` vs `# ty: ignore[<code>]`. The "why" exists so future contributors can judge edge cases instead of blindly following the rule.
