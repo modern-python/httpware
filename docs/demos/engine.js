@@ -5,6 +5,9 @@
  * match the library; TIME constants marked (demo) are compressed so an outage
  * fits a ~12s watchable timeline — semantics (ordering, thresholds, accounting)
  * are unchanged. Keep this block the single place to check for drift.
+ *
+ * CircuitBreaker note: OPEN-state landing results are no-ops — real httpware's
+ * on_failure/on_success only count outcomes in CLOSED (and the HALF_OPEN probe).
  */
 window.HttpwareDemo = (function () {
   const REAL = {
@@ -30,6 +33,10 @@ window.HttpwareDemo = (function () {
     return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
   // ---- pattern models (faithful) ----
+  // OPEN-state landing results are no-ops — real httpware's on_failure/on_success
+  // only count outcomes in CLOSED (and the HALF_OPEN probe); a pre-trip in-flight
+  // request that lands after the circuit has already opened must not touch
+  // fails/openedAt, or a draining backlog keeps re-arming the reset clock.
   function makeCircuitBreaker(cfg) {
     const T = cfg.failureThreshold, R = cfg.resetTimeout, S = cfg.successThreshold;
     return { state: 'CLOSED', fails: 0, succ: 0, openedAt: 0, probe: false,
@@ -47,6 +54,7 @@ window.HttpwareDemo = (function () {
           else { this.state = 'OPEN'; this.openedAt = now; this.fails = 1; this.succ = 0; }
           return;
         }
+        if (this.state === 'OPEN') return; // late-landing in-flight result: no-op (matches on_failure/on_success)
         if (ok) this.fails = 0;
         else { this.fails++; if (this.fails >= T) { this.state = 'OPEN'; this.openedAt = now; } }
       } };
