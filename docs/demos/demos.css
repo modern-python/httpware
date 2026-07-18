@@ -1,0 +1,135 @@
+/* httpware resilience demos — shared stylesheet.
+ * Ported from the validated prototype (.superpowers/brainstorm/67614-1784395901/content/circuit-breaker-v6.html).
+ * Palette follows the mkdocs-material theme where an equivalent token exists
+ * (bg/fg/primary), falling back to the prototype's hex values otherwise.
+ * The --hw-ok/--hw-bad/--hw-warn/--hw-reject semantic colors have no material
+ * equivalent and are switched explicitly for the slate (dark) scheme.
+ */
+.hw-demo {
+  --hw-bg: var(--md-default-bg-color, #fff);
+  --hw-fg: var(--md-default-fg-color, #1b1b2e);
+  --hw-muted: #6b6b80;
+  --hw-line: #e4e4ee;
+  --hw-accent: var(--md-primary-fg-color, #5b4bd6);
+  --hw-ok: #12a150;
+  --hw-bad: #e5484d;
+  --hw-warn: #f5a623;
+  --hw-reject: #8e8ea0;
+  --hw-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  position: relative;
+  display: block;
+}
+[data-md-color-scheme="slate"] .hw-demo {
+  --hw-muted: #9a9ab0;
+  --hw-line: #2a2a3a;
+  --hw-ok: #3dd68c;
+  --hw-bad: #ff6369;
+  --hw-warn: #ffb84d;
+  --hw-reject: #6a6a80;
+}
+
+.hw-demo, .hw-demo *, .hw-demo *::before, .hw-demo *::after { box-sizing: border-box; }
+
+.hw-demo .hw-wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  color: var(--hw-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+.hw-demo h2 { font-size: 1.25rem; margin: 0 0 4px; }
+.hw-demo .intro { color: var(--hw-muted); margin: 0 0 18px; max-width: 600px; }
+
+.hw-demo .ctl { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 8px; }
+.hw-demo .scenarios { display: flex; flex-wrap: wrap; gap: 8px; }
+.hw-demo .scenario-btn {
+  background: transparent; color: var(--hw-fg); border: 1px solid var(--hw-line);
+  border-radius: 8px; padding: 7px 14px; font-size: .85rem; cursor: pointer;
+}
+.hw-demo .scenario-btn.active { border-color: var(--hw-accent); color: var(--hw-accent); font-weight: 600; }
+.hw-demo .play {
+  background: var(--hw-accent); color: #fff; border: 0; border-radius: 8px; padding: 9px 22px;
+  font-size: .95rem; font-weight: 600; cursor: pointer;
+}
+.hw-demo .play:disabled { opacity: .5; cursor: not-allowed; }
+.hw-demo .play.ghost { background: transparent; color: var(--hw-muted); border: 1px solid var(--hw-line); }
+.hw-demo .scen { color: var(--hw-muted); font-size: .85rem; margin-bottom: 16px; }
+
+.hw-demo .timeline {
+  position: relative; height: 26px; border-radius: 8px; overflow: hidden; margin-bottom: 14px;
+  background: var(--hw-bg); border: 1px solid var(--hw-line); font-family: var(--hw-mono); font-size: .68rem;
+}
+.hw-demo .outage {
+  position: absolute; top: 0; bottom: 0; background: rgba(229, 72, 77, .18);
+  border-left: 2px solid var(--hw-bad); border-right: 2px solid var(--hw-bad);
+}
+.hw-demo .outage span { position: absolute; top: 6px; left: 8px; color: var(--hw-bad); }
+.hw-demo .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--hw-fg); left: 0; transition: left .15s linear; }
+
+.hw-demo .lane {
+  border: 2px solid var(--hw-line); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px;
+  transition: border-color .3s; position: relative;
+}
+.hw-demo .lane.hot { border-color: var(--hw-bad); }
+.hw-demo .lane.safe { border-color: var(--hw-ok); }
+.hw-demo .lane h3 { margin: 0 0 10px; font-size: .95rem; display: flex; align-items: center; gap: 8px; }
+.hw-demo .badge {
+  font-family: var(--hw-mono); font-size: .66rem; padding: 2px 7px; border-radius: 5px;
+  background: var(--hw-bg); border: 1px solid var(--hw-line); color: var(--hw-muted);
+}
+.hw-demo .badge.bad { color: var(--hw-bad); border-color: var(--hw-bad); }
+.hw-demo .badge.warn { color: var(--hw-warn); border-color: var(--hw-warn); }
+.hw-demo .badge.ok { color: var(--hw-ok); border-color: var(--hw-ok); }
+.hw-demo .laneflow { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.hw-demo .box {
+  font-family: var(--hw-mono); font-size: .75rem; border: 1.5px solid var(--hw-line); border-radius: 8px;
+  padding: 8px 10px; background: var(--hw-bg); white-space: nowrap; transition: all .25s;
+}
+.hw-demo .box.down { border-color: var(--hw-bad); background: rgba(229, 72, 77, .12); color: var(--hw-bad); }
+.hw-demo .box.open { border-color: var(--hw-bad); background: rgba(229, 72, 77, .12); color: var(--hw-bad); }
+.hw-demo .box.half { border-color: var(--hw-warn); background: rgba(245, 166, 35, .12); color: var(--hw-warn); }
+.hw-demo .arrow { flex: 1; height: 2px; background: var(--hw-line); }
+.hw-demo .track { position: relative; height: 20px; margin: 6px 0 4px; }
+.hw-demo .dot { position: absolute; top: 6px; width: 8px; height: 8px; border-radius: 50%; left: 0; transition: left .17s linear; }
+.hw-demo .dot.ok { background: var(--hw-ok); }
+.hw-demo .dot.bad { background: var(--hw-bad); }
+.hw-demo .dot.rej { background: var(--hw-reject); }
+.hw-demo .score { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--hw-mono); font-size: .82rem; margin-top: 6px; }
+.hw-demo .score .k { color: var(--hw-muted); }
+.hw-demo .stat { padding: 2px 6px; border-radius: 6px; }
+.hw-demo .inflight-big { font-size: 1.15rem; font-weight: 700; transition: color .3s; }
+.hw-demo .big { font-weight: 700; }
+.hw-demo .note { color: var(--hw-muted); font-size: .76rem; font-style: italic; margin-top: 6px; }
+
+/* spotlight overlay: 4 dim panels leave a bright hole around the target(s) */
+.hw-demo .dim { position: fixed; background: rgba(8, 8, 16, .6); z-index: 40; display: none; }
+.hw-demo .dim.show { display: block; }
+.hw-demo .ring {
+  position: fixed; z-index: 45; border: 2px solid var(--hw-accent); border-radius: 8px;
+  box-shadow: 0 0 0 4px rgba(91, 75, 214, .28); pointer-events: none; display: none; transition: all .2s;
+}
+.hw-demo .ring.show { display: block; }
+.hw-demo .coach {
+  position: fixed; z-index: 70; width: 300px; background: var(--hw-bg); border: 1px solid var(--hw-line);
+  border-radius: 12px; padding: 15px 17px; box-shadow: 0 16px 50px rgba(0, 0, 0, .35); display: none;
+  color: var(--hw-fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.hw-demo .coach.show { display: block; }
+.hw-demo .coach .step {
+  font-family: var(--hw-mono); font-size: .68rem; color: var(--hw-accent); text-transform: uppercase;
+  letter-spacing: .06em; margin-bottom: 6px;
+}
+.hw-demo .coach h4 { margin: 0 0 6px; font-size: 1.02rem; }
+.hw-demo .coach p { margin: 0 0 14px; font-size: .9rem; }
+.hw-demo .coach .go {
+  background: var(--hw-accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px;
+  font-weight: 600; cursor: pointer; font-size: .88rem;
+}
+.hw-demo .c-arrow {
+  position: absolute; width: 13px; height: 13px; background: var(--hw-bg);
+  border-left: 1px solid var(--hw-line); border-top: 1px solid var(--hw-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hw-demo .playhead, .hw-demo .ring, .hw-demo .box, .hw-demo .lane, .hw-demo .dot { transition: none; }
+}
