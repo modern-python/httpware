@@ -35,20 +35,21 @@ recorded regression evidence that it holds under true thread parallelism.
 
 ## Free-threaded stress-test suite
 
-Five tests (four marked `pytest.mark.stress`, one deterministic cross-loop
-test) exercise real thread parallelism against httpware's Lock/Semaphore-based
-components. All five pass on 3.14t with `sys._is_gil_enabled() is False`
-(verified directly, and via the `pytest-freethreaded` CI job which asserts the
-GIL is disabled before running the suite):
+Real thread-parallelism tests exercise httpware's Lock/Semaphore-based
+components; five carry `pytest.mark.stress` and a sixth deterministically
+covers the cross-loop guard. All pass on 3.14t with `sys._is_gil_enabled() is
+False` (verified directly, and via the `pytest-freethreaded` CI job which
+asserts the GIL is disabled before running the suite):
 
-- `tests/test_retry_budget_freethreaded_stress.py::test_shared_retry_budget_survives_thread_parallelism`
-- `tests/test_circuit_breaker_freethreaded_stress.py::test_circuit_breaker_opens_consistently_under_parallel_failures`
-- `tests/test_bulkhead_freethreaded_stress.py::test_bulkhead_never_exceeds_max_concurrent_under_parallelism`
-- `tests/test_httpx2_freethreaded_boundary.py::test_httpx2_shared_pool_no_crosstalk_under_parallelism`
-- `tests/test_event_loop_guard_freethreaded.py::test_async_bulkhead_rejects_second_event_loop`
-  (deterministically covers the guard's outer cross-loop raise; the inner
-  double-checked-lock arm stays `# pragma: no cover` — free-threading makes it
-  reachable but only nondeterministically, so it is not asserted here)
+- `tests/test_retry_budget_threadsafety.py::test_concurrent_deposit_withdraw_does_not_corrupt` (`stress`)
+- `tests/test_retry_budget_threadsafety.py::test_concurrent_only_deposit_count_matches` (`stress`)
+- `tests/test_circuit_breaker_freethreaded_stress.py::test_circuit_breaker_opens_consistently_under_parallel_failures` (`stress`)
+- `tests/test_bulkhead_freethreaded_stress.py::test_bulkhead_never_exceeds_max_concurrent_under_parallelism` (`stress`)
+- `tests/test_httpx2_freethreaded_boundary.py::test_httpx2_shared_pool_no_crosstalk_under_parallelism` (`stress`)
+- `tests/test_bulkhead.py::test_cross_loop_acquire_raises_runtimeerror` (deterministic;
+  covers the guard's outer cross-loop raise. The inner double-checked-lock arm
+  stays `# pragma: no cover` — free-threading makes it reachable but only
+  nondeterministically, so it is not asserted)
 
 Each stress test uses invariant assertions (final counts, exhaustion bounds,
 state consistency) rather than interleaving-dependent timing, per
