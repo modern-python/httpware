@@ -29,7 +29,7 @@ HttpwareDemo.mount('#cb-demo', {
       body: '5 failures in a row -> circuit OPEN. It now fast-fails instantly; its in-flight stays flat while the plain client keeps piling up.' },
     { when: (s) => s.now >= 5.6, spot: ['ifA', 'latA', 'ifB', 'latB'], title: 'The gap — this is the point',
       body: 'Plain client: in-flight high AND p99 blown to 12s — drowning. Protected client: in-flight flat, p99 still 40ms. Same outage, two outcomes.' },
-    { when: (s) => s.now >= 8.4, spot: ['brkB'], title: 'Recovery via one probe',
+    { when: (s) => s.mw.recovered, spot: ['brkB'], title: 'Recovery via one probe',
       body: 'Backend is back. The breaker admits exactly ONE probe, sees success, and closes — no thundering herd.' },
   ],
 });

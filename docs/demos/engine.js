@@ -39,7 +39,11 @@ window.HttpwareDemo = (function () {
   // fails/openedAt, or a draining backlog keeps re-arming the reset clock.
   function makeCircuitBreaker(cfg) {
     const T = cfg.failureThreshold, R = cfg.resetTimeout, S = cfg.successThreshold;
-    return { state: 'CLOSED', fails: 0, succ: 0, openedAt: 0, probe: false,
+    // `recovered` is a read-only observability flag (no effect on allow/res logic):
+    // it flips true exactly when the circuit genuinely reaches CLOSED via a
+    // successful probe, so callers can gate on real recovery instead of a guessed
+    // timestamp — compressed demo timing can push recovery later than expected.
+    return { state: 'CLOSED', fails: 0, succ: 0, openedAt: 0, probe: false, recovered: false,
       allow(now) {
         if (this.state === 'OPEN') {
           if (now - this.openedAt >= R) { this.state = 'HALF_OPEN'; this.probe = false; }
@@ -50,7 +54,7 @@ window.HttpwareDemo = (function () {
       },
       res(ok, now) {
         if (this.state === 'HALF_OPEN') { this.probe = false;
-          if (ok) { this.succ++; if (this.succ >= S) { this.state = 'CLOSED'; this.fails = 0; this.succ = 0; } }
+          if (ok) { this.succ++; if (this.succ >= S) { this.state = 'CLOSED'; this.fails = 0; this.succ = 0; this.recovered = true; } }
           else { this.state = 'OPEN'; this.openedAt = now; this.fails = 1; this.succ = 0; }
           return;
         }
