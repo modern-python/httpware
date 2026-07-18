@@ -102,7 +102,11 @@ addopts = "--cov=. --cov-report term-missing --cov-fail-under=100"
 asyncio_mode = "auto"
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "stress: concurrency stress test; proves thread-safety under free-threaded CPython (3.14t). Runs under the GIL too, so it counts toward coverage.",
+]
 
 [tool.coverage]
 run.concurrency = ["thread"]
+run.omit = ["benchmarks/*"]
 report.exclude_also = ["if typing.TYPE_CHECKING:", 'pytest\.fail\(']
