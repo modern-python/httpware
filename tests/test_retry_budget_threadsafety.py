@@ -7,6 +7,8 @@ spawn many threads doing many ops and assert no exception, sane counters.
 
 import threading
 
+import pytest
+
 from httpware.middleware.resilience.budget import RetryBudget
 
 
@@ -14,6 +16,7 @@ _N_THREADS = 16
 _N_OPS_PER_THREAD = 1000
 
 
+@pytest.mark.stress
 def test_concurrent_deposit_withdraw_does_not_corrupt() -> None:
     budget = RetryBudget(ttl=60.0, min_retries_per_sec=1000.0, percent_can_retry=0.5)
     errors: list[BaseException] = []
@@ -42,6 +45,7 @@ def test_concurrent_deposit_withdraw_does_not_corrupt() -> None:
     assert len(budget._deposits) > 0  # noqa: SLF001
 
 
+@pytest.mark.stress
 def test_concurrent_only_deposit_count_matches() -> None:
     budget = RetryBudget(ttl=60.0)
     barrier = threading.Barrier(_N_THREADS)

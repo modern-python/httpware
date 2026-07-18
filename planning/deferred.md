@@ -6,6 +6,10 @@ As of 0.7.0, all planned epics (3, 4, 5, 6) are closed — see the [change Index
 
 ## Open
 
+### Free-threading
+
+- **3.13t free-threaded CI** — blocked on a msgspec cp313t wheel; add the interpreter to the `pytest-freethreaded` job when the wheel ships.
+
 ### Resilience
 
 - **CircuitBreaker — manual control** (`src/httpware/middleware/resilience/circuit_breaker.py`) — the trip-mode work is done (0.13.0 shipped the opt-in time-based failure-rate mode) and 0.14.0 shipped the read-only `state` property + public `CircuitState` enum. The one remaining piece is `force_open`/`force_closed` (Polly's `ManualControl`) — the genuinely YAGNI half for an HTTP *client* (you'd usually just stop sending requests), keyed off the 0.10.0 audit's events-only control-surface decision (decision 4). Demand-gated.

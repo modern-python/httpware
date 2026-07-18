@@ -26,6 +26,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Free Threading :: 2 - Beta",
     "Typing :: Typed",
     "Topic :: Software Development :: Libraries",
     "Topic :: Internet :: WWW/HTTP",
@@ -102,7 +103,11 @@ addopts = "--cov=. --cov-report term-missing --cov-fail-under=100"
 asyncio_mode = "auto"
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "stress: concurrency stress test; proves thread-safety under free-threaded CPython (3.14t). Runs under the GIL too, so it counts toward coverage.",
+]
 
 [tool.coverage]
 run.concurrency = ["thread"]
+run.omit = ["benchmarks/*"]
 report.exclude_also = ["if typing.TYPE_CHECKING:", 'pytest\.fail\(']

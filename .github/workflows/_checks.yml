@@ -45,3 +45,18 @@ jobs:
       - run: uv python pin ${{ matrix.python-version }}
       - run: just install
       - run: just test --cov-report xml
+
+  pytest-freethreaded:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: extractions/setup-just@v4
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+      - run: uv python install 3.14t
+      - run: uv python pin 3.14t
+      - run: just install
+      - run: uv run --no-sync python -c "import sys; assert not sys._is_gil_enabled(), 'GIL is enabled'"
+      - run: just test --cov-report xml
