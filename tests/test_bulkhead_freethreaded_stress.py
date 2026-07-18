@@ -13,6 +13,7 @@ import pytest
 
 from httpware import Bulkhead, Client
 
+
 _MAX = 4
 _N_THREADS = 24
 

@@ -12,8 +12,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import httpx2
 import pytest
 
+
 _N_THREADS = 16
 _N_REQ = 100
+_HTTP_OK = 200
 
 
 class _Echo(BaseHTTPRequestHandler):
@@ -24,7 +26,7 @@ class _Echo(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *args: object) -> None:  # silence server logs
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002 -- silence server logs, stdlib signature
         pass
 
 
@@ -53,5 +55,5 @@ def test_httpx2_shared_pool_no_crosstalk_under_parallelism() -> None:
         server.shutdown()
 
     # Every response must echo its own request's number; a mismatch is pool cross-talk.
-    mismatches = [(n, status, text) for n, status, text in results if status != 200 or text != str(n)]
+    mismatches = [(n, status, text) for n, status, text in results if status != _HTTP_OK or text != str(n)]
     assert mismatches == []

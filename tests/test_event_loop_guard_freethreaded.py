@@ -5,9 +5,8 @@ inner double-checked-lock arm stays `# pragma: no cover`: it needs two threads t
 simultaneously, which free-threading can reach but only nondeterministically.
 """
 
-from http import HTTPStatus
-
 import asyncio
+from http import HTTPStatus
 
 import httpx2
 import pytest

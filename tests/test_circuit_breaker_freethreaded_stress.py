@@ -19,6 +19,7 @@ import pytest
 from httpware import CircuitBreaker, CircuitState, Client
 from httpware.errors import CircuitOpenError, StatusError
 
+
 _N_THREADS = 16
 _N_OPS = 50
 

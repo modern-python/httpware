@@ -15,6 +15,7 @@ import pytest
 from httpware import Client, Retry
 from httpware.middleware.resilience.budget import RetryBudget
 
+
 _N_THREADS = 16
 _N_OPS = 100
 
