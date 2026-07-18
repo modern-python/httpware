@@ -24,12 +24,14 @@ cp313t wheel.
 ## httpx2 shared-pool boundary
 
 `tests/test_httpx2_freethreaded_boundary.py::test_httpx2_shared_pool_no_crosstalk_under_parallelism`
-(marked `stress`) drives 32 threads sharing one `httpx2` client + connection
-pool, 3 × 12,800 requests, on 3.14t with the GIL disabled. Every response is
-verified against its own request. Result: **zero cross-talk, zero crashes.**
-httpx2 is a dependency httpware can't self-certify beyond this boundary test —
-this is the recorded regression evidence that it holds under true thread
-parallelism.
+(marked `stress`) drives 16 threads sharing one `httpx2` client + connection
+pool, 100 requests per thread (1,600 total), in a single run on 3.14t with the
+GIL disabled. Every response is verified against its own request. Result:
+**zero cross-talk, zero crashes.** (The initial exploratory validation during
+design was heavier — 32 threads, 3 × 12,800 requests — and also clean; the
+committed test is the trimmed, CI-fast regression guard.) httpx2 is a
+dependency httpware can't self-certify beyond this boundary test — this is the
+recorded regression evidence that it holds under true thread parallelism.
 
 ## Free-threaded stress-test suite
 
