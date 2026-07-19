@@ -8,6 +8,10 @@
 
 A key ordering constraint: `AsyncBulkhead` must sit outside `AsyncRetry` (before it in `middleware=`) so one slot covers all retry attempts of a single call. For the full recommended ordering across all four primitives, see [Composition](#composition). Reach for the [Middleware guide](middleware.md) when you want to write your own resilience policy.
 
+!!! tip "See it under load"
+    New to these patterns? The [interactive demos](demos/index.md) show each one
+    surviving an outage side by side with an unprotected client.
+
 - [`AsyncRetry`](#asyncretry)
 - [`RetryBudget`](#retrybudget)
 - [`AsyncBulkhead`](#asyncbulkhead)
