@@ -12,6 +12,7 @@ nav:
       - Retry: demos/retry.md
       - Circuit Breaker: demos/circuit-breaker.md
       - Bulkhead: demos/bulkhead.md
+      - Timeout: demos/timeout.md
   - Errors: errors.md
   - Observability: observability.md
   - Decoders: decoders.md

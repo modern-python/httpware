@@ -93,6 +93,17 @@ window.HttpwareDemo = (function () {
       release() { if (this.inUse > 0) this.inUse--; } };
   }
 
+  // AsyncTimeout bounds the WHOLE operation (all retry attempts + backoff sleeps),
+  // not a single call — so a lane-B pend entry carries one deadline set at the
+  // first attempt and clamps every subsequent (re)push to it. A landing whose
+  // projected time would cross the deadline is cut short here and marked
+  // timedOut so the caller resolves it as a TimeoutError failure, never a retry.
+  function clampToDeadline(tick, landTicks, deadline) {
+    const land = tick + landTicks;
+    if (deadline === Infinity || land * TICK / 1000 <= deadline) return { land, timedOut: false };
+    return { land: Math.max(tick + 1, Math.round(deadline * 1000 / TICK)), timedOut: true };
+  }
+
   const prefersReduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -208,6 +219,7 @@ window.HttpwareDemo = (function () {
       <span class="k">&#10007; <span data-el="badB">0</span></span>
       <span class="k">&#9211; fast-failed <span data-el="rejB">0</span></span>
       <span class="stat" data-el="poolWrap" style="display:none"><span class="k">pool</span> <span class="big" data-el="poolB">&mdash;</span></span>
+      <span class="stat" data-el="elapsedWrap" style="display:none"><span class="k">elapsed</span> <span class="big" data-el="elapsedB">&mdash;</span></span>
       <span class="stat"><span class="k">p99</span> <span class="big" data-el="latB">40ms</span></span>
     </div>
   </div>
@@ -241,11 +253,12 @@ window.HttpwareDemo = (function () {
       laneB: $('laneB'), badgeB: $('badgeB'), srvB: $('srvB'), trackB: $('trackB'), brkB: $('brkB'),
       ifB: $('ifB'), okB: $('okB'), badB: $('badB'), rejB: $('rejB'), latB: $('latB'),
       poolWrap: $('poolWrap'), poolB: $('poolB'),
+      elapsedWrap: $('elapsedWrap'), elapsedB: $('elapsedB'),
       note: $('note'),
       dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
       coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
     };
-    const ELS = { ifA: els.ifA, latA: els.latA, ifB: els.ifB, latB: els.latB, brkB: els.brkB, poolB: els.poolB };
+    const ELS = { ifA: els.ifA, latA: els.latA, ifB: els.ifB, latB: els.latB, brkB: els.brkB, poolB: els.poolB, elapsedB: els.elapsedB };
 
     // Built fresh inside run() from the selected scenario (STOPS is never read before a
     // scenario is played, so it's safe to leave empty until then) — pages with one
@@ -263,6 +276,7 @@ window.HttpwareDemo = (function () {
     let brk = null;
     let bulk = null;
     let retryCfg = null, budget = null, budgetExhausted = false;
+    let tmoCfg = null, timedOutCount = 0;
     let rnd = mulberry(SEED);
     let selectedScenario = null;
 
@@ -378,6 +392,8 @@ window.HttpwareDemo = (function () {
       els.brkB.className = 'box'; els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
       els.poolWrap.style.display = bulk ? '' : 'none';
       els.poolB.textContent = bulk ? (bulk.inUse + '/' + bulk.max) : '—';
+      els.elapsedWrap.style.display = tmoCfg ? '' : 'none';
+      els.elapsedB.textContent = tmoCfg ? ('0.0s / ' + tmoCfg.timeout.toFixed(1) + 's') : '—';
       els.srvA.className = 'box'; els.srvA.textContent = 'server ✓';
       els.srvB.className = 'box'; els.srvB.textContent = 'server ✓';
       els.laneA.className = 'lane'; els.laneB.className = 'lane';
@@ -393,6 +409,10 @@ window.HttpwareDemo = (function () {
       els.ifA.style.color = A.if > 10 ? 'var(--hw-bad)' : '';
       els.ifB.style.color = B.if <= 6 ? 'var(--hw-ok)' : '';
       if (bulk) els.poolB.textContent = bulk.inUse + '/' + bulk.max;
+      if (tmoCfg) {
+        const maxElapsed = B.pend.reduce((m, p) => Math.max(m, now - p.start), 0);
+        els.elapsedB.textContent = maxElapsed.toFixed(1) + 's / ' + tmoCfg.timeout.toFixed(1) + 's';
+      }
       // "Stress" covers two distinct fault shapes: outright failure (down) and a
       // high-latency-but-ok fault (slow, e.g. bulkhead.md's 5s dependency) — both must
       // read as backend trouble even though only `down` implies an error response.
@@ -436,16 +456,20 @@ window.HttpwareDemo = (function () {
         ? makeRetryBudget(scenario.chainB.budget || REAL.retryBudget)
         : null;
       budgetExhausted = false;
+      tmoCfg = scenario.chainB && scenario.chainB.timeout ? scenario.chainB.timeout : null;
+      timedOutCount = 0;
       rnd = mulberry(SEED);
       els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
       els.poolWrap.style.display = bulk ? '' : 'none';
       els.poolB.textContent = bulk ? (bulk.inUse + '/' + bulk.max) : '—';
+      els.elapsedWrap.style.display = tmoCfg ? '' : 'none';
+      els.elapsedB.textContent = tmoCfg ? ('0.0s / ' + tmoCfg.timeout.toFixed(1) + 's') : '—';
 
       timer = setInterval(() => {
         if (paused) return;
         const now = tick * TICK / 1000;
         const mw = { state: brk ? brk.state : 'CLOSED', recovered: brk ? brk.recovered : false,
-          budgetExhausted, rejected: B.rej, cb: brk };
+          budgetExhausted, rejected: B.rej, cb: brk, timedOut: timedOutCount };
         const state = { now, A, B, mw };
         if (stopIdx < STOPS.length && STOPS[stopIdx].when(state)) { showStop(STOPS[stopIdx]); return; }
 
@@ -458,10 +482,17 @@ window.HttpwareDemo = (function () {
               const p = L.pend[i]; L.pend.splice(i, 1);
               if (L === B && brk) brk.res(p.ok, now);
               let retried = false;
+              // AsyncTimeout bounds the WHOLE operation (outermost: timeout ->
+              // circuitBreaker -> bulkhead -> retry -> terminal). An entry clamped
+              // to its deadline (see clampToDeadline) lands as a TimeoutError
+              // failure here, regardless of what the untimed outcome would have
+              // been, and is never retried.
+              if (L === B && p.timedOut) {
+                timedOutCount++;
               // Retry decision happens at landing time: a failed lane-B attempt gets
               // one more shot if maxAttempts allows it AND the budget grants a token;
               // otherwise (or with no budget at all) it counts as a final failure.
-              if (L === B && retryCfg && !p.ok && (p.attempt + 1) < retryCfg.maxAttempts) {
+              } else if (L === B && retryCfg && !p.ok && (p.attempt + 1) < retryCfg.maxAttempts) {
                 if (budget && budget.tryWithdraw(now)) {
                   const nextAttempt = p.attempt + 1;
                   // Full-jitter backoff (demo seconds); the retry is a NEW attempt
@@ -473,8 +504,12 @@ window.HttpwareDemo = (function () {
                   // terminal: the bulkhead sits OUTSIDE retry, so one slot is acquired
                   // once and held for the WHOLE operation (all attempts), released only
                   // when the operation finally lands. Carry `bh` forward on every retry
-                  // push, or a retried request leaks its slot forever.
-                  L.pend.push({ land: tick + landTicks, ok: f2.ok, attempt: nextAttempt, bh: p.bh });
+                  // push, or a retried request leaks its slot forever. The deadline (and
+                  // start) is likewise carried forward unchanged — it bounds the WHOLE
+                  // operation, set once at the first attempt, not reset per retry — and
+                  // clamped again here in case the backoff + this attempt would cross it.
+                  const { land, timedOut } = clampToDeadline(tick, landTicks, p.deadline);
+                  L.pend.push({ land, ok: f2.ok, attempt: nextAttempt, bh: p.bh, start: p.start, deadline: p.deadline, timedOut });
                   spawnDot(dotsB, els.trackB, f2.ok ? 'ok' : 'bad');
                   retried = true;
                 } else if (budget) {
@@ -484,7 +519,7 @@ window.HttpwareDemo = (function () {
               // Release the bulkhead slot only once the attempt truly finishes (not on
               // a retry re-push) — `p.bh` marks entries that actually acquired a slot,
               // so a null/absent bulkhead or a rejected (never-pushed) request is a no-op.
-              if (!retried) { L.if--; if (p.ok) L.ok++; else L.bad++;
+              if (!retried) { L.if--; if (L === B && p.timedOut) L.bad++; else if (p.ok) L.ok++; else L.bad++;
                 if (L === B && bulk && p.bh) bulk.release(); }
             }
           }
@@ -506,7 +541,11 @@ window.HttpwareDemo = (function () {
             B.rej++; spawnDot(dotsB, els.trackB, 'rej');
           } else {
             if (budget) budget.deposit(now);
-            B.if++; B.pend.push({ land: tick + landTicks, ok: f.ok, attempt: 0, bh: !!bulk });
+            // Total deadline set once at the first attempt (Infinity when no
+            // AsyncTimeout is configured, so the clamp below is always a no-op).
+            const deadline = tmoCfg ? now + tmoCfg.timeout : Infinity;
+            const { land, timedOut } = clampToDeadline(tick, landTicks, deadline);
+            B.if++; B.pend.push({ land, ok: f.ok, attempt: 0, bh: !!bulk, start: now, deadline, timedOut });
             spawnDot(dotsB, els.trackB, f.ok ? 'ok' : 'bad');
           }
         }
@@ -526,6 +565,7 @@ window.HttpwareDemo = (function () {
         els.note.textContent = "Faithful model of httpware's " + describeChain(selectedScenario.chainB) +
           ' — not httpware running in your browser.';
         brk = null; bulk = null; retryCfg = null; budget = null; budgetExhausted = false;
+        tmoCfg = null; timedOutCount = 0;
         setupOutageBar(selectedScenario);
         resetVisual();
       });
