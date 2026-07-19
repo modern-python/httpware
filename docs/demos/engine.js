@@ -27,6 +27,11 @@ window.HttpwareDemo = (function () {
   // its OPEN-state stop.
   const SEED = 103;
 
+  // Thundering-herd sim knobs. dt = bucket width (s); reqInterval = per-client
+  // request spacing (s) so N clients emit a steady baseline; maxNaive is a pure
+  // safety cap on the unbounded naive retry loop (an outage can't outlast dur).
+  const HERD = { dt: 0.35, reqInterval: 0.5, maxNaive: 5000 };
+
   // seeded PRNG so both lanes face the identical fault timeline
   function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0;
     let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
@@ -246,6 +251,88 @@ window.HttpwareDemo = (function () {
       hideAll() { els.coach.classList.remove('show'); hideSpot(); },
       setContinue(fn) { onContinue = fn; },
     };
+  }
+
+  // ---- thundering-herd simulation (faithful; reuses the real RetryBudget model) ----
+  // N independent clients hit ONE backend through a sustained outage. Every backend
+  // attempt (initial + each retry) is counted into a per-bucket series for each lane.
+  //   naive: FIXED backoff, NO jitter, UNBOUNDED retries -> same-bucket failures retry
+  //          into the same later bucket => synchronized spikes with dead gaps.
+  //   httpware: FULL-JITTER backoff + per-client RetryBudget + maxAttempts cap ->
+  //          retry timing decorrelates into a near-constant rate; the budget and the
+  //          attempt cap bound amplification. The budget is PER CLIENT, never shared.
+  // Arrivals are phase-staggered (not synchronized): the clustering that follows is
+  // caused by the retry policy, not by synchronized arrivals.
+  function simulateHerd(scenario, opts) {
+    const N = opts.clients, cfg = opts.retry, budgetCfg = opts.budget;
+    const dur = scenario.dur, dt = HERD.dt, ri = HERD.reqInterval;
+    const buckets = Math.ceil(dur / dt);
+    const naive = new Array(buckets).fill(0);
+    const hw = new Array(buckets).fill(0);
+    const bkt = (t) => Math.min(buckets - 1, Math.max(0, Math.floor(t / dt)));
+    const rnd = mulberry(SEED); // one deterministic stream drives jitter + any probabilistic fault
+    for (let c = 0; c < N; c++) {
+      const phase = (c / N) * ri; // spread arrivals across a request interval
+      // naive: unbounded fixed-backoff retries, no jitter
+      for (let t0 = phase; t0 < dur; t0 += ri) {
+        let t = t0, guard = 0;
+        while (t < dur) {
+          naive[bkt(t)]++;
+          const f = scenario.fault(t, rnd);
+          if (f.ok) break;
+          t += cfg.baseDelay; // fixed, no jitter, no attempt cap
+          if (++guard > HERD.maxNaive) break;
+        }
+      }
+      // httpware: full jitter + per-client budget + maxAttempts
+      const budget = makeRetryBudget(budgetCfg);
+      for (let t0 = phase; t0 < dur; t0 += ri) {
+        let t = t0, attempt = 0;
+        budget.deposit(t);           // deposit once per operation (matches terminal)
+        hw[bkt(t)]++;
+        let f = scenario.fault(t, rnd);
+        while (!f.ok && (attempt + 1) < cfg.maxAttempts && budget.tryWithdraw(t)) {
+          const backoff = rnd() * Math.min(cfg.maxDelay, cfg.baseDelay * Math.pow(2, attempt));
+          t += backoff;
+          if (t >= dur) break;
+          attempt++;
+          hw[bkt(t)]++;
+          f = scenario.fault(t, rnd);
+        }
+      }
+    }
+    const baseline = N * (dt / ri); // healthy backend calls per bucket
+    const stat = (arr) => {
+      const peak = arr.reduce((m, v) => Math.max(m, v), 0);
+      const total = arr.reduce((a, b) => a + b, 0);
+      return { series: arr, peak, total, mult: baseline > 0 ? peak / baseline : 0 };
+    };
+    return { naive: stat(naive), hw: stat(hw), buckets, dt, baseline,
+      outage: computeOutageWindow(scenario) };
+  }
+
+  // Render a call-rate strip as an SVG of vertical bars into `el`. Buckets [0,
+  // revealUpTo) are drawn (progressive reveal during playback). peakScale is shared
+  // across both strips so their heights are comparable and httpware's flatness reads
+  // honestly against naive's spikes. viewBox is unitless; CSS sizes the strip.
+  function renderRateStrip(el, series, revealUpTo, opts) {
+    const n = series.length, W = 100, H = 100, bw = W / n;
+    const scale = opts.peakScale > 0 ? H / opts.peakScale : 0;
+    let body = '';
+    if (opts.outage) {
+      const ox = (opts.outage.from / opts.dur) * W;
+      const ow = ((opts.outage.to - opts.outage.from) / opts.dur) * W;
+      body += `<rect x="${ox.toFixed(2)}" y="0" width="${ow.toFixed(2)}" height="${H}" class="herd-band"/>`;
+    }
+    const upto = Math.min(revealUpTo, n);
+    for (let i = 0; i < upto; i++) {
+      const h = Math.min(H, series[i] * scale);
+      if (h <= 0) continue;
+      body += `<rect x="${(i * bw).toFixed(2)}" y="${(H - h).toFixed(2)}" width="${Math.max(0.5, bw - 0.3).toFixed(2)}" height="${h.toFixed(2)}" class="${opts.cls}"/>`;
+    }
+    const by = H - Math.min(H, opts.baseline * scale);
+    body += `<line x1="0" y1="${by.toFixed(2)}" x2="${W}" y2="${by.toFixed(2)}" class="herd-baseline"/>`;
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="herd-svg">${body}</svg>`;
   }
 
   function template(config) {
@@ -625,5 +712,6 @@ window.HttpwareDemo = (function () {
     if (firstScenarioBtn) firstScenarioBtn.click();
   }
 
-  return { mount, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead }, _util: { mulberry }, REAL, TICK, ADV };
+  return { mount, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead, simulateHerd },
+    _render: { renderRateStrip }, _util: { mulberry }, REAL, TICK, ADV };
 })();
