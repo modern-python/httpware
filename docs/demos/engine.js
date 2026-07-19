@@ -524,6 +524,11 @@ window.HttpwareDemo = (function () {
   </div>
 
   <p class="note" data-el="note">Faithful model of httpware, not httpware running in your browser. Pick a scenario above to begin.</p>
+
+  <div class="macro" data-el="macroWrap" style="display:none">
+    <div class="macro-head"><span class="k">backend call-rate</span> &mdash; <span data-el="macroStage">healthy</span></div>
+    <div class="herd-strip" data-el="macroStrip"></div>
+  </div>
 </div>
 
 <div class="dim" data-el="dimT"></div><div class="dim" data-el="dimB"></div>
@@ -554,6 +559,7 @@ window.HttpwareDemo = (function () {
       poolWrap: $('poolWrap'), poolB: $('poolB'),
       elapsedWrap: $('elapsedWrap'), elapsedB: $('elapsedB'),
       note: $('note'),
+      macroWrap: $('macroWrap'), macroStrip: $('macroStrip'), macroStage: $('macroStage'),
       dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
       coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
     };
@@ -579,6 +585,7 @@ window.HttpwareDemo = (function () {
     let A = { ok: 0, bad: 0, if: 0, pend: [] };
     let B = { ok: 0, bad: 0, rej: 0, if: 0, pend: [] };
     let brk = null;
+    let macroSeries = []; // lane-B backend calls per tick, for config.macroStrip
     let bulk = null;
     let retryCfg = null, budget = null, budgetExhausted = false;
     let tmoCfg = null, timedOutCount = 0;
@@ -641,6 +648,7 @@ window.HttpwareDemo = (function () {
       els.poolB.textContent = cfgB.bulkhead ? ('0/' + cfgB.bulkhead.maxConcurrent) : '—';
       els.elapsedWrap.style.display = cfgB.timeout ? '' : 'none';
       els.elapsedB.textContent = cfgB.timeout ? ('0.0s / ' + cfgB.timeout.timeout.toFixed(1) + 's') : '—';
+      els.macroWrap.style.display = (selectedScenario && config.macroStrip) ? '' : 'none';
       els.srvA.className = 'box'; els.srvA.textContent = 'server ✓';
       els.srvB.className = 'box'; els.srvB.textContent = 'server ✓';
       els.laneA.className = 'lane'; els.laneB.className = 'lane';
@@ -729,6 +737,8 @@ window.HttpwareDemo = (function () {
       timedOutCount = 0;
       rnd = mulberry(SEED);
       resetVisual();
+      macroSeries = new Array(Math.ceil(scenario.dur * 1000 / TICK) + 2).fill(0);
+      if (config.macroStrip) els.macroWrap.style.display = '';
 
       timer = setInterval(() => {
         if (paused) return;
@@ -776,6 +786,7 @@ window.HttpwareDemo = (function () {
                   L.pend.push({ land, ok: f2.ok, attempt: nextAttempt, bh: p.bh, start: p.start, deadline: p.deadline, timedOut });
                   spawnDot(dotsB, els.trackB, f2.ok ? 'ok' : 'bad');
                   retried = true;
+                  if (config.macroStrip) macroSeries[tick]++;
                 } else if (budget) {
                   budgetExhausted = true;
                 }
@@ -822,9 +833,16 @@ window.HttpwareDemo = (function () {
             const { land, timedOut } = clampToDeadline(tick, landTicks, deadline);
             B.if++; B.pend.push({ land, ok: f.ok, attempt: 0, bh: !!bulk, start: now, deadline, timedOut });
             spawnDot(dotsB, els.trackB, f.ok ? 'ok' : 'bad');
+            if (config.macroStrip) macroSeries[tick]++;
           }
         }
         updateUI(now, lastFault);
+        if (config.macroStrip) {
+          const peak = macroSeries.reduce((m, v) => Math.max(m, v), 0) || 1;
+          renderRateStrip(els.macroStrip, macroSeries, tick + 1,
+            { peakScale: peak, baseline: 0, outage: null, dur: scenario.dur * 1000 / TICK, cls: 'herd-bar-hw' });
+          els.macroStage.textContent = config.stageLabel ? config.stageLabel(now) : '';
+        }
         tick++;
         if (now >= scenario.dur) clearInterval(timer);
       }, TICK);
