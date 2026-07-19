@@ -233,7 +233,9 @@ window.HttpwareDemo = (function () {
     };
     const ELS = { ifA: els.ifA, latA: els.latA, ifB: els.ifB, latB: els.latB, brkB: els.brkB };
 
-    const STOPS = config.buildStops({});
+    // Rebuilt per-run from the selected scenario (see run()) — pages with one shared
+    // stop list across scenarios (buildStops ignoring its arg) keep working unchanged.
+    let STOPS = config.buildStops(null);
 
     let timer = null, paused = false, tick = 0, stopIdx = 0;
     let dotsA = [], dotsB = [];
@@ -392,6 +394,7 @@ window.HttpwareDemo = (function () {
     function run() {
       if (!selectedScenario) return;
       const scenario = selectedScenario;
+      STOPS = config.buildStops(scenario);
       resetVisual();
       brk = scenario.chainB && scenario.chainB.circuitBreaker
         ? makeCircuitBreaker(scenario.chainB.circuitBreaker) : null;

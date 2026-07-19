@@ -21,7 +21,7 @@ HttpwareDemo.mount('#retry-demo', {
       chainB: { retry: { maxAttempts: 3, baseDelay: 0.1, maxDelay: 5.0 },
                 budget: { ttl: 10.0, minRetriesPerSec: 10.0, percentCanRetry: 0.2 } } },
   ],
-  buildStops: () => [
+  buildStops: (scenario) => scenario.id === 'sustained' ? [
     { when: (s) => s.now >= 1.2, spot: ['ifA', 'ifB'], title: 'A backend blip appears',
       body: 'Both clients hit the same transient errors. Watch how each responds.' },
     { when: (s) => s.now >= 2.4, spot: ['ifB'], title: 'httpware retries the blip',
@@ -30,6 +30,13 @@ HttpwareDemo.mount('#retry-demo', {
       body: 'On a SUSTAINED outage, blind retries would multiply load. The budget is spent — httpware STOPS retrying and fails fast, protecting the dying backend instead of hammering it.' },
     { when: (s) => s.now >= 10.0, spot: ['ifA', 'ifB'], title: 'Blip: recovered. Outage: contained',
       body: 'Retry rescues transient errors without turning a real outage into a storm. That cap is the whole reason the budget exists.' },
+  ] : [
+    { when: (s) => s.now >= 1.2, spot: ['ifA', 'ifB'], title: 'A backend blip appears',
+      body: 'Both clients hit the same transient errors. Watch how each responds.' },
+    { when: (s) => s.now >= 2.4, spot: ['ifB'], title: 'httpware retries the blip',
+      body: 'The plain client surfaces the error immediately. httpware retries with backoff — most of these recover on attempt 2 or 3, invisibly to the caller.' },
+    { when: (s) => s.now >= 10.0, spot: ['ifA', 'ifB'], title: 'Blip: recovered',
+      body: 'The backend healed and so did both clients — but compare the ✗ counts: httpware surfaced far fewer failures to the caller. That is what retry buys you on a transient blip.' },
   ],
 });
 </script>
