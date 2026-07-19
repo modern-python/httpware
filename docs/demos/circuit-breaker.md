@@ -10,6 +10,7 @@ and probing for recovery.
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   HttpwareDemo.mount('#cb-demo', {
+  ring: 'reset',
   scenarios: [
     { id: 'down', label: 'Backend goes down', dur: 12.5,
       fault: (now) => (now >= 2.0 && now < 8.0)

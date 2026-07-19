@@ -27,6 +27,11 @@ window.HttpwareDemo = (function () {
   // its OPEN-state stop.
   const SEED = 103;
 
+  // Thundering-herd sim knobs. dt = bucket width (s); reqInterval = per-client
+  // request spacing (s) so N clients emit a steady baseline; maxNaive is a pure
+  // safety cap on the unbounded naive retry loop (an outage can't outlast dur).
+  const HERD = { dt: 0.35, reqInterval: 0.5, maxNaive: 5000 };
+
   // seeded PRNG so both lanes face the identical fault timeline
   function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0;
     let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
@@ -179,6 +184,308 @@ window.HttpwareDemo = (function () {
     return { from, to: Math.min(scenario.dur, to + scenario.dur / steps), label };
   }
 
+  // All contiguous "backend in trouble" intervals (down or slow), for a strip that
+  // shades each outage window separately — so a flapping backend's recovery GAPS stay
+  // visibly unshaded between the shaded dips. Decorative; never drives the sim.
+  function computeOutageBands(scenario) {
+    const steps = 400, worst = () => 0;
+    const bands = [];
+    let start = null;
+    for (let i = 0; i <= steps; i++) {
+      const t = (scenario.dur * i) / steps;
+      const f = scenario.fault(t, worst);
+      const down = !f.ok || (f.ok && f.ms >= 1.0);
+      if (down && start === null) start = t;
+      else if (!down && start !== null) { bands.push({ from: start, to: t }); start = null; }
+    }
+    if (start !== null) bands.push({ from: start, to: scenario.dur });
+    return bands;
+  }
+
+  // ---- shared guided-tour driver: spotlight cutout + side-placed coach ----
+  // Extracted from mount() so a second mount mode (herd) reuses one implementation.
+  // `els` supplies the tour DOM (dimT/dimB/dimL/dimR/ring/coach/cArrow/cStep/
+  // cTitle/cBody/cGo). Behavior is identical to the previous inline closures.
+  function makeTour(els) {
+    // 4 dim panels leave a bright hole over the union of target rects.
+    function spotlight(nodes) {
+      const rs = nodes.map((n) => n.getBoundingClientRect());
+      const pad = 6;
+      const x0 = Math.min(...rs.map((r) => r.left)) - pad, y0 = Math.min(...rs.map((r) => r.top)) - pad;
+      const x1 = Math.max(...rs.map((r) => r.right)) + pad, y1 = Math.max(...rs.map((r) => r.bottom)) + pad;
+      const W = window.innerWidth, H = window.innerHeight;
+      const set = (node, l, t, w, h) => {
+        node.style.left = l + 'px'; node.style.top = t + 'px';
+        node.style.width = Math.max(0, w) + 'px'; node.style.height = Math.max(0, h) + 'px';
+        node.classList.add('show');
+      };
+      set(els.dimT, 0, 0, W, y0);
+      set(els.dimB, 0, y1, W, H - y1);
+      set(els.dimL, 0, y0, x0, y1 - y0);
+      set(els.dimR, x1, y0, W - x1, y1 - y0);
+      els.ring.style.left = x0 + 'px'; els.ring.style.top = y0 + 'px';
+      els.ring.style.width = (x1 - x0) + 'px'; els.ring.style.height = (y1 - y0) + 'px';
+      els.ring.classList.add('show');
+      return { x0, y0, x1, y1 };
+    }
+    function hideSpot() {
+      [els.dimT, els.dimB, els.dimL, els.dimR, els.ring].forEach((n) => n.classList.remove('show'));
+    }
+    function placeCoach(hole) {
+      const c = els.coach;
+      c.classList.add('show');
+      const cw = c.offsetWidth, ch = c.offsetHeight, gap = 16;
+      const W = window.innerWidth, H = window.innerHeight, cy = (hole.y0 + hole.y1) / 2, cx = (hole.x0 + hole.x1) / 2;
+      const room = { right: W - hole.x1, left: hole.x0, bottom: H - hole.y1, top: hole.y0 };
+      let side, left, top;
+      if (room.right >= cw + gap) { side = 'right'; left = hole.x1 + gap; top = cy - ch / 2; }
+      else if (room.left >= cw + gap) { side = 'left'; left = hole.x0 - gap - cw; top = cy - ch / 2; }
+      else if (room.bottom >= ch + gap) { side = 'bottom'; top = hole.y1 + gap; left = cx - cw / 2; }
+      else { side = 'top'; top = hole.y0 - gap - ch; left = cx - cw / 2; }
+      left = Math.min(Math.max(10, left), W - cw - 10);
+      top = Math.min(Math.max(10, top), H - ch - 10);
+      c.style.left = left + 'px'; c.style.top = top + 'px';
+      const a = els.cArrow;
+      a.style.transform = 'rotate(45deg)';
+      if (side === 'right') { a.style.left = '-7px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderRight = 'none'; a.style.borderLeft = '1px solid var(--hw-line)'; a.style.borderBottom = '1px solid var(--hw-line)'; }
+      else if (side === 'left') { a.style.left = (cw - 7) + 'px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderBottom = 'none'; a.style.borderLeft = 'none'; a.style.borderTop = '1px solid var(--hw-line)'; a.style.borderRight = '1px solid var(--hw-line)'; }
+      else if (side === 'bottom') { a.style.top = '-7px'; a.style.left = (cx - left - 6) + 'px'; a.style.borderBottom = 'none'; a.style.borderRight = 'none'; }
+      else { a.style.top = (ch - 7) + 'px'; a.style.left = (cx - left - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderLeft = 'none'; }
+    }
+    let onContinue = null;
+    els.cGo.addEventListener('click', () => {
+      els.coach.classList.remove('show'); hideSpot();
+      if (onContinue) onContinue();
+    });
+    return {
+      show(stop, stepIdx, total, spotLookup) {
+        const nodes = stop.spot.map((key) => spotLookup[key]).filter(Boolean);
+        const hole = spotlight(nodes);
+        els.cStep.textContent = `Step ${stepIdx + 1} of ${total}`;
+        els.cTitle.textContent = stop.title;
+        els.cBody.textContent = stop.body;
+        placeCoach(hole);
+      },
+      hideAll() { els.coach.classList.remove('show'); hideSpot(); },
+      setContinue(fn) { onContinue = fn; },
+    };
+  }
+
+  // ---- thundering-herd simulation (faithful; reuses the real RetryBudget model) ----
+  // N independent clients hit ONE backend through a FLAPPING outage (down, recover,
+  // down, recover...). Every backend attempt (initial + each retry) is counted into a
+  // per-bucket series for each lane.
+  //   naive: FIXED backoff, NO jitter, UNBOUNDED retries -> during each outage dip a
+  //          client retries until the backend recovers, so retries ACCUMULATE into a
+  //          surge that clears the instant the dip ends (its retry succeeds) -> a spike
+  //          per dip with a recovery gap between. The gaps are the backend healing, not
+  //          client synchronization (arrivals are phase-staggered, never lockstep).
+  //   httpware: FULL-JITTER backoff + per-client RetryBudget + maxAttempts cap ->
+  //          retry timing decorrelates into a near-constant rate; the budget and the
+  //          attempt cap bound amplification. The budget is PER CLIENT, never shared.
+  function simulateHerd(scenario, opts) {
+    const N = opts.clients, cfg = opts.retry, budgetCfg = opts.budget;
+    const dur = scenario.dur, dt = HERD.dt, ri = HERD.reqInterval;
+    const buckets = Math.ceil(dur / dt);
+    const naive = new Array(buckets).fill(0);
+    const hw = new Array(buckets).fill(0);
+    const bkt = (t) => Math.min(buckets - 1, Math.max(0, Math.floor(t / dt)));
+    const rnd = mulberry(SEED); // one deterministic stream drives jitter + any probabilistic fault
+    for (let c = 0; c < N; c++) {
+      const phase = (c / N) * ri; // spread arrivals across a request interval
+      // naive: unbounded fixed-backoff retries, no jitter
+      for (let t0 = phase; t0 < dur; t0 += ri) {
+        let t = t0, guard = 0;
+        while (t < dur) {
+          naive[bkt(t)]++;
+          const f = scenario.fault(t, rnd);
+          if (f.ok) break;
+          t += cfg.baseDelay; // fixed, no jitter, no attempt cap
+          if (++guard > HERD.maxNaive) break;
+        }
+      }
+      // httpware: full jitter + per-client budget + maxAttempts
+      const budget = makeRetryBudget(budgetCfg);
+      for (let t0 = phase; t0 < dur; t0 += ri) {
+        let t = t0, attempt = 0;
+        budget.deposit(t);           // deposit once per operation (matches terminal)
+        hw[bkt(t)]++;
+        let f = scenario.fault(t, rnd);
+        while (!f.ok && (attempt + 1) < cfg.maxAttempts && budget.tryWithdraw(t)) {
+          const backoff = rnd() * Math.min(cfg.maxDelay, cfg.baseDelay * Math.pow(2, attempt));
+          t += backoff;
+          if (t >= dur) break;
+          attempt++;
+          hw[bkt(t)]++;
+          f = scenario.fault(t, rnd);
+        }
+      }
+    }
+    const baseline = N * (dt / ri); // healthy backend calls per bucket
+    const stat = (arr) => {
+      const peak = arr.reduce((m, v) => Math.max(m, v), 0);
+      const total = arr.reduce((a, b) => a + b, 0);
+      return { series: arr, peak, total, mult: baseline > 0 ? peak / baseline : 0 };
+    };
+    return { naive: stat(naive), hw: stat(hw), buckets, dt, baseline,
+      outage: computeOutageWindow(scenario), outageBands: computeOutageBands(scenario) };
+  }
+
+  // Render a call-rate strip as an SVG of vertical bars into `el`. Buckets [0,
+  // revealUpTo) are drawn (progressive reveal during playback). peakScale is shared
+  // across both strips so their heights are comparable and httpware's flatness reads
+  // honestly against naive's spikes. viewBox is unitless; CSS sizes the strip.
+  function renderRateStrip(el, series, revealUpTo, opts) {
+    const n = series.length, W = 100, H = 100, bw = W / n;
+    const scale = opts.peakScale > 0 ? H / opts.peakScale : 0;
+    let body = '';
+    const bands = opts.outageBands || (opts.outage ? [opts.outage] : []);
+    for (const b of bands) {
+      const ox = (b.from / opts.dur) * W;
+      const ow = ((b.to - b.from) / opts.dur) * W;
+      body += `<rect x="${ox.toFixed(2)}" y="0" width="${ow.toFixed(2)}" height="${H}" class="herd-band"/>`;
+    }
+    const upto = Math.min(revealUpTo, n);
+    for (let i = 0; i < upto; i++) {
+      const h = Math.min(H, series[i] * scale);
+      if (h <= 0) continue;
+      body += `<rect x="${(i * bw).toFixed(2)}" y="${(H - h).toFixed(2)}" width="${Math.max(0.5, bw - 0.3).toFixed(2)}" height="${h.toFixed(2)}" class="${opts.cls}"/>`;
+    }
+    const by = H - Math.min(H, opts.baseline * scale);
+    body += `<line x1="0" y1="${by.toFixed(2)}" x2="${W}" y2="${by.toFixed(2)}" class="herd-baseline"/>`;
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="herd-svg">${body}</svg>`;
+  }
+
+  // CSS-driven conic countdown ring overlaid on an element. fraction 0..1 is the
+  // ELAPSED share of the wait; 0 or >=1 clears it. No per-frame DOM churn — sets a
+  // custom property the ::after conic-gradient reads.
+  function renderCountdownRing(el, fraction) {
+    if (!el) return;
+    const f = Math.max(0, Math.min(1, fraction));
+    if (f <= 0 || f >= 1) { el.classList.remove('counting'); el.style.removeProperty('--hw-ring'); return; }
+    el.classList.add('counting');
+    el.style.setProperty('--hw-ring', (f * 360).toFixed(0) + 'deg');
+  }
+
+  function herdTemplate(config) {
+    const title = config.title || 'Now scale it to 20 clients';
+    const intro = config.intro || 'One client retrying a blip is invisible. Twenty clients retrying an ' +
+      'outage is a traffic weapon — unless their retries are spread out and capped. ' +
+      'These strips show <b>backend call-rate over time</b>. Press play and watch the shape.';
+    return `
+<div class="hw-wrap herd-wrap">
+  <h2>${esc(title)}</h2>
+  <p class="intro">${intro}</p>
+  <div class="ctl">
+    <button type="button" class="play" data-el="hplay">&#9654; Run the storm</button>
+    <button type="button" class="play ghost" data-el="hreplay">&#8635; Replay</button>
+  </div>
+
+  <div class="herd-lane">
+    <h3>20 naive clients <span class="badge bad">fixed backoff, no jitter, unbounded</span></h3>
+    <div class="herd-strip" data-el="naiveStrip"></div>
+    <div class="score">
+      <span class="stat" data-el="naiveMult"><span class="k">peak load</span> <span class="fail-big" data-el="naiveMultN">1&times;</span></span>
+      <span class="stat" data-el="naiveTotal"><span class="k">calls sent</span> <span class="big" data-el="naiveTotalN">0</span></span>
+    </div>
+  </div>
+
+  <div class="herd-lane">
+    <h3>20 httpware clients <span class="badge ok">full jitter + per-client budget</span></h3>
+    <div class="herd-strip" data-el="hwStrip"></div>
+    <div class="score">
+      <span class="stat" data-el="hwMult"><span class="k">peak load</span> <span class="fail-big" data-el="hwMultN">1&times;</span></span>
+      <span class="stat" data-el="hwTotal"><span class="k">calls sent</span> <span class="big" data-el="hwTotalN">0</span></span>
+    </div>
+  </div>
+
+  <p class="note">Faithful model: each httpware client owns its RetryBudget (never shared). Jitter flattens the visible spikes; the budget + max_attempts cap what a longer storm could do.</p>
+</div>
+
+<div class="dim" data-el="dimT"></div><div class="dim" data-el="dimB"></div>
+<div class="dim" data-el="dimL"></div><div class="dim" data-el="dimR"></div>
+<div class="ring" data-el="ring"></div>
+<div class="coach" data-el="coach">
+  <div class="c-arrow" data-el="cArrow"></div>
+  <div class="step" data-el="cStep">Step 1 of 1</div>
+  <h4 data-el="cTitle"></h4><p data-el="cBody"></p>
+  <button type="button" class="go" data-el="cGo">Continue &#9654;</button>
+</div>`;
+  }
+
+  function mountHerd(selector, config) {
+    const container = document.querySelector(selector);
+    if (!container) return;
+    container.classList.add('hw-demo');
+    container.innerHTML = herdTemplate(config);
+    const $ = (k) => container.querySelector('[data-el="' + k + '"]');
+    const els = {
+      hplay: $('hplay'), hreplay: $('hreplay'),
+      naiveStrip: $('naiveStrip'), hwStrip: $('hwStrip'),
+      naiveMult: $('naiveMult'), naiveMultN: $('naiveMultN'), naiveTotal: $('naiveTotal'), naiveTotalN: $('naiveTotalN'),
+      hwMult: $('hwMult'), hwMultN: $('hwMultN'), hwTotal: $('hwTotal'), hwTotalN: $('hwTotalN'),
+      dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
+      coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
+    };
+    const SPOT = { naiveMult: els.naiveMult, hwMult: els.hwMult, naiveTotal: els.naiveTotal,
+      hwTotal: els.hwTotal, naiveStrip: els.naiveStrip, hwStrip: els.hwStrip };
+    const tour = makeTour(els);
+
+    let timer = null, paused = false, reveal = 0, stopIdx = 0, STOPS = [];
+    const scenario = config.scenario;
+    let sim = null;
+
+    function paint() {
+      const peakScale = Math.max(sim.naive.peak, sim.hw.peak, 1);
+      const stripOpts = (cls) => ({ peakScale, baseline: sim.baseline, outage: sim.outage, outageBands: sim.outageBands, dur: scenario.dur, cls });
+      renderRateStrip(els.naiveStrip, sim.naive.series, reveal, stripOpts('herd-bar-naive'));
+      renderRateStrip(els.hwStrip, sim.hw.series, reveal, stripOpts('herd-bar-hw'));
+      // running peak/total over revealed buckets so the numbers climb with the bars
+      const upto = Math.min(reveal, sim.buckets);
+      const runPeak = (arr) => arr.slice(0, upto).reduce((m, v) => Math.max(m, v), 0);
+      const runTot = (arr) => arr.slice(0, upto).reduce((a, b) => a + b, 0);
+      const nm = sim.baseline > 0 ? runPeak(sim.naive.series) / sim.baseline : 0;
+      const hm = sim.baseline > 0 ? runPeak(sim.hw.series) / sim.baseline : 0;
+      els.naiveMultN.textContent = nm.toFixed(1) + '×';
+      els.hwMultN.textContent = hm.toFixed(1) + '×';
+      els.naiveTotalN.textContent = String(runTot(sim.naive.series));
+      els.hwTotalN.textContent = String(runTot(sim.hw.series));
+      // httpware is bounded by max_attempts, not a hard multiplier cap — it settles
+      // near ~3x for this scenario, never near naive's per-dip ~18x. Thresholds
+      // reflect that measured gap, not the placeholder "<=2x is good" assumption.
+      els.naiveMultN.style.color = nm > 5 ? 'var(--hw-bad)' : '';
+      els.hwMultN.style.color = hm <= 4 ? 'var(--hw-ok)' : '';
+    }
+
+    function reset() {
+      clearInterval(timer); reveal = 0; stopIdx = 0; paused = false;
+      sim = simulateHerd(scenario, { clients: config.clients, retry: config.retry, budget: config.budget });
+      STOPS = config.buildStops(sim);
+      tour.hideAll();
+      paint();
+    }
+    tour.setContinue(() => { paused = false; stopIdx++; });
+
+    function run() {
+      reset();
+      timer = setInterval(() => {
+        if (paused) return;
+        const state = { bucket: reveal, revealed: reveal, sim,
+          naiveShown: sim.naive.series.slice(0, reveal).reduce((a, b) => a + b, 0),
+          hwShown: sim.hw.series.slice(0, reveal).reduce((a, b) => a + b, 0) };
+        if (stopIdx < STOPS.length && STOPS[stopIdx].when(state)) {
+          paused = true; tour.show(STOPS[stopIdx], stopIdx, STOPS.length, SPOT); return;
+        }
+        reveal++;
+        paint();
+        if (reveal > sim.buckets) clearInterval(timer);
+      }, TICK);
+    }
+    els.hplay.addEventListener('click', run);
+    els.hreplay.addEventListener('click', run);
+    reset(); // first paint shows the empty strips + baseline, ready to play
+  }
+
   function template(config) {
     const scenarioBtns = config.scenarios.map((sc) =>
       `<button type="button" class="scenario-btn" data-scenario="${esc(sc.id)}">${esc(sc.label)}</button>`
@@ -238,6 +545,11 @@ window.HttpwareDemo = (function () {
   </div>
 
   <p class="note" data-el="note">Faithful model of httpware, not httpware running in your browser. Pick a scenario above to begin.</p>
+
+  <div class="macro" data-el="macroWrap" style="display:none">
+    <div class="macro-head"><span class="k">backend call-rate</span> &mdash; <span data-el="macroStage">healthy</span></div>
+    <div class="herd-strip" data-el="macroStrip"></div>
+  </div>
 </div>
 
 <div class="dim" data-el="dimT"></div><div class="dim" data-el="dimB"></div>
@@ -268,10 +580,17 @@ window.HttpwareDemo = (function () {
       poolWrap: $('poolWrap'), poolB: $('poolB'),
       elapsedWrap: $('elapsedWrap'), elapsedB: $('elapsedB'),
       note: $('note'),
+      macroWrap: $('macroWrap'), macroStrip: $('macroStrip'), macroStage: $('macroStage'),
       dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
       coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
     };
     const ELS = { ifA: els.ifA, latA: els.latA, badWrapA: els.badWrapA, ifB: els.ifB, latB: els.latB, badWrapB: els.badWrapB, brkB: els.brkB, poolB: els.poolB, elapsedB: els.elapsedB };
+    const tour = makeTour(els);
+    tour.setContinue(() => { paused = false; stopIdx++; });
+    function showStop(s) {
+      paused = true;
+      tour.show(s, stopIdx, STOPS.length, ELS);
+    }
 
     // Built fresh inside run() from the selected scenario (STOPS is never read before a
     // scenario is played, so it's safe to leave empty until then) — pages with one
@@ -287,6 +606,7 @@ window.HttpwareDemo = (function () {
     let A = { ok: 0, bad: 0, if: 0, pend: [] };
     let B = { ok: 0, bad: 0, rej: 0, if: 0, pend: [] };
     let brk = null;
+    let macroSeries = []; // lane-B backend calls per tick, for config.macroStrip
     let bulk = null;
     let retryCfg = null, budget = null, budgetExhausted = false;
     let tmoCfg = null, timedOutCount = 0;
@@ -314,70 +634,6 @@ window.HttpwareDemo = (function () {
         else d.node.style.left = d.x + '%';
       }
     }
-
-    // ---- spotlight: 4 dim panels leave a bright hole over the union of targets ----
-    function spotlight(nodes) {
-      const rs = nodes.map((n) => n.getBoundingClientRect());
-      const pad = 6;
-      const x0 = Math.min(...rs.map((r) => r.left)) - pad, y0 = Math.min(...rs.map((r) => r.top)) - pad;
-      const x1 = Math.max(...rs.map((r) => r.right)) + pad, y1 = Math.max(...rs.map((r) => r.bottom)) + pad;
-      const W = window.innerWidth, H = window.innerHeight;
-      const set = (node, l, t, w, h) => {
-        node.style.left = l + 'px'; node.style.top = t + 'px';
-        node.style.width = Math.max(0, w) + 'px'; node.style.height = Math.max(0, h) + 'px';
-        node.classList.add('show');
-      };
-      set(els.dimT, 0, 0, W, y0);
-      set(els.dimB, 0, y1, W, H - y1);
-      set(els.dimL, 0, y0, x0, y1 - y0);
-      set(els.dimR, x1, y0, W - x1, y1 - y0);
-      els.ring.style.left = x0 + 'px'; els.ring.style.top = y0 + 'px';
-      els.ring.style.width = (x1 - x0) + 'px'; els.ring.style.height = (y1 - y0) + 'px';
-      els.ring.classList.add('show');
-      return { x0, y0, x1, y1 };
-    }
-    function hideSpot() {
-      [els.dimT, els.dimB, els.dimL, els.dimR, els.ring].forEach((n) => n.classList.remove('show'));
-    }
-
-    // ---- place coach on the side with the most room; arrow points at target ----
-    function placeCoach(hole) {
-      const c = els.coach;
-      c.classList.add('show');
-      const cw = c.offsetWidth, ch = c.offsetHeight, gap = 16;
-      const W = window.innerWidth, H = window.innerHeight, cy = (hole.y0 + hole.y1) / 2, cx = (hole.x0 + hole.x1) / 2;
-      const room = { right: W - hole.x1, left: hole.x0, bottom: H - hole.y1, top: hole.y0 };
-      let side, left, top;
-      if (room.right >= cw + gap) { side = 'right'; left = hole.x1 + gap; top = cy - ch / 2; }
-      else if (room.left >= cw + gap) { side = 'left'; left = hole.x0 - gap - cw; top = cy - ch / 2; }
-      else if (room.bottom >= ch + gap) { side = 'bottom'; top = hole.y1 + gap; left = cx - cw / 2; }
-      else { side = 'top'; top = hole.y0 - gap - ch; left = cx - cw / 2; }
-      left = Math.min(Math.max(10, left), W - cw - 10);
-      top = Math.min(Math.max(10, top), H - ch - 10);
-      c.style.left = left + 'px'; c.style.top = top + 'px';
-      const a = els.cArrow;
-      a.style.transform = 'rotate(45deg)';
-      if (side === 'right') { a.style.left = '-7px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderRight = 'none'; a.style.borderLeft = '1px solid var(--hw-line)'; a.style.borderBottom = '1px solid var(--hw-line)'; }
-      else if (side === 'left') { a.style.left = (cw - 7) + 'px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderBottom = 'none'; a.style.borderLeft = 'none'; a.style.borderTop = '1px solid var(--hw-line)'; a.style.borderRight = '1px solid var(--hw-line)'; }
-      else if (side === 'bottom') { a.style.top = '-7px'; a.style.left = (cx - left - 6) + 'px'; a.style.borderBottom = 'none'; a.style.borderRight = 'none'; }
-      else { a.style.top = (ch - 7) + 'px'; a.style.left = (cx - left - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderLeft = 'none'; }
-    }
-
-    function showStop(s) {
-      paused = true;
-      const nodes = s.spot.map((key) => ELS[key]).filter(Boolean);
-      const hole = spotlight(nodes);
-      els.cStep.textContent = `Step ${stopIdx + 1} of ${STOPS.length}`;
-      els.cTitle.textContent = s.title;
-      els.cBody.textContent = s.body;
-      placeCoach(hole);
-    }
-    els.cGo.addEventListener('click', () => {
-      els.coach.classList.remove('show');
-      hideSpot();
-      paused = false;
-      stopIdx++;
-    });
 
     function setupOutageBar(scenario) {
       const win = computeOutageWindow(scenario);
@@ -407,17 +663,20 @@ window.HttpwareDemo = (function () {
       // box reads "no breaker" on a circuit-breaker page until the first Play.
       const cfgB = selectedScenario ? selectedScenario.chainB : {};
       els.brkB.className = 'box'; els.brkB.textContent = cfgB.circuitBreaker ? 'breaker CLOSED' : 'no breaker';
+      els.brkB.classList.remove('counting'); els.brkB.style.removeProperty('--hw-ring');
+      els.elapsedB.classList.remove('counting'); els.elapsedB.style.removeProperty('--hw-ring');
       els.poolWrap.style.display = cfgB.bulkhead ? '' : 'none';
       els.poolB.textContent = cfgB.bulkhead ? ('0/' + cfgB.bulkhead.maxConcurrent) : '—';
       els.elapsedWrap.style.display = cfgB.timeout ? '' : 'none';
       els.elapsedB.textContent = cfgB.timeout ? ('0.0s / ' + cfgB.timeout.timeout.toFixed(1) + 's') : '—';
+      els.macroWrap.style.display = (selectedScenario && config.macroStrip) ? '' : 'none';
       els.srvA.className = 'box'; els.srvA.textContent = 'server ✓';
       els.srvB.className = 'box'; els.srvB.textContent = 'server ✓';
       els.laneA.className = 'lane'; els.laneB.className = 'lane';
       els.playhead.style.left = '0%';
       els.badgeA.className = 'badge'; els.badgeA.textContent = 'no protection';
       els.badgeB.className = 'badge'; els.badgeB.textContent = selectedScenario ? chainLabel(selectedScenario.chainB) : 'CircuitBreaker';
-      els.coach.classList.remove('show'); hideSpot();
+      tour.hideAll();
     }
 
     function updateUI(now, lastFault) {
@@ -469,6 +728,15 @@ window.HttpwareDemo = (function () {
       const okBadge = st === 'CLOSED' && brk && !stressed;
       els.badgeB.className = 'badge ' + (st === 'OPEN' ? 'warn' : okBadge ? 'ok' : '');
       els.badgeB.textContent = st === 'OPEN' ? 'fast-failing' : st === 'HALF_OPEN' ? 'probing' : chainLabel(selectedScenario.chainB);
+      // countdown ring (config.ring): show the multi-second wait this page is about.
+      if (config.ring === 'deadline' && tmoCfg) {
+        renderCountdownRing(els.elapsedB, maxElapsed / tmoCfg.timeout);
+      } else if (config.ring === 'reset' && brk && brk.state === 'OPEN') {
+        const R = selectedScenario.chainB.circuitBreaker.resetTimeout;
+        renderCountdownRing(els.brkB, (now - brk.openedAt) / R);
+      } else if (config.ring === 'reset') {
+        renderCountdownRing(els.brkB, 0); // clear once the breaker leaves OPEN
+      }
     }
 
     function run() {
@@ -490,6 +758,8 @@ window.HttpwareDemo = (function () {
       timedOutCount = 0;
       rnd = mulberry(SEED);
       resetVisual();
+      macroSeries = new Array(Math.ceil(scenario.dur * 1000 / TICK) + 2).fill(0);
+      if (config.macroStrip) els.macroWrap.style.display = '';
 
       timer = setInterval(() => {
         if (paused) return;
@@ -537,6 +807,7 @@ window.HttpwareDemo = (function () {
                   L.pend.push({ land, ok: f2.ok, attempt: nextAttempt, bh: p.bh, start: p.start, deadline: p.deadline, timedOut });
                   spawnDot(dotsB, els.trackB, f2.ok ? 'ok' : 'bad');
                   retried = true;
+                  if (config.macroStrip) macroSeries[tick]++;
                 } else if (budget) {
                   budgetExhausted = true;
                 }
@@ -583,9 +854,16 @@ window.HttpwareDemo = (function () {
             const { land, timedOut } = clampToDeadline(tick, landTicks, deadline);
             B.if++; B.pend.push({ land, ok: f.ok, attempt: 0, bh: !!bulk, start: now, deadline, timedOut });
             spawnDot(dotsB, els.trackB, f.ok ? 'ok' : 'bad');
+            if (config.macroStrip) macroSeries[tick]++;
           }
         }
         updateUI(now, lastFault);
+        if (config.macroStrip) {
+          const peak = macroSeries.reduce((m, v) => Math.max(m, v), 0) || 1;
+          renderRateStrip(els.macroStrip, macroSeries, tick + 1,
+            { peakScale: peak, baseline: 0, outage: null, dur: scenario.dur * 1000 / TICK, cls: 'herd-bar-hw' });
+          els.macroStage.textContent = config.stageLabel ? config.stageLabel(now) : '';
+        }
         tick++;
         if (now >= scenario.dur) clearInterval(timer);
       }, TICK);
@@ -614,5 +892,6 @@ window.HttpwareDemo = (function () {
     if (firstScenarioBtn) firstScenarioBtn.click();
   }
 
-  return { mount, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead }, _util: { mulberry }, REAL, TICK, ADV };
+  return { mount, mountHerd, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead, simulateHerd },
+    _render: { renderRateStrip }, _util: { mulberry }, REAL, TICK, ADV };
 })();

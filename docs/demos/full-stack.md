@@ -24,6 +24,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 retry: { maxAttempts: 3, baseDelay: 0.1, maxDelay: 5.0 },
                 budget: { ttl: 10.0, minRetriesPerSec: 10.0, percentCanRetry: 0.2 } } },
   ],
+  macroStrip: true,
+  stageLabel: (now) => now < 2 ? 'healthy'
+    : now < 5 ? 'phase 1 — latency spike'
+    : now < 8 ? 'phase 2 — brownout'
+    : now < 12 ? 'phase 3 — hard down' : 'recovered',
   buildStops: () => [
     { when: (s) => s.now >= 2.4, spot: ['poolB', 'elapsedB'], title: 'Phase 1 — latency spike',
       body: 'Bulkhead caps concurrency so the slow phase can’t exhaust the client; timeout bounds each operation at 2s.' },
