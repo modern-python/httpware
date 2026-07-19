@@ -8,7 +8,8 @@ and probing for recovery.
 <div class="hw-demo" id="cb-demo"></div>
 
 <script>
-HttpwareDemo.mount('#cb-demo', {
+document.addEventListener('DOMContentLoaded', function () {
+  HttpwareDemo.mount('#cb-demo', {
   scenarios: [
     { id: 'down', label: 'Backend goes down', dur: 12.5,
       fault: (now) => (now >= 2.0 && now < 8.0)
@@ -32,5 +33,6 @@ HttpwareDemo.mount('#cb-demo', {
     { when: (s) => s.mw.recovered, spot: ['brkB'], title: 'Recovery via one probe',
       body: 'Backend is back. The breaker admits exactly ONE probe, sees success, and closes — no thundering herd.' },
   ],
+  });
 });
 </script>

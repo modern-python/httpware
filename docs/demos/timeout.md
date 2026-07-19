@@ -7,7 +7,8 @@ including every retry and every backoff sleep, so one call can't blow your laten
 <div class="hw-demo" id="to-demo"></div>
 
 <script>
-HttpwareDemo.mount('#to-demo', {
+document.addEventListener('DOMContentLoaded', function () {
+  HttpwareDemo.mount('#to-demo', {
   scenarios: [
     { id: 'brownout', label: 'Slow brownout under retry', dur: 12.5,
       fault: (now, rnd) => (now >= 2.0 && now < 9.0)
@@ -27,5 +28,6 @@ HttpwareDemo.mount('#to-demo', {
     { when: (s) => s.now >= 10.0, spot: ['latA', 'elapsedB'], title: 'Bounded tail latency',
       body: 'Retry rescues what it can within budget; the timeout guarantees the tail. Together they bound both failure and latency.' },
   ],
+  });
 });
 </script>

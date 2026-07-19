@@ -7,7 +7,8 @@ Here a nasty multi-phase incident hits both clients; watch the layers interlock.
 <div class="hw-demo" id="fs-demo"></div>
 
 <script>
-HttpwareDemo.mount('#fs-demo', {
+document.addEventListener('DOMContentLoaded', function () {
+  HttpwareDemo.mount('#fs-demo', {
   scenarios: [
     { id: 'incident', label: 'Multi-phase incident', dur: 16.0,
       fault: (now, rnd) => {
@@ -33,5 +34,6 @@ HttpwareDemo.mount('#fs-demo', {
     { when: (s) => s.now >= 13.5, spot: ['ifA', 'latA', 'ifB', 'latB'], title: 'The whole stack vs nothing',
       body: 'Plain client: cascading meltdown across every phase. httpware: each layer absorbs the phase it’s built for. That is why they compose.' },
   ],
+  });
 });
 </script>

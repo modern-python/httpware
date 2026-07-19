@@ -7,7 +7,8 @@ calls fail fast with `BulkheadFullError` instead of piling up and exhausting the
 <div class="hw-demo" id="bh-demo"></div>
 
 <script>
-HttpwareDemo.mount('#bh-demo', {
+document.addEventListener('DOMContentLoaded', function () {
+  HttpwareDemo.mount('#bh-demo', {
   scenarios: [
     { id: 'slow', label: 'Dependency turns slow', dur: 12.5,
       fault: (now) => (now >= 2.0 && now < 9.0)
@@ -24,5 +25,6 @@ HttpwareDemo.mount('#bh-demo', {
     { when: (s) => s.now >= 6.0, spot: ['ifA', 'poolB'], title: 'Bounded vs unbounded',
       body: 'Plain client: in-flight unbounded, whole client degraded. httpware: in-flight pinned at the pool size, blast radius contained to this one dependency.' },
   ],
+  });
 });
 </script>

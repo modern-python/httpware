@@ -8,7 +8,8 @@ a dead backend can't be amplified.
 <div class="hw-demo" id="retry-demo"></div>
 
 <script>
-HttpwareDemo.mount('#retry-demo', {
+document.addEventListener('DOMContentLoaded', function () {
+  HttpwareDemo.mount('#retry-demo', {
   scenarios: [
     { id: 'blip', label: 'Brief blip (recovers)', dur: 12.5,
       fault: (now, rnd) => (now >= 2.0 && now < 3.2)
@@ -38,5 +39,6 @@ HttpwareDemo.mount('#retry-demo', {
     { when: (s) => s.now >= 10.0, spot: ['ifA', 'ifB'], title: 'Blip: recovered',
       body: 'The backend healed and so did both clients — but compare the ✗ counts: httpware surfaced far fewer failures to the caller. That is what retry buys you on a transient blip.' },
   ],
+  });
 });
 </script>
