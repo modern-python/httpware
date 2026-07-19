@@ -96,6 +96,7 @@
 .hw-demo .score .k { color: var(--hw-muted); }
 .hw-demo .stat { padding: 2px 6px; border-radius: 6px; }
 .hw-demo .inflight-big { font-size: 1.15rem; font-weight: 700; transition: color .3s; }
+.hw-demo .fail-big { font-size: 1.15rem; font-weight: 700; transition: color .3s; }
 .hw-demo .big { font-weight: 700; }
 .hw-demo .note { color: var(--hw-muted); font-size: .76rem; font-style: italic; margin-top: 6px; }
 

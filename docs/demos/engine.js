@@ -213,7 +213,7 @@ window.HttpwareDemo = (function () {
     <div class="score">
       <span class="stat"><span class="k">in-flight</span> <span class="inflight-big" data-el="ifA">0</span></span>
       <span class="k">&#10003; <span data-el="okA">0</span></span>
-      <span class="k">&#10007; <span data-el="badA">0</span></span>
+      <span class="stat" data-el="badWrapA"><span class="k">&#10007; failed</span> <span class="fail-big" data-el="badA">0</span></span>
       <span class="stat"><span class="k">p99</span> <span class="big" data-el="latA">40ms</span></span>
     </div>
   </div>
@@ -229,7 +229,7 @@ window.HttpwareDemo = (function () {
     <div class="score">
       <span class="stat"><span class="k">in-flight</span> <span class="inflight-big" data-el="ifB">0</span></span>
       <span class="k">&#10003; <span data-el="okB">0</span></span>
-      <span class="k">&#10007; <span data-el="badB">0</span></span>
+      <span class="stat" data-el="badWrapB"><span class="k">&#10007; failed</span> <span class="fail-big" data-el="badB">0</span></span>
       <span class="k">&#9211; fast-failed <span data-el="rejB">0</span></span>
       <span class="stat" data-el="poolWrap" style="display:none"><span class="k">pool</span> <span class="big" data-el="poolB">&mdash;</span></span>
       <span class="stat" data-el="elapsedWrap" style="display:none"><span class="k">elapsed</span> <span class="big" data-el="elapsedB">&mdash;</span></span>
@@ -262,16 +262,16 @@ window.HttpwareDemo = (function () {
       scenarios: $('scenarios'), play: $('play'), replay: $('replay'), scenLabel: $('scenLabel'),
       timeline: $('timeline'), outage: $('outage'), outageLabel: $('outageLabel'), playhead: $('playhead'),
       laneA: $('laneA'), badgeA: $('badgeA'), srvA: $('srvA'), trackA: $('trackA'),
-      ifA: $('ifA'), okA: $('okA'), badA: $('badA'), latA: $('latA'),
+      ifA: $('ifA'), okA: $('okA'), badA: $('badA'), badWrapA: $('badWrapA'), latA: $('latA'),
       laneB: $('laneB'), badgeB: $('badgeB'), srvB: $('srvB'), trackB: $('trackB'), brkB: $('brkB'),
-      ifB: $('ifB'), okB: $('okB'), badB: $('badB'), rejB: $('rejB'), latB: $('latB'),
+      ifB: $('ifB'), okB: $('okB'), badB: $('badB'), badWrapB: $('badWrapB'), rejB: $('rejB'), latB: $('latB'),
       poolWrap: $('poolWrap'), poolB: $('poolB'),
       elapsedWrap: $('elapsedWrap'), elapsedB: $('elapsedB'),
       note: $('note'),
       dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
       coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
     };
-    const ELS = { ifA: els.ifA, latA: els.latA, ifB: els.ifB, latB: els.latB, brkB: els.brkB, poolB: els.poolB, elapsedB: els.elapsedB };
+    const ELS = { ifA: els.ifA, latA: els.latA, badWrapA: els.badWrapA, ifB: els.ifB, latB: els.latB, badWrapB: els.badWrapB, brkB: els.brkB, poolB: els.poolB, elapsedB: els.elapsedB };
 
     // Built fresh inside run() from the selected scenario (STOPS is never read before a
     // scenario is played, so it's safe to leave empty until then) — pages with one
@@ -401,7 +401,7 @@ window.HttpwareDemo = (function () {
       els.ifA.textContent = '0'; els.okA.textContent = '0'; els.badA.textContent = '0';
       els.ifB.textContent = '0'; els.okB.textContent = '0'; els.badB.textContent = '0'; els.rejB.textContent = '0';
       els.latA.textContent = '40ms'; els.latB.textContent = '40ms';
-      [els.latA, els.latB, els.ifA, els.ifB].forEach((n) => { n.style.color = ''; });
+      [els.latA, els.latB, els.ifA, els.ifB, els.badA, els.badB].forEach((n) => { n.style.color = ''; });
       // Flow-diagram boxes reflect the selected scenario's CHAIN config, not the runtime
       // middleware objects (which aren't constructed until run()). Otherwise the breaker
       // box reads "no breaker" on a circuit-breaker page until the first Play.
@@ -425,6 +425,8 @@ window.HttpwareDemo = (function () {
       els.ifB.textContent = B.if; els.okB.textContent = B.ok; els.badB.textContent = B.bad; els.rejB.textContent = B.rej;
       els.ifA.style.color = A.if > 10 ? 'var(--hw-bad)' : '';
       els.ifB.style.color = B.if <= 6 ? 'var(--hw-ok)' : '';
+      els.badA.style.color = A.bad > 0 ? 'var(--hw-bad)' : '';
+      els.badB.style.color = B.bad > 0 ? 'var(--hw-bad)' : '';
       if (bulk) els.poolB.textContent = bulk.inUse + '/' + bulk.max;
       let maxElapsed = 0;
       if (tmoCfg) {
