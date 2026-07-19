@@ -335,6 +335,125 @@ window.HttpwareDemo = (function () {
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="herd-svg">${body}</svg>`;
   }
 
+  function herdTemplate(config) {
+    const title = config.title || 'Now scale it to 20 clients';
+    const intro = config.intro || 'One client retrying a blip is invisible. Twenty clients retrying a ' +
+      '<b>sustained</b> outage is a traffic weapon — unless their retries are spread out and capped. ' +
+      'These strips show <b>backend call-rate over time</b>. Press play and watch the shape.';
+    return `
+<div class="hw-wrap herd-wrap">
+  <h2>${esc(title)}</h2>
+  <p class="intro">${intro}</p>
+  <div class="ctl">
+    <button type="button" class="play" data-el="hplay">&#9654; Run the storm</button>
+    <button type="button" class="play ghost" data-el="hreplay">&#8635; Replay</button>
+  </div>
+
+  <div class="herd-lane">
+    <h3>20 naive clients <span class="badge bad">fixed backoff, no jitter, unbounded</span></h3>
+    <div class="herd-strip" data-el="naiveStrip"></div>
+    <div class="score">
+      <span class="stat" data-el="naiveMult"><span class="k">peak load</span> <span class="fail-big" data-el="naiveMultN">1&times;</span></span>
+      <span class="stat" data-el="naiveTotal"><span class="k">calls sent</span> <span class="big" data-el="naiveTotalN">0</span></span>
+    </div>
+  </div>
+
+  <div class="herd-lane">
+    <h3>20 httpware clients <span class="badge ok">full jitter + per-client budget</span></h3>
+    <div class="herd-strip" data-el="hwStrip"></div>
+    <div class="score">
+      <span class="stat" data-el="hwMult"><span class="k">peak load</span> <span class="fail-big" data-el="hwMultN">1&times;</span></span>
+      <span class="stat" data-el="hwTotal"><span class="k">calls sent</span> <span class="big" data-el="hwTotalN">0</span></span>
+    </div>
+  </div>
+
+  <p class="note">Faithful model: each httpware client owns its RetryBudget (never shared). Jitter flattens the visible spikes; the budget + max_attempts cap what a longer storm could do.</p>
+</div>
+
+<div class="dim" data-el="dimT"></div><div class="dim" data-el="dimB"></div>
+<div class="dim" data-el="dimL"></div><div class="dim" data-el="dimR"></div>
+<div class="ring" data-el="ring"></div>
+<div class="coach" data-el="coach">
+  <div class="c-arrow" data-el="cArrow"></div>
+  <div class="step" data-el="cStep">Step 1 of 1</div>
+  <h4 data-el="cTitle"></h4><p data-el="cBody"></p>
+  <button type="button" class="go" data-el="cGo">Continue &#9654;</button>
+</div>`;
+  }
+
+  function mountHerd(selector, config) {
+    const container = document.querySelector(selector);
+    if (!container) return;
+    container.classList.add('hw-demo');
+    container.innerHTML = herdTemplate(config);
+    const $ = (k) => container.querySelector('[data-el="' + k + '"]');
+    const els = {
+      hplay: $('hplay'), hreplay: $('hreplay'),
+      naiveStrip: $('naiveStrip'), hwStrip: $('hwStrip'),
+      naiveMult: $('naiveMult'), naiveMultN: $('naiveMultN'), naiveTotal: $('naiveTotal'), naiveTotalN: $('naiveTotalN'),
+      hwMult: $('hwMult'), hwMultN: $('hwMultN'), hwTotal: $('hwTotal'), hwTotalN: $('hwTotalN'),
+      dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
+      coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
+    };
+    const SPOT = { naiveMult: els.naiveMult, hwMult: els.hwMult, naiveTotal: els.naiveTotal,
+      hwTotal: els.hwTotal, naiveStrip: els.naiveStrip, hwStrip: els.hwStrip };
+    const tour = makeTour(els);
+
+    let timer = null, paused = false, reveal = 0, stopIdx = 0, STOPS = [];
+    const scenario = config.scenario;
+    let sim = null;
+
+    function paint() {
+      const peakScale = Math.max(sim.naive.peak, sim.hw.peak, 1);
+      const stripOpts = (cls) => ({ peakScale, baseline: sim.baseline, outage: sim.outage, dur: scenario.dur, cls });
+      renderRateStrip(els.naiveStrip, sim.naive.series, reveal, stripOpts('herd-bar-naive'));
+      renderRateStrip(els.hwStrip, sim.hw.series, reveal, stripOpts('herd-bar-hw'));
+      // running peak/total over revealed buckets so the numbers climb with the bars
+      const upto = Math.min(reveal, sim.buckets);
+      const runPeak = (arr) => arr.slice(0, upto).reduce((m, v) => Math.max(m, v), 0);
+      const runTot = (arr) => arr.slice(0, upto).reduce((a, b) => a + b, 0);
+      const nm = sim.baseline > 0 ? runPeak(sim.naive.series) / sim.baseline : 0;
+      const hm = sim.baseline > 0 ? runPeak(sim.hw.series) / sim.baseline : 0;
+      els.naiveMultN.textContent = nm.toFixed(1) + '×';
+      els.hwMultN.textContent = hm.toFixed(1) + '×';
+      els.naiveTotalN.textContent = String(runTot(sim.naive.series));
+      els.hwTotalN.textContent = String(runTot(sim.hw.series));
+      // httpware is bounded by max_attempts, not a hard multiplier cap — it settles
+      // near ~3x for this scenario, never near naive's unbounded ~70x. Thresholds
+      // reflect that measured gap, not the placeholder "<=2x is good" assumption.
+      els.naiveMultN.style.color = nm > 5 ? 'var(--hw-bad)' : '';
+      els.hwMultN.style.color = hm <= 4 ? 'var(--hw-ok)' : '';
+    }
+
+    function reset() {
+      clearInterval(timer); reveal = 0; stopIdx = 0; paused = false;
+      sim = simulateHerd(scenario, { clients: config.clients, retry: config.retry, budget: config.budget });
+      STOPS = config.buildStops(sim);
+      tour.hideAll();
+      paint();
+    }
+    tour.setContinue(() => { paused = false; stopIdx++; });
+
+    function run() {
+      reset();
+      timer = setInterval(() => {
+        if (paused) return;
+        const state = { bucket: reveal, revealed: reveal, sim,
+          naiveShown: sim.naive.series.slice(0, reveal).reduce((a, b) => a + b, 0),
+          hwShown: sim.hw.series.slice(0, reveal).reduce((a, b) => a + b, 0) };
+        if (stopIdx < STOPS.length && STOPS[stopIdx].when(state)) {
+          paused = true; tour.show(STOPS[stopIdx], stopIdx, STOPS.length, SPOT); return;
+        }
+        reveal++;
+        paint();
+        if (reveal > sim.buckets) clearInterval(timer);
+      }, TICK);
+    }
+    els.hplay.addEventListener('click', run);
+    els.hreplay.addEventListener('click', run);
+    reset(); // first paint shows the empty strips + baseline, ready to play
+  }
+
   function template(config) {
     const scenarioBtns = config.scenarios.map((sc) =>
       `<button type="button" class="scenario-btn" data-scenario="${esc(sc.id)}">${esc(sc.label)}</button>`
@@ -712,6 +831,6 @@ window.HttpwareDemo = (function () {
     if (firstScenarioBtn) firstScenarioBtn.click();
   }
 
-  return { mount, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead, simulateHerd },
+  return { mount, mountHerd, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead, simulateHerd },
     _render: { renderRateStrip }, _util: { mulberry }, REAL, TICK, ADV };
 })();
