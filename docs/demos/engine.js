@@ -174,7 +174,7 @@ window.HttpwareDemo = (function () {
     </div>
   </div>
 
-  <p class="note" data-el="note">Pick a scenario to see the faithful model in play.</p>
+  <p class="note" data-el="note">Faithful model of httpware, not httpware running in your browser. Pick a scenario above to begin.</p>
 </div>
 
 <div class="dim" data-el="dimT"></div><div class="dim" data-el="dimB"></div>
