@@ -64,10 +64,27 @@ window.HttpwareDemo = (function () {
       } };
   }
 
+  // Finagle-style token bucket: caps retries to a fraction of traffic, with a floor.
+  // Mirrors budget.py (ttl, min_retries_per_sec, percent_can_retry). Deposits on each
+  // request, purges entries older than ttl, floor = int(minRetriesPerSec * ttl).
+  function makeRetryBudget(cfg) {
+    const ttl = cfg.ttl, floor = Math.floor(cfg.minRetriesPerSec * ttl), pct = cfg.percentCanRetry;
+    let deposits = []; // timestamps of requests in window
+    let debt = 0;      // retries taken (each costs 1 token)
+    function purge(now) { const cut = now - ttl; deposits = deposits.filter((t) => t >= cut); }
+    return {
+      deposit(now) { deposits.push(now); },
+      tryWithdraw(now) { purge(now);
+        const balance = floor + Math.floor(deposits.length * pct) - debt;
+        if (balance >= 1) { debt += 1; return true; }
+        return false; },
+    };
+  }
+
   const prefersReduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  const MW_LABELS = { circuitBreaker: 'CircuitBreaker', retry: 'Retry', bulkhead: 'Bulkhead', timeout: 'Timeout' };
+  const MW_LABELS = { circuitBreaker: 'CircuitBreaker', retry: 'Retry', budget: 'RetryBudget', bulkhead: 'Bulkhead', timeout: 'Timeout' };
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({
@@ -90,6 +107,14 @@ window.HttpwareDemo = (function () {
         ? `reset_timeout=${c.resetTimeout}s (demo; real default ${r.resetTimeout}s)`
         : `reset_timeout=${c.resetTimeout}s`;
       parts.push(`CircuitBreaker(failure_threshold=${c.failureThreshold}, ${resetNote}, success_threshold=${c.successThreshold})`);
+    }
+    if (chainB.retry) {
+      const t = chainB.retry;
+      parts.push(`Retry(max_attempts=${t.maxAttempts}, base_delay=${t.baseDelay}s, max_delay=${t.maxDelay}s)`);
+    }
+    if (chainB.budget) {
+      const b = chainB.budget;
+      parts.push(`RetryBudget(ttl=${b.ttl}s, min_retries_per_sec=${b.minRetriesPerSec}, percent_can_retry=${b.percentCanRetry})`);
     }
     return parts.join(', ');
   }
@@ -215,6 +240,7 @@ window.HttpwareDemo = (function () {
     let A = { ok: 0, bad: 0, if: 0, pend: [] };
     let B = { ok: 0, bad: 0, rej: 0, if: 0, pend: [] };
     let brk = null;
+    let retryCfg = null, budget = null, budgetExhausted = false;
     let rnd = mulberry(SEED);
     let selectedScenario = null;
 
@@ -369,13 +395,18 @@ window.HttpwareDemo = (function () {
       resetVisual();
       brk = scenario.chainB && scenario.chainB.circuitBreaker
         ? makeCircuitBreaker(scenario.chainB.circuitBreaker) : null;
+      retryCfg = scenario.chainB && scenario.chainB.retry ? scenario.chainB.retry : null;
+      budget = scenario.chainB && scenario.chainB.budget ? makeRetryBudget(scenario.chainB.budget) : null;
+      budgetExhausted = false;
       rnd = mulberry(SEED);
       els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
 
       timer = setInterval(() => {
         if (paused) return;
         const now = tick * TICK / 1000;
-        const state = { now, A, B, mw: brk };
+        const mw = { state: brk ? brk.state : 'CLOSED', recovered: brk ? brk.recovered : false,
+          budgetExhausted, rejected: B.rej, cb: brk };
+        const state = { now, A, B, mw };
         if (stopIdx < STOPS.length && STOPS[stopIdx].when(state)) { showStop(STOPS[stopIdx]); return; }
 
         advDots(dotsA); advDots(dotsB);
@@ -384,9 +415,28 @@ window.HttpwareDemo = (function () {
         for (const L of [A, B]) {
           for (let i = L.pend.length - 1; i >= 0; i--) {
             if (L.pend[i].land <= tick) {
-              const p = L.pend[i]; L.if--; L.pend.splice(i, 1);
+              const p = L.pend[i]; L.pend.splice(i, 1);
               if (L === B && brk) brk.res(p.ok, now);
-              if (p.ok) L.ok++; else L.bad++;
+              let retried = false;
+              // Retry decision happens at landing time: a failed lane-B attempt gets
+              // one more shot if maxAttempts allows it AND the budget grants a token;
+              // otherwise (or with no budget at all) it counts as a final failure.
+              if (L === B && retryCfg && !p.ok && (p.attempt + 1) < retryCfg.maxAttempts) {
+                if (budget && budget.tryWithdraw(now)) {
+                  const nextAttempt = p.attempt + 1;
+                  // Full-jitter backoff (demo seconds); the retry is a NEW attempt
+                  // against the backend, so its outcome is sampled at the later time.
+                  const backoffSec = rnd() * Math.min(retryCfg.maxDelay, retryCfg.baseDelay * Math.pow(2, p.attempt));
+                  const f2 = scenario.fault(now + backoffSec, rnd);
+                  const landTicks = Math.max(1, Math.round((backoffSec + f2.ms) * 1000 / TICK));
+                  L.pend.push({ land: tick + landTicks, ok: f2.ok, attempt: nextAttempt });
+                  spawnDot(dotsB, els.trackB, f2.ok ? 'ok' : 'bad');
+                  retried = true;
+                } else if (budget) {
+                  budgetExhausted = true;
+                }
+              }
+              if (!retried) { L.if--; if (p.ok) L.ok++; else L.bad++; }
             }
           }
         }
@@ -397,12 +447,13 @@ window.HttpwareDemo = (function () {
           const f = scenario.fault(now, rnd);
           lastFault = f;
           const landTicks = Math.max(1, Math.round(f.ms * 1000 / TICK));
-          A.if++; A.pend.push({ land: tick + landTicks, ok: f.ok });
+          A.if++; A.pend.push({ land: tick + landTicks, ok: f.ok, attempt: 0 });
           spawnDot(dotsA, els.trackA, f.ok ? 'ok' : 'bad');
           if (brk && !brk.allow(now)) {
             B.rej++; spawnDot(dotsB, els.trackB, 'rej');
           } else {
-            B.if++; B.pend.push({ land: tick + landTicks, ok: f.ok });
+            if (budget) budget.deposit(now);
+            B.if++; B.pend.push({ land: tick + landTicks, ok: f.ok, attempt: 0 });
             spawnDot(dotsB, els.trackB, f.ok ? 'ok' : 'bad');
           }
         }
@@ -421,7 +472,7 @@ window.HttpwareDemo = (function () {
         els.scenLabel.textContent = 'Scenario: ' + selectedScenario.label;
         els.note.textContent = "Faithful model of httpware's " + describeChain(selectedScenario.chainB) +
           ' — not httpware running in your browser.';
-        brk = null;
+        brk = null; retryCfg = null; budget = null; budgetExhausted = false;
         setupOutageBar(selectedScenario);
         resetVisual();
       });
@@ -430,5 +481,5 @@ window.HttpwareDemo = (function () {
     els.replay.addEventListener('click', run);
   }
 
-  return { mount, _models: { makeCircuitBreaker }, _util: { mulberry }, REAL, TICK, ADV };
+  return { mount, _models: { makeCircuitBreaker, makeRetryBudget }, _util: { mulberry }, REAL, TICK, ADV };
 })();

@@ -9,6 +9,7 @@ nav:
   - Resilience: resilience.md
   - Demos:
       - Overview: demos/index.md
+      - Retry: demos/retry.md
       - Circuit Breaker: demos/circuit-breaker.md
   - Errors: errors.md
   - Observability: observability.md
