@@ -83,6 +83,16 @@ window.HttpwareDemo = (function () {
     };
   }
 
+  // Semaphore concurrency limiter (bulkhead.py). Admits up to maxConcurrent in-flight;
+  // a request that can't get a slot within acquireTimeout fails fast (BulkheadFullError).
+  // The demo models the common case acquireTimeout->0 (reject immediately when full) —
+  // real httpware's default is acquireTimeout=1.0 (bounded wait), not modeled here.
+  function makeBulkhead(cfg) {
+    return { max: cfg.maxConcurrent, inUse: 0,
+      tryAcquire() { if (this.inUse < this.max) { this.inUse++; return true; } return false; },
+      release() { if (this.inUse > 0) this.inUse--; } };
+  }
+
   const prefersReduced = window.matchMedia &&
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -197,6 +207,7 @@ window.HttpwareDemo = (function () {
       <span class="k">&#10003; <span data-el="okB">0</span></span>
       <span class="k">&#10007; <span data-el="badB">0</span></span>
       <span class="k">&#9211; fast-failed <span data-el="rejB">0</span></span>
+      <span class="stat" data-el="poolWrap"><span class="k">pool</span> <span class="big" data-el="poolB">&mdash;</span></span>
       <span class="stat"><span class="k">p99</span> <span class="big" data-el="latB">40ms</span></span>
     </div>
   </div>
@@ -229,11 +240,12 @@ window.HttpwareDemo = (function () {
       ifA: $('ifA'), okA: $('okA'), badA: $('badA'), latA: $('latA'),
       laneB: $('laneB'), badgeB: $('badgeB'), srvB: $('srvB'), trackB: $('trackB'), brkB: $('brkB'),
       ifB: $('ifB'), okB: $('okB'), badB: $('badB'), rejB: $('rejB'), latB: $('latB'),
+      poolWrap: $('poolWrap'), poolB: $('poolB'),
       note: $('note'),
       dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
       coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
     };
-    const ELS = { ifA: els.ifA, latA: els.latA, ifB: els.ifB, latB: els.latB, brkB: els.brkB };
+    const ELS = { ifA: els.ifA, latA: els.latA, ifB: els.ifB, latB: els.latB, brkB: els.brkB, poolB: els.poolB };
 
     // Built fresh inside run() from the selected scenario (STOPS is never read before a
     // scenario is played, so it's safe to leave empty until then) — pages with one
@@ -249,6 +261,7 @@ window.HttpwareDemo = (function () {
     let A = { ok: 0, bad: 0, if: 0, pend: [] };
     let B = { ok: 0, bad: 0, rej: 0, if: 0, pend: [] };
     let brk = null;
+    let bulk = null;
     let retryCfg = null, budget = null, budgetExhausted = false;
     let rnd = mulberry(SEED);
     let selectedScenario = null;
@@ -363,6 +376,8 @@ window.HttpwareDemo = (function () {
       els.latA.textContent = '40ms'; els.latB.textContent = '40ms';
       [els.latA, els.latB, els.ifA, els.ifB].forEach((n) => { n.style.color = ''; });
       els.brkB.className = 'box'; els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
+      els.poolWrap.style.display = bulk ? '' : 'none';
+      els.poolB.textContent = bulk ? (bulk.inUse + '/' + bulk.max) : '—';
       els.srvA.className = 'box'; els.srvA.textContent = 'server ✓';
       els.srvB.className = 'box'; els.srvB.textContent = 'server ✓';
       els.laneA.className = 'lane'; els.laneB.className = 'lane';
@@ -377,23 +392,30 @@ window.HttpwareDemo = (function () {
       els.ifB.textContent = B.if; els.okB.textContent = B.ok; els.badB.textContent = B.bad; els.rejB.textContent = B.rej;
       els.ifA.style.color = A.if > 10 ? 'var(--hw-bad)' : '';
       els.ifB.style.color = B.if <= 6 ? 'var(--hw-ok)' : '';
+      if (bulk) els.poolB.textContent = bulk.inUse + '/' + bulk.max;
+      // "Stress" covers two distinct fault shapes: outright failure (down) and a
+      // high-latency-but-ok fault (slow, e.g. bulkhead.md's 5s dependency) — both must
+      // read as backend trouble even though only `down` implies an error response.
       const down = !!(lastFault && !lastFault.ok);
-      els.latA.textContent = down ? (A.if > 4 ? '12s+' : formatMs(lastFault.ms)) : '40ms';
-      els.latA.style.color = down ? 'var(--hw-bad)' : '';
+      const slow = !!(lastFault && lastFault.ok && lastFault.ms >= 1.0);
+      const stressed = down || slow;
+      els.latA.textContent = stressed ? (A.if > 4 ? '12s+' : formatMs(lastFault.ms)) : '40ms';
+      els.latA.style.color = stressed ? 'var(--hw-bad)' : '';
       els.latB.textContent = '40ms';
       els.latB.style.color = (down && brk && brk.state === 'OPEN') ? 'var(--hw-ok)' : '';
       const st = brk ? brk.state : 'CLOSED';
       els.brkB.className = 'box ' + (st === 'OPEN' ? 'open' : st === 'HALF_OPEN' ? 'half' : '');
       els.brkB.textContent = brk ? ('breaker ' + st) : 'no breaker';
-      els.srvA.className = 'box' + (down ? ' down' : '');
-      els.srvA.textContent = down ? ('server ✗' + (lastFault.label ? ' ' + lastFault.label : '')) : 'server ✓';
-      els.srvB.className = 'box' + (down ? ' down' : '');
-      els.srvB.textContent = down ? 'server ✗' : 'server ✓';
-      els.laneA.classList.toggle('hot', down && A.if > 8);
-      els.laneB.classList.toggle('safe', st === 'CLOSED' && !down);
-      els.badgeA.className = 'badge' + (down ? ' bad' : '');
-      els.badgeA.textContent = down ? 'drowning' : 'no protection';
-      const okBadge = st === 'CLOSED' && brk && !down;
+      els.srvA.className = 'box' + (stressed ? ' down' : '');
+      els.srvA.textContent = down ? ('server ✗' + (lastFault.label ? ' ' + lastFault.label : ''))
+        : slow ? ('server ' + (lastFault.label || 'slow')) : 'server ✓';
+      els.srvB.className = 'box' + (stressed ? ' down' : '');
+      els.srvB.textContent = down ? 'server ✗' : slow ? 'server slow' : 'server ✓';
+      els.laneA.classList.toggle('hot', stressed && A.if > 8);
+      els.laneB.classList.toggle('safe', st === 'CLOSED' && !stressed);
+      els.badgeA.className = 'badge' + (stressed ? ' bad' : '');
+      els.badgeA.textContent = stressed ? 'drowning' : 'no protection';
+      const okBadge = st === 'CLOSED' && brk && !stressed;
       els.badgeB.className = 'badge ' + (st === 'OPEN' ? 'warn' : okBadge ? 'ok' : '');
       els.badgeB.textContent = st === 'OPEN' ? 'fast-failing' : st === 'HALF_OPEN' ? 'probing' : chainLabel(selectedScenario.chainB);
     }
@@ -405,6 +427,8 @@ window.HttpwareDemo = (function () {
       resetVisual();
       brk = scenario.chainB && scenario.chainB.circuitBreaker
         ? makeCircuitBreaker(scenario.chainB.circuitBreaker) : null;
+      bulk = scenario.chainB && scenario.chainB.bulkhead
+        ? makeBulkhead(scenario.chainB.bulkhead) : null;
       retryCfg = scenario.chainB && scenario.chainB.retry ? scenario.chainB.retry : null;
       // retry.py: Retry(budget=None) defaults to RetryBudget() — a retry config with no
       // explicit budget must still retry (real defaults), never silently go unbudgeted.
@@ -414,6 +438,8 @@ window.HttpwareDemo = (function () {
       budgetExhausted = false;
       rnd = mulberry(SEED);
       els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
+      els.poolWrap.style.display = bulk ? '' : 'none';
+      els.poolB.textContent = bulk ? (bulk.inUse + '/' + bulk.max) : '—';
 
       timer = setInterval(() => {
         if (paused) return;
@@ -450,7 +476,11 @@ window.HttpwareDemo = (function () {
                   budgetExhausted = true;
                 }
               }
-              if (!retried) { L.if--; if (p.ok) L.ok++; else L.bad++; }
+              // Release the bulkhead slot only once the attempt truly finishes (not on
+              // a retry re-push) — `p.bh` marks entries that actually acquired a slot,
+              // so a null/absent bulkhead or a rejected (never-pushed) request is a no-op.
+              if (!retried) { L.if--; if (p.ok) L.ok++; else L.bad++;
+                if (L === B && bulk && p.bh) bulk.release(); }
             }
           }
         }
@@ -465,9 +495,13 @@ window.HttpwareDemo = (function () {
           spawnDot(dotsA, els.trackA, f.ok ? 'ok' : 'bad');
           if (brk && !brk.allow(now)) {
             B.rej++; spawnDot(dotsB, els.trackB, 'rej');
+          } else if (bulk && !bulk.tryAcquire()) {
+            // Pool is full: fail fast (BulkheadFullError) rather than queue — the
+            // demo's acquireTimeout=0 choice (see makeBulkhead).
+            B.rej++; spawnDot(dotsB, els.trackB, 'rej');
           } else {
             if (budget) budget.deposit(now);
-            B.if++; B.pend.push({ land: tick + landTicks, ok: f.ok, attempt: 0 });
+            B.if++; B.pend.push({ land: tick + landTicks, ok: f.ok, attempt: 0, bh: !!bulk });
             spawnDot(dotsB, els.trackB, f.ok ? 'ok' : 'bad');
           }
         }
@@ -486,7 +520,7 @@ window.HttpwareDemo = (function () {
         els.scenLabel.textContent = 'Scenario: ' + selectedScenario.label;
         els.note.textContent = "Faithful model of httpware's " + describeChain(selectedScenario.chainB) +
           ' — not httpware running in your browser.';
-        brk = null; retryCfg = null; budget = null; budgetExhausted = false;
+        brk = null; bulk = null; retryCfg = null; budget = null; budgetExhausted = false;
         setupOutageBar(selectedScenario);
         resetVisual();
       });
@@ -495,5 +529,5 @@ window.HttpwareDemo = (function () {
     els.replay.addEventListener('click', run);
   }
 
-  return { mount, _models: { makeCircuitBreaker, makeRetryBudget }, _util: { mulberry }, REAL, TICK, ADV };
+  return { mount, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead }, _util: { mulberry }, REAL, TICK, ADV };
 })();
