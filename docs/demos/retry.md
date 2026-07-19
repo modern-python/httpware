@@ -7,7 +7,7 @@ a dead backend can't be amplified.
 
 <div class="hw-demo" id="retry-demo"></div>
 
-<p>That was <b>one</b> client. The real danger of blind retries shows up at scale — when <b>many</b> clients retry the same outage at once.</p>
+<p>That was <b>one</b> client recovering from a blip. The real danger of blind retries shows up at <b>scale</b> — when many clients hit a real outage at once.</p>
 
 <div class="hw-demo" id="retry-herd"></div>
 
@@ -20,22 +20,8 @@ document.addEventListener('DOMContentLoaded', function () {
         ? { ok: false, ms: 0.05, label: 'blip' } : { ok: true, ms: 0.05 },
       chainB: { retry: { maxAttempts: 3, baseDelay: 0.1, maxDelay: 5.0 },
                 budget: { ttl: 10.0, minRetriesPerSec: 10.0, percentCanRetry: 0.2 } } },
-    { id: 'sustained', label: 'Sustained outage', dur: 12.5,
-      fault: (now) => (now >= 2.0 && now < 9.0)
-        ? { ok: false, ms: 0.05, label: 'DOWN' } : { ok: true, ms: 0.05 },
-      chainB: { retry: { maxAttempts: 3, baseDelay: 0.1, maxDelay: 5.0 },
-                budget: { ttl: 10.0, minRetriesPerSec: 10.0, percentCanRetry: 0.2 } } },
   ],
-  buildStops: (scenario) => scenario.id === 'sustained' ? [
-    { when: (s) => s.now >= 1.2, spot: ['ifA', 'ifB'], title: 'A backend blip appears',
-      body: 'Both clients hit the same transient errors. Watch how each responds.' },
-    { when: (s) => s.now >= 2.4, spot: ['ifB'], title: 'httpware retries the blip',
-      body: 'The plain client surfaces the error immediately. httpware retries with backoff — most of these recover on attempt 2 or 3, invisibly to the caller.' },
-    { when: (s) => s.mw.budgetExhausted, spot: ['ifB'], title: 'The budget refuses to amplify',
-      body: 'On a SUSTAINED outage, blind retries would multiply load. The budget is spent — httpware STOPS retrying and fails fast, protecting the dying backend instead of hammering it.' },
-    { when: (s) => s.now >= 10.0, spot: ['ifA', 'ifB'], title: 'Blip: recovered. Outage: contained',
-      body: 'Retry rescues transient errors without turning a real outage into a storm. That cap is the whole reason the budget exists.' },
-  ] : [
+  buildStops: () => [
     { when: (s) => s.now >= 1.2, spot: ['badWrapA', 'badWrapB'], title: 'A backend blip appears',
       body: 'Both clients are about to hit the same transient errors. Keep your eye on the ✗ failed counts — they start equal at zero.' },
     { when: (s) => s.now >= 2.4, spot: ['badWrapA', 'badWrapB'], title: 'Plain surfaces every error; httpware retries',
@@ -47,7 +33,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   HttpwareDemo.mountHerd('#retry-herd', {
     clients: 20,
-    intro: 'A real backend rarely dies cleanly — it <b>flaps</b>: fails, recovers, fails again. These strips show <b>backend call-rate over time</b> for twenty clients through three dips. Press play and watch the shape.',
+    intro: 'Retry rescues a transient blip (above) — but it can’t fix an <i>outage</i>: retried or not, the caller sees the same failures. There the danger isn’t caller failures, it’s <b>amplification</b>. A real backend rarely dies cleanly — it <b>flaps</b>: fails, recovers, fails again. These strips show <b>backend call-rate over time</b> for twenty clients through three dips. Press play and watch the shape.',
     scenario: { id: 'storm', dur: 12.5,
       fault: (now) => {
         const down = (now >= 2.0 && now < 4.0) || (now >= 5.5 && now < 7.5) || (now >= 9.0 && now < 11.0);
