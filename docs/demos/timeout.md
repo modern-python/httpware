@@ -9,6 +9,7 @@ including every retry and every backoff sleep, so one call can't blow your laten
 <script>
 document.addEventListener('DOMContentLoaded', function () {
   HttpwareDemo.mount('#to-demo', {
+  ring: 'deadline',
   scenarios: [
     { id: 'brownout', label: 'Slow brownout under retry', dur: 12.5,
       fault: (now, rnd) => (now >= 2.0 && now < 9.0)

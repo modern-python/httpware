@@ -143,3 +143,18 @@
 .hw-demo .herd-baseline { stroke: var(--hw-muted); stroke-width: .6; stroke-dasharray: 2 2; opacity: .7; }
 .hw-demo .herd-bar-naive { fill: var(--hw-bad); }
 .hw-demo .herd-bar-hw { fill: var(--hw-ok); }
+
+/* countdown ring overlaid on a lane element */
+.hw-demo .counting { position: relative; }
+.hw-demo .counting::after {
+  content: ""; position: absolute; right: -18px; top: 50%; width: 13px; height: 13px;
+  margin-top: -6px; border-radius: 50%;
+  background: conic-gradient(var(--hw-warn) var(--hw-ring, 0deg), var(--hw-line) 0);
+}
+
+/* jagged failure dot: readable without color (star/spikes vs the round success dot) */
+.hw-demo .dot.bad {
+  border-radius: 0;
+  clip-path: polygon(50% 0, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+  width: 11px; height: 11px; top: 4px;
+}

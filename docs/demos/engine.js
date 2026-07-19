@@ -335,6 +335,17 @@ window.HttpwareDemo = (function () {
     el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="herd-svg">${body}</svg>`;
   }
 
+  // CSS-driven conic countdown ring overlaid on an element. fraction 0..1 is the
+  // ELAPSED share of the wait; 0 or >=1 clears it. No per-frame DOM churn — sets a
+  // custom property the ::after conic-gradient reads.
+  function renderCountdownRing(el, fraction) {
+    if (!el) return;
+    const f = Math.max(0, Math.min(1, fraction));
+    if (f <= 0 || f >= 1) { el.classList.remove('counting'); el.style.removeProperty('--hw-ring'); return; }
+    el.classList.add('counting');
+    el.style.setProperty('--hw-ring', (f * 360).toFixed(0) + 'deg');
+  }
+
   function herdTemplate(config) {
     const title = config.title || 'Now scale it to 20 clients';
     const intro = config.intro || 'One client retrying a blip is invisible. Twenty clients retrying a ' +
@@ -624,6 +635,8 @@ window.HttpwareDemo = (function () {
       // box reads "no breaker" on a circuit-breaker page until the first Play.
       const cfgB = selectedScenario ? selectedScenario.chainB : {};
       els.brkB.className = 'box'; els.brkB.textContent = cfgB.circuitBreaker ? 'breaker CLOSED' : 'no breaker';
+      els.brkB.classList.remove('counting'); els.brkB.style.removeProperty('--hw-ring');
+      els.elapsedB.classList.remove('counting'); els.elapsedB.style.removeProperty('--hw-ring');
       els.poolWrap.style.display = cfgB.bulkhead ? '' : 'none';
       els.poolB.textContent = cfgB.bulkhead ? ('0/' + cfgB.bulkhead.maxConcurrent) : '—';
       els.elapsedWrap.style.display = cfgB.timeout ? '' : 'none';
@@ -686,6 +699,15 @@ window.HttpwareDemo = (function () {
       const okBadge = st === 'CLOSED' && brk && !stressed;
       els.badgeB.className = 'badge ' + (st === 'OPEN' ? 'warn' : okBadge ? 'ok' : '');
       els.badgeB.textContent = st === 'OPEN' ? 'fast-failing' : st === 'HALF_OPEN' ? 'probing' : chainLabel(selectedScenario.chainB);
+      // countdown ring (config.ring): show the multi-second wait this page is about.
+      if (config.ring === 'deadline' && tmoCfg) {
+        renderCountdownRing(els.elapsedB, maxElapsed / tmoCfg.timeout);
+      } else if (config.ring === 'reset' && brk && brk.state === 'OPEN') {
+        const R = selectedScenario.chainB.circuitBreaker.resetTimeout;
+        renderCountdownRing(els.brkB, (now - brk.openedAt) / R);
+      } else if (config.ring === 'reset') {
+        renderCountdownRing(els.brkB, 0); // clear once the breaker leaves OPEN
+      }
     }
 
     function run() {
