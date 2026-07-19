@@ -207,7 +207,7 @@ window.HttpwareDemo = (function () {
       <span class="k">&#10003; <span data-el="okB">0</span></span>
       <span class="k">&#10007; <span data-el="badB">0</span></span>
       <span class="k">&#9211; fast-failed <span data-el="rejB">0</span></span>
-      <span class="stat" data-el="poolWrap"><span class="k">pool</span> <span class="big" data-el="poolB">&mdash;</span></span>
+      <span class="stat" data-el="poolWrap" style="display:none"><span class="k">pool</span> <span class="big" data-el="poolB">&mdash;</span></span>
       <span class="stat"><span class="k">p99</span> <span class="big" data-el="latB">40ms</span></span>
     </div>
   </div>
@@ -469,7 +469,12 @@ window.HttpwareDemo = (function () {
                   const backoffSec = rnd() * Math.min(retryCfg.maxDelay, retryCfg.baseDelay * Math.pow(2, p.attempt));
                   const f2 = scenario.fault(now + backoffSec, rnd);
                   const landTicks = Math.max(1, Math.round((backoffSec + f2.ms) * 1000 / TICK));
-                  L.pend.push({ land: tick + landTicks, ok: f2.ok, attempt: nextAttempt });
+                  // Composition order is timeout -> circuitBreaker -> bulkhead -> retry ->
+                  // terminal: the bulkhead sits OUTSIDE retry, so one slot is acquired
+                  // once and held for the WHOLE operation (all attempts), released only
+                  // when the operation finally lands. Carry `bh` forward on every retry
+                  // push, or a retried request leaks its slot forever.
+                  L.pend.push({ land: tick + landTicks, ok: f2.ok, attempt: nextAttempt, bh: p.bh });
                   spawnDot(dotsB, els.trackB, f2.ok ? 'ok' : 'bad');
                   retried = true;
                 } else if (budget) {
