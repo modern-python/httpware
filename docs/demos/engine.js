@@ -520,9 +520,11 @@ window.HttpwareDemo = (function () {
               // so a null/absent bulkhead or a rejected (never-pushed) request is a no-op.
               // Breaker records ONCE per fully-exhausted retry sequence (not per attempt):
               // brk.res is called here, only on the terminal (non-retried) landing. A
-              // timed-out entry is an outer-timeout cancellation, not a counted outcome —
-              // AsyncTimeout is OUTERMOST, so a deadline-cancelled operation surfaces as
-              // the outer TimeoutError and the inner breaker never sees it.
+              // timed-out entry is an outer-timeout cancellation: AsyncTimeout is
+              // OUTERMOST, so the inner breaker's `except BaseException` clause does see
+              // the CancelledError (it releases the in-flight probe slot) but does not
+              // count it as a success/failure outcome — only the outer TimeoutError
+              // surfaces to the caller.
               if (!retried) {
                 L.if--;
                 if (L === B && p.timedOut) { L.bad++; }
