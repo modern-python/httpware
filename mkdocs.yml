@@ -13,6 +13,7 @@ nav:
       - Circuit Breaker: demos/circuit-breaker.md
       - Bulkhead: demos/bulkhead.md
       - Timeout: demos/timeout.md
+      - Full stack: demos/full-stack.md
   - Errors: errors.md
   - Observability: observability.md
   - Decoders: decoders.md
