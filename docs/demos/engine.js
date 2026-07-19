@@ -65,19 +65,21 @@ window.HttpwareDemo = (function () {
   }
 
   // Finagle-style token bucket: caps retries to a fraction of traffic, with a floor.
-  // Mirrors budget.py (ttl, min_retries_per_sec, percent_can_retry). Deposits on each
-  // request, purges entries older than ttl, floor = int(minRetriesPerSec * ttl).
+  // Byte-faithful port of budget.py's RetryBudget: both deposits AND withdrawals are
+  // timestamp windows purged by ttl (so spent capacity ages out and recovers over
+  // time, not a permanent ratchet); ceiling = ceil(deposits * pct) + floor (floor =
+  // int(minRetriesPerSec * ttl)); withdraw permitted while withdrawn.length < ceiling.
   function makeRetryBudget(cfg) {
     const ttl = cfg.ttl, floor = Math.floor(cfg.minRetriesPerSec * ttl), pct = cfg.percentCanRetry;
-    let deposits = []; // timestamps of requests in window
-    let debt = 0;      // retries taken (each costs 1 token)
-    function purge(now) { const cut = now - ttl; deposits = deposits.filter((t) => t >= cut); }
+    let deposits = [], withdrawn = []; // timestamps within the [now - ttl, now] window
+    function purge(now) { const cut = now - ttl;
+      deposits = deposits.filter((t) => t >= cut); withdrawn = withdrawn.filter((t) => t >= cut); }
     return {
-      deposit(now) { deposits.push(now); },
+      deposit(now) { purge(now); deposits.push(now); },
       tryWithdraw(now) { purge(now);
-        const balance = floor + Math.floor(deposits.length * pct) - debt;
-        if (balance >= 1) { debt += 1; return true; }
-        return false; },
+        const ceiling = Math.ceil(deposits.length * pct) + floor;
+        if (withdrawn.length >= ceiling) return false;
+        withdrawn.push(now); return true; },
     };
   }
 
@@ -233,9 +235,14 @@ window.HttpwareDemo = (function () {
     };
     const ELS = { ifA: els.ifA, latA: els.latA, ifB: els.ifB, latB: els.latB, brkB: els.brkB };
 
-    // Rebuilt per-run from the selected scenario (see run()) — pages with one shared
-    // stop list across scenarios (buildStops ignoring its arg) keep working unchanged.
-    let STOPS = config.buildStops(null);
+    // Built fresh inside run() from the selected scenario (STOPS is never read before a
+    // scenario is played, so it's safe to leave empty until then) — pages with one
+    // shared stop list across scenarios (buildStops ignoring its arg) keep working
+    // unchanged. Must NOT call config.buildStops() here at mount time: retry.md's
+    // buildStops dereferences its scenario argument, so calling it with no scenario
+    // selected yet would throw and abort mount() before the Play/scenario listeners
+    // are wired up.
+    let STOPS = [];
 
     let timer = null, paused = false, tick = 0, stopIdx = 0;
     let dotsA = [], dotsB = [];
@@ -399,7 +406,11 @@ window.HttpwareDemo = (function () {
       brk = scenario.chainB && scenario.chainB.circuitBreaker
         ? makeCircuitBreaker(scenario.chainB.circuitBreaker) : null;
       retryCfg = scenario.chainB && scenario.chainB.retry ? scenario.chainB.retry : null;
-      budget = scenario.chainB && scenario.chainB.budget ? makeRetryBudget(scenario.chainB.budget) : null;
+      // retry.py: Retry(budget=None) defaults to RetryBudget() — a retry config with no
+      // explicit budget must still retry (real defaults), never silently go unbudgeted.
+      budget = retryCfg
+        ? makeRetryBudget(scenario.chainB.budget || REAL.retryBudget)
+        : null;
       budgetExhausted = false;
       rnd = mulberry(SEED);
       els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
