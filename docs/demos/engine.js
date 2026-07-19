@@ -153,16 +153,29 @@ window.HttpwareDemo = (function () {
     const steps = 200;
     const worstRnd = () => 0;
     let from = null, to = null, label = '';
+    let sawDown = false, sawSlow = false;
     for (let i = 0; i <= steps; i++) {
       const t = (scenario.dur * i) / steps;
       const f = scenario.fault(t, worstRnd);
-      if (!f.ok) {
+      // High-latency-but-ok samples are stress too (matches the `slow` threshold
+      // updateUI already uses) — otherwise a latency-spike phase (ok:true, high ms)
+      // is invisible on this bar even though it's exactly the kind of backend
+      // trouble the guided tour calls out (e.g. full-stack's phase 1).
+      const down = !f.ok;
+      const slow = f.ok && f.ms >= 1.0;
+      if (down || slow) {
         if (from === null) from = t;
         to = t;
-        if (!label) label = f.label || 'DOWN';
+        if (down) sawDown = true;
+        if (slow) sawSlow = true;
+        if (!label) label = down ? (f.label || 'DOWN') : (f.label || 'degraded');
       }
     }
     if (from === null) return null;
+    // A window that mixes down and slow phases (e.g. full-stack's multi-phase
+    // incident) can't be summed up by one phase's label without misleading about
+    // the other — fall back to a generic label. Decorative only, never drives the sim.
+    if (sawDown && sawSlow) label = 'degraded';
     return { from, to: Math.min(scenario.dur, to + scenario.dur / steps), label };
   }
 
@@ -409,8 +422,9 @@ window.HttpwareDemo = (function () {
       els.ifA.style.color = A.if > 10 ? 'var(--hw-bad)' : '';
       els.ifB.style.color = B.if <= 6 ? 'var(--hw-ok)' : '';
       if (bulk) els.poolB.textContent = bulk.inUse + '/' + bulk.max;
+      let maxElapsed = 0;
       if (tmoCfg) {
-        const maxElapsed = B.pend.reduce((m, p) => Math.max(m, now - p.start), 0);
+        maxElapsed = B.pend.reduce((m, p) => Math.max(m, now - p.start), 0);
         els.elapsedB.textContent = maxElapsed.toFixed(1) + 's / ' + tmoCfg.timeout.toFixed(1) + 's';
       }
       // "Stress" covers two distinct fault shapes: outright failure (down) and a
@@ -421,7 +435,11 @@ window.HttpwareDemo = (function () {
       const stressed = down || slow;
       els.latA.textContent = stressed ? (A.if > 4 ? '12s+' : formatMs(lastFault.ms)) : '40ms';
       els.latA.style.color = stressed ? 'var(--hw-bad)' : '';
-      els.latB.textContent = '40ms';
+      // On timeout pages, AsyncTimeout bounds every lane-B attempt at the deadline —
+      // p99 must reflect that ACTUAL bounded latency, not the constant 40ms, or it
+      // visually contradicts elapsedB as it climbs toward the same deadline. Pages
+      // with no timeout configured keep the untouched 40ms constant.
+      els.latB.textContent = tmoCfg ? formatMs(Math.min(maxElapsed, tmoCfg.timeout)) : '40ms';
       els.latB.style.color = (down && brk && brk.state === 'OPEN') ? 'var(--hw-ok)' : '';
       const st = brk ? brk.state : 'CLOSED';
       els.brkB.className = 'box ' + (st === 'OPEN' ? 'open' : st === 'HALF_OPEN' ? 'half' : '');
