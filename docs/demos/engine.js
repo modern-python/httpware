@@ -184,6 +184,24 @@ window.HttpwareDemo = (function () {
     return { from, to: Math.min(scenario.dur, to + scenario.dur / steps), label };
   }
 
+  // All contiguous "backend in trouble" intervals (down or slow), for a strip that
+  // shades each outage window separately — so a flapping backend's recovery GAPS stay
+  // visibly unshaded between the shaded dips. Decorative; never drives the sim.
+  function computeOutageBands(scenario) {
+    const steps = 400, worst = () => 0;
+    const bands = [];
+    let start = null;
+    for (let i = 0; i <= steps; i++) {
+      const t = (scenario.dur * i) / steps;
+      const f = scenario.fault(t, worst);
+      const down = !f.ok || (f.ok && f.ms >= 1.0);
+      if (down && start === null) start = t;
+      else if (!down && start !== null) { bands.push({ from: start, to: t }); start = null; }
+    }
+    if (start !== null) bands.push({ from: start, to: scenario.dur });
+    return bands;
+  }
+
   // ---- shared guided-tour driver: spotlight cutout + side-placed coach ----
   // Extracted from mount() so a second mount mode (herd) reuses one implementation.
   // `els` supplies the tour DOM (dimT/dimB/dimL/dimR/ring/coach/cArrow/cStep/
@@ -254,15 +272,17 @@ window.HttpwareDemo = (function () {
   }
 
   // ---- thundering-herd simulation (faithful; reuses the real RetryBudget model) ----
-  // N independent clients hit ONE backend through a sustained outage. Every backend
-  // attempt (initial + each retry) is counted into a per-bucket series for each lane.
-  //   naive: FIXED backoff, NO jitter, UNBOUNDED retries -> same-bucket failures retry
-  //          into the same later bucket => synchronized spikes with dead gaps.
+  // N independent clients hit ONE backend through a FLAPPING outage (down, recover,
+  // down, recover...). Every backend attempt (initial + each retry) is counted into a
+  // per-bucket series for each lane.
+  //   naive: FIXED backoff, NO jitter, UNBOUNDED retries -> during each outage dip a
+  //          client retries until the backend recovers, so retries ACCUMULATE into a
+  //          surge that clears the instant the dip ends (its retry succeeds) -> a spike
+  //          per dip with a recovery gap between. The gaps are the backend healing, not
+  //          client synchronization (arrivals are phase-staggered, never lockstep).
   //   httpware: FULL-JITTER backoff + per-client RetryBudget + maxAttempts cap ->
   //          retry timing decorrelates into a near-constant rate; the budget and the
   //          attempt cap bound amplification. The budget is PER CLIENT, never shared.
-  // Arrivals are phase-staggered (not synchronized): the clustering that follows is
-  // caused by the retry policy, not by synchronized arrivals.
   function simulateHerd(scenario, opts) {
     const N = opts.clients, cfg = opts.retry, budgetCfg = opts.budget;
     const dur = scenario.dur, dt = HERD.dt, ri = HERD.reqInterval;
@@ -308,7 +328,7 @@ window.HttpwareDemo = (function () {
       return { series: arr, peak, total, mult: baseline > 0 ? peak / baseline : 0 };
     };
     return { naive: stat(naive), hw: stat(hw), buckets, dt, baseline,
-      outage: computeOutageWindow(scenario) };
+      outage: computeOutageWindow(scenario), outageBands: computeOutageBands(scenario) };
   }
 
   // Render a call-rate strip as an SVG of vertical bars into `el`. Buckets [0,
@@ -319,9 +339,10 @@ window.HttpwareDemo = (function () {
     const n = series.length, W = 100, H = 100, bw = W / n;
     const scale = opts.peakScale > 0 ? H / opts.peakScale : 0;
     let body = '';
-    if (opts.outage) {
-      const ox = (opts.outage.from / opts.dur) * W;
-      const ow = ((opts.outage.to - opts.outage.from) / opts.dur) * W;
+    const bands = opts.outageBands || (opts.outage ? [opts.outage] : []);
+    for (const b of bands) {
+      const ox = (b.from / opts.dur) * W;
+      const ow = ((b.to - b.from) / opts.dur) * W;
       body += `<rect x="${ox.toFixed(2)}" y="0" width="${ow.toFixed(2)}" height="${H}" class="herd-band"/>`;
     }
     const upto = Math.min(revealUpTo, n);
@@ -416,7 +437,7 @@ window.HttpwareDemo = (function () {
 
     function paint() {
       const peakScale = Math.max(sim.naive.peak, sim.hw.peak, 1);
-      const stripOpts = (cls) => ({ peakScale, baseline: sim.baseline, outage: sim.outage, dur: scenario.dur, cls });
+      const stripOpts = (cls) => ({ peakScale, baseline: sim.baseline, outage: sim.outage, outageBands: sim.outageBands, dur: scenario.dur, cls });
       renderRateStrip(els.naiveStrip, sim.naive.series, reveal, stripOpts('herd-bar-naive'));
       renderRateStrip(els.hwStrip, sim.hw.series, reveal, stripOpts('herd-bar-hw'));
       // running peak/total over revealed buckets so the numbers climb with the bars
@@ -430,7 +451,7 @@ window.HttpwareDemo = (function () {
       els.naiveTotalN.textContent = String(runTot(sim.naive.series));
       els.hwTotalN.textContent = String(runTot(sim.hw.series));
       // httpware is bounded by max_attempts, not a hard multiplier cap — it settles
-      // near ~3x for this scenario, never near naive's unbounded ~70x. Thresholds
+      // near ~3x for this scenario, never near naive's per-dip ~18x. Thresholds
       // reflect that measured gap, not the placeholder "<=2x is good" assumption.
       els.naiveMultN.style.color = nm > 5 ? 'var(--hw-bad)' : '';
       els.hwMultN.style.color = hm <= 4 ? 'var(--hw-ok)' : '';

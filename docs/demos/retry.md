@@ -47,24 +47,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
   HttpwareDemo.mountHerd('#retry-herd', {
     clients: 20,
+    intro: 'A real backend rarely dies cleanly — it <b>flaps</b>: fails, recovers, fails again. These strips show <b>backend call-rate over time</b> for twenty clients through three dips. Press play and watch the shape.',
     scenario: { id: 'storm', dur: 12.5,
-      fault: (now) => (now >= 2.0 && now < 9.0)
-        ? { ok: false, ms: 0.05, label: 'DOWN' } : { ok: true, ms: 0.05 } },
+      fault: (now) => {
+        const down = (now >= 2.0 && now < 4.0) || (now >= 5.5 && now < 7.5) || (now >= 9.0 && now < 11.0);
+        return down ? { ok: false, ms: 0.05, label: 'DOWN' } : { ok: true, ms: 0.05 };
+      } },
     retry: { maxAttempts: 3, baseDelay: 0.1, maxDelay: 5.0 },
     budget: { ttl: 10.0, minRetriesPerSec: 10.0, percentCanRetry: 0.2 },
     buildStops: (sim) => [
       { when: (s) => s.revealed >= Math.round(2.2 / sim.dt), spot: ['naiveStrip', 'hwStrip'],
-        title: 'The outage hits both herds',
-        body: 'Twenty naive clients and twenty httpware clients face the same sustained outage. Every failed request wants to retry. Watch what each herd does to the backend call-rate.' },
-      { when: (s) => s.revealed >= Math.round(4.0 / sim.dt), spot: ['naiveStrip'],
-        title: 'Naive: synchronized spikes',
-        body: 'All twenty naive clients back off the SAME fixed delay, so a batch that fails together retries together — the failures never spread out. Tall spikes with dead gaps between: the retry storm hammering a backend that is already down.' },
-      { when: (s) => s.revealed >= Math.round(6.5 / sim.dt), spot: ['hwStrip'],
-        title: 'httpware: a near-flat rate',
-        body: 'Full jitter scatters each client’s retries across the window instead of stacking them, and each client’s own budget + max_attempts cap how much it can add — so the aggregate holds at a low, steady few-times-baseline instead of exploding.' },
+        title: 'A flapping backend',
+        body: 'The backend drops, recovers, drops again — three dips (shaded). Every failed request wants to retry. Watch what each herd does to the backend call-rate through the dips.' },
+      { when: (s) => s.revealed >= Math.round(4.6 / sim.dt), spot: ['naiveStrip'],
+        title: 'Naive: a surge on every dip',
+        body: 'On each dip, twenty clients retry unbounded — the load piles up into a surge that keeps climbing until the backend recovers, then clears. Three dips, three spikes, with recovery gaps between: the retry storm hitting a backend every time it tries to come back.' },
+      { when: (s) => s.revealed >= Math.round(8.2 / sim.dt), spot: ['hwStrip'],
+        title: 'httpware: flat through every dip',
+        body: 'Full jitter spreads each client’s retries out, and each client’s own max_attempts=3 cap (with its per-client budget as the guarantee at higher volume) limits how much it can add — so httpware holds a low, steady few-times-baseline through every dip instead of spiking.' },
       { when: (s) => s.revealed >= sim.buckets - 1, spot: ['naiveMult', 'hwMult'],
         title: 'Peak load: the whole point',
-        body: 'The naive herd peaked at about 70× the healthy load — and keeps climbing the longer the outage runs, because its retries are unbounded. httpware peaked at about 3×: at this client count, that ceiling comes from each client’s own max_attempts=3 cap (jitter just spreads the retries flat instead of stacking them). The per-client budget is what holds the line as the herd grows even larger. Same outage, same client count — a flat rate also leaves the backend room to recover.' },
+        body: 'On its worst dip the naive herd spiked to about 18× the healthy load; httpware never exceeded about 3×, capped by each client’s max_attempts. That flat rate is exactly what lets the backend recover in the gaps — instead of being knocked back down by a retry surge every time it heals.' },
     ],
   });
 });
