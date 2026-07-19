@@ -402,11 +402,15 @@ window.HttpwareDemo = (function () {
       els.ifB.textContent = '0'; els.okB.textContent = '0'; els.badB.textContent = '0'; els.rejB.textContent = '0';
       els.latA.textContent = '40ms'; els.latB.textContent = '40ms';
       [els.latA, els.latB, els.ifA, els.ifB].forEach((n) => { n.style.color = ''; });
-      els.brkB.className = 'box'; els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
-      els.poolWrap.style.display = bulk ? '' : 'none';
-      els.poolB.textContent = bulk ? (bulk.inUse + '/' + bulk.max) : '—';
-      els.elapsedWrap.style.display = tmoCfg ? '' : 'none';
-      els.elapsedB.textContent = tmoCfg ? ('0.0s / ' + tmoCfg.timeout.toFixed(1) + 's') : '—';
+      // Flow-diagram boxes reflect the selected scenario's CHAIN config, not the runtime
+      // middleware objects (which aren't constructed until run()). Otherwise the breaker
+      // box reads "no breaker" on a circuit-breaker page until the first Play.
+      const cfgB = selectedScenario ? selectedScenario.chainB : {};
+      els.brkB.className = 'box'; els.brkB.textContent = cfgB.circuitBreaker ? 'breaker CLOSED' : 'no breaker';
+      els.poolWrap.style.display = cfgB.bulkhead ? '' : 'none';
+      els.poolB.textContent = cfgB.bulkhead ? ('0/' + cfgB.bulkhead.maxConcurrent) : '—';
+      els.elapsedWrap.style.display = cfgB.timeout ? '' : 'none';
+      els.elapsedB.textContent = cfgB.timeout ? ('0.0s / ' + cfgB.timeout.timeout.toFixed(1) + 's') : '—';
       els.srvA.className = 'box'; els.srvA.textContent = 'server ✓';
       els.srvB.className = 'box'; els.srvB.textContent = 'server ✓';
       els.laneA.className = 'lane'; els.laneB.className = 'lane';
@@ -433,8 +437,15 @@ window.HttpwareDemo = (function () {
       const down = !!(lastFault && !lastFault.ok);
       const slow = !!(lastFault && lastFault.ok && lastFault.ms >= 1.0);
       const stressed = down || slow;
-      els.latA.textContent = stressed ? (A.if > 4 ? '12s+' : formatMs(lastFault.ms)) : '40ms';
-      els.latA.style.color = stressed ? 'var(--hw-bad)' : '';
+      // latA is the plain client's p99: reflect the ACTUAL in-flight latency tail, not
+      // the last request. In a brownout (mixed fast successes + slow failures) the last
+      // sample flickers, so a last-request p99 drops to 40ms whenever the last request
+      // was a fast success — contradicting the "p99 blown" narration while slow requests
+      // are still piled up in flight. The in-flight max is stable and honest.
+      const aTailMs = A.pend.length ? A.pend.reduce((m, p) => Math.max(m, p.ms), 0) : 0.04;
+      const plainStress = aTailMs >= 1.0 || A.if > 4;
+      els.latA.textContent = plainStress ? (A.if > 4 ? '12s+' : formatMs(aTailMs)) : '40ms';
+      els.latA.style.color = plainStress ? 'var(--hw-bad)' : '';
       // On timeout pages, AsyncTimeout bounds every lane-B attempt at the deadline —
       // p99 must reflect that ACTUAL bounded latency, not the constant 40ms, or it
       // visually contradicts elapsedB as it climbs toward the same deadline. Pages
@@ -449,10 +460,10 @@ window.HttpwareDemo = (function () {
         : slow ? ('server ' + (lastFault.label || 'slow')) : 'server ✓';
       els.srvB.className = 'box' + (stressed ? ' down' : '');
       els.srvB.textContent = down ? 'server ✗' : slow ? 'server slow' : 'server ✓';
-      els.laneA.classList.toggle('hot', stressed && A.if > 8);
+      els.laneA.classList.toggle('hot', plainStress && A.if > 8);
       els.laneB.classList.toggle('safe', st === 'CLOSED' && !stressed);
-      els.badgeA.className = 'badge' + (stressed ? ' bad' : '');
-      els.badgeA.textContent = stressed ? 'drowning' : 'no protection';
+      els.badgeA.className = 'badge' + (plainStress ? ' bad' : '');
+      els.badgeA.textContent = plainStress ? 'drowning' : 'no protection';
       const okBadge = st === 'CLOSED' && brk && !stressed;
       els.badgeB.className = 'badge ' + (st === 'OPEN' ? 'warn' : okBadge ? 'ok' : '');
       els.badgeB.textContent = st === 'OPEN' ? 'fast-failing' : st === 'HALF_OPEN' ? 'probing' : chainLabel(selectedScenario.chainB);
@@ -554,7 +565,7 @@ window.HttpwareDemo = (function () {
           const f = scenario.fault(now, rnd);
           lastFault = f;
           const landTicks = Math.max(1, Math.round(f.ms * 1000 / TICK));
-          A.if++; A.pend.push({ land: tick + landTicks, ok: f.ok, attempt: 0 });
+          A.if++; A.pend.push({ land: tick + landTicks, ok: f.ok, attempt: 0, ms: f.ms });
           spawnDot(dotsA, els.trackA, f.ok ? 'ok' : 'bad');
           if (brk && !brk.allow(now)) {
             B.rej++; spawnDot(dotsB, els.trackB, 'rej');
@@ -595,6 +606,10 @@ window.HttpwareDemo = (function () {
     });
     els.play.addEventListener('click', run);
     els.replay.addEventListener('click', run);
+    // Auto-select the first scenario so first paint shows a coherent ready-to-play
+    // state (correct flow-diagram boxes, Play enabled) instead of bare "—" placeholders.
+    const firstScenarioBtn = els.scenarios.querySelector('.scenario-btn');
+    if (firstScenarioBtn) firstScenarioBtn.click();
   }
 
   return { mount, _models: { makeCircuitBreaker, makeRetryBudget, makeBulkhead }, _util: { mulberry }, REAL, TICK, ADV };
