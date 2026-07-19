@@ -369,8 +369,8 @@ window.HttpwareDemo = (function () {
 
   function herdTemplate(config) {
     const title = config.title || 'Now scale it to 20 clients';
-    const intro = config.intro || 'One client retrying a blip is invisible. Twenty clients retrying a ' +
-      '<b>sustained</b> outage is a traffic weapon — unless their retries are spread out and capped. ' +
+    const intro = config.intro || 'One client retrying a blip is invisible. Twenty clients retrying an ' +
+      'outage is a traffic weapon — unless their retries are spread out and capped. ' +
       'These strips show <b>backend call-rate over time</b>. Press play and watch the shape.';
     return `
 <div class="hw-wrap herd-wrap">
