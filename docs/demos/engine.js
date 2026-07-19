@@ -480,7 +480,6 @@ window.HttpwareDemo = (function () {
           for (let i = L.pend.length - 1; i >= 0; i--) {
             if (L.pend[i].land <= tick) {
               const p = L.pend[i]; L.pend.splice(i, 1);
-              if (L === B && brk) brk.res(p.ok, now);
               let retried = false;
               // AsyncTimeout bounds the WHOLE operation (outermost: timeout ->
               // circuitBreaker -> bulkhead -> retry -> terminal). An entry clamped
@@ -519,8 +518,17 @@ window.HttpwareDemo = (function () {
               // Release the bulkhead slot only once the attempt truly finishes (not on
               // a retry re-push) — `p.bh` marks entries that actually acquired a slot,
               // so a null/absent bulkhead or a rejected (never-pushed) request is a no-op.
-              if (!retried) { L.if--; if (L === B && p.timedOut) L.bad++; else if (p.ok) L.ok++; else L.bad++;
-                if (L === B && bulk && p.bh) bulk.release(); }
+              // Breaker records ONCE per fully-exhausted retry sequence (not per attempt):
+              // brk.res is called here, only on the terminal (non-retried) landing. A
+              // timed-out entry is an outer-timeout cancellation, not a counted outcome —
+              // AsyncTimeout is OUTERMOST, so a deadline-cancelled operation surfaces as
+              // the outer TimeoutError and the inner breaker never sees it.
+              if (!retried) {
+                L.if--;
+                if (L === B && p.timedOut) { L.bad++; }
+                else { if (L === B && brk) brk.res(p.ok, now); if (p.ok) L.ok++; else L.bad++; }
+                if (L === B && bulk && p.bh) bulk.release();
+              }
             }
           }
         }
