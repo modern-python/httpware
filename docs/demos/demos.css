@@ -92,8 +92,8 @@
 .hw-demo .track { position: relative; height: 20px; margin: 6px 0 4px; }
 .hw-demo .dot { position: absolute; top: 6px; width: 8px; height: 8px; border-radius: 50%; left: 0; transition: left .17s linear; }
 .hw-demo .dot.ok { background: var(--hw-ok); }
-.hw-demo .dot.bad { background: var(--hw-bad); }
-.hw-demo .dot.rej { background: var(--hw-reject); }
+.hw-demo .dot.bad { background: var(--hw-bad); border-radius: 0; }
+.hw-demo .dot.rej { background: transparent; border: 2px solid var(--hw-reject); }
 .hw-demo .score { display: flex; flex-wrap: wrap; gap: 6px 18px; font-family: var(--hw-mono); font-size: .82rem; margin-top: 6px; }
 .hw-demo .score .k { color: var(--hw-muted); }
 .hw-demo .stat { padding: 2px 6px; border-radius: 6px; }

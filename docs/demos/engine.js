@@ -462,7 +462,6 @@ window.HttpwareDemo = (function () {
       if (!selectedScenario) return;
       const scenario = selectedScenario;
       STOPS = config.buildStops(scenario);
-      resetVisual();
       brk = scenario.chainB && scenario.chainB.circuitBreaker
         ? makeCircuitBreaker(scenario.chainB.circuitBreaker) : null;
       bulk = scenario.chainB && scenario.chainB.bulkhead
@@ -477,11 +476,7 @@ window.HttpwareDemo = (function () {
       tmoCfg = scenario.chainB && scenario.chainB.timeout ? scenario.chainB.timeout : null;
       timedOutCount = 0;
       rnd = mulberry(SEED);
-      els.brkB.textContent = brk ? 'breaker CLOSED' : 'no breaker';
-      els.poolWrap.style.display = bulk ? '' : 'none';
-      els.poolB.textContent = bulk ? (bulk.inUse + '/' + bulk.max) : '—';
-      els.elapsedWrap.style.display = tmoCfg ? '' : 'none';
-      els.elapsedB.textContent = tmoCfg ? ('0.0s / ' + tmoCfg.timeout.toFixed(1) + 's') : '—';
+      resetVisual();
 
       timer = setInterval(() => {
         if (paused) return;
