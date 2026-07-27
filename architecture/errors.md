@@ -3,9 +3,9 @@
 `StatusError` and all its 4xx/5xx subclasses are constructed with a **single positional `response: httpx2.Response`**. Subclasses do not override `__init__`. All fields are available via `exc.response.*` (status code, headers, content, request, etc.).
 
 ```python
-raise NotFoundError(response)          # correct
-exc.response.status_code               # 404
-exc.response.request.url               # URL of the failed request
+raise NotFoundError(response)  # correct
+exc.response.status_code  # 404
+exc.response.request.url  # URL of the failed request
 ```
 
 `__repr__` and the `str()` summary redact URL userinfo (`user:pass@`) and mask the values of known-sensitive query and fragment parameters (e.g. `token`, `api_key`, `secret`) to avoid leaking credentials in tracebacks.

@@ -235,7 +235,9 @@ The discover map labels the file "Hypothesis property-based tests for retry inte
 
 ```python
 async def test_total_attempts_never_exceeds_max_attempts(
-    max_attempts: int, status: int, method: str,
+    max_attempts: int,
+    status: int,
+    method: str,
 ) -> None:
     ...
     await client.request(method, "https://example.test/x")
@@ -270,8 +272,15 @@ CLAUDE.md and `architecture/errors.md` mandate that all `StatusError` subclasses
 ```python
 def test_inheritance_tree() -> None:
     ...
-    for exc in (BadRequestError, UnauthorizedError, ForbiddenError, ForbiddenError,
-                ConflictError, UnprocessableEntityError, RateLimitedError):
+    for exc in (
+        BadRequestError,
+        UnauthorizedError,
+        ForbiddenError,
+        ForbiddenError,
+        ConflictError,
+        UnprocessableEntityError,
+        RateLimitedError,
+    ):
         assert issubclass(exc, ClientStatusError), exc
 ```
 
@@ -333,6 +342,7 @@ The async detector only checks `__aiter__`; the sync detector excludes replayabl
 def _is_streaming_body_async(value: object) -> bool:
     ...
     return hasattr(value, "__aiter__")
+
 
 def _is_streaming_body_sync(value: object) -> bool:
     ...
@@ -410,9 +420,7 @@ The test asserts `len(budget._deposits) == expected_deposits`, relying on a comm
 
 ```python
 expected_deposits = (_N_SYNC_THREADS * _N_OPS_PER_THREAD) + _N_ASYNC_TASKS
-assert len(budget._deposits) == expected_deposits, (
-    f"expected {expected_deposits} deposits, got {len(budget._deposits)}"
-)
+assert len(budget._deposits) == expected_deposits, f"expected {expected_deposits} deposits, got {len(budget._deposits)}"
 ```
 
 Panel 2/3: code_reality, reproducer. Suggested direction: pin the injected clock so no real time elapses, making the no-purge assumption an enforced invariant rather than a fragile comment.

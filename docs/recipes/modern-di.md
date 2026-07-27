@@ -64,6 +64,7 @@ class ServiceClients(Group):
         cache_settings=providers.CacheSettings(finalizer=AsyncClient.aclose),
     )
 
+
 # At Container(...) construction:
 # modern_di.exceptions.DuplicateProviderTypeError: Provider is duplicated by type
 # <class 'httpware.client.AsyncClient'>. To resolve this issue: ...

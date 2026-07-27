@@ -74,10 +74,7 @@ class CsvDecoder:
         (row_type,) = typing.get_args(model)
         field_types = {f.name: f.type for f in dataclasses.fields(row_type)}
         reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
-        return [
-            row_type(**{name: field_types[name](value) for name, value in row.items()})
-            for row in reader
-        ]
+        return [row_type(**{name: field_types[name](value) for name, value in row.items()}) for row in reader]
 ```
 
 `can_decode` is total and never raises: a non-`list` model, a bare `list`, or `list[int]` all fall through to `False`. `decode` coerces each CSV cell with its field's type (CSV values arrive as strings) — a real decoder would handle optionals, dates, and missing columns; this is where your domain logic goes. Wire it ahead of the built-ins so it gets first refusal on `list[...]` models while pydantic still handles everything else:

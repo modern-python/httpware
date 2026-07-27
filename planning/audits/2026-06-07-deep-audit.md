@@ -539,8 +539,10 @@ async def test_on_error_lets_cancelled_propagate() -> None:
     @async_on_error
     async def swallow_all(request, exc) -> httpx2.Response | None:
         raise AssertionError("should not catch CancelledError")
+
     async def terminal(request):
         raise asyncio.CancelledError
+
     dispatch = compose_async((swallow_all,), terminal)
     with pytest.raises(asyncio.CancelledError):
         await dispatch(_make_request())
@@ -556,7 +558,10 @@ Suggested direction: add `test_on_error_lets_keyboardinterrupt_propagate` (and o
 
 ```python
 """Tests for the per-method API surface of AsyncClient."""
+
 from httpware import AsyncClient, NotFoundError
+
+
 def _client_with_handler(handler, **kwargs) -> AsyncClient: ...
 async def test_get_returns_httpx2_response() -> None: ...
 ```

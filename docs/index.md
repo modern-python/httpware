@@ -42,10 +42,12 @@ import asyncio
 
 from httpware import AsyncClient
 
+
 async def main() -> None:
     async with AsyncClient(base_url="https://jsonplaceholder.typicode.com") as client:
         response = await client.get("/users/1")
         print(response.json())
+
 
 asyncio.run(main())
 ```
@@ -102,7 +104,7 @@ async def main() -> None:
         base_url="https://api.example.com",
         middleware=[
             AsyncBulkhead(max_concurrent=10),  # cap total in-flight
-            AsyncRetry(),                       # default: 3 attempts, full-jitter backoff
+            AsyncRetry(),  # default: 3 attempts, full-jitter backoff
         ],
     ) as client:
         user = await client.get("/users/1", response_model=User)
