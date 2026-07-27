@@ -47,7 +47,8 @@ from httpware import async_before_request
 
 
 _CORRELATION_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "correlation_id", default=None,
+    "correlation_id",
+    default=None,
 )
 
 
@@ -132,7 +133,8 @@ from httpware import async_on_error
 
 @async_on_error
 async def fallback_on_network_error(
-    request: httpx2.Request, exc: Exception,
+    request: httpx2.Request,
+    exc: Exception,
 ) -> httpx2.Response | None:
     if isinstance(exc, NetworkError):
         return httpx2.Response(

@@ -24,8 +24,8 @@ async def main() -> None:
             response, tags = await client.send_with_response(request, response_model=list[Tag])
             for tag in tags:
                 process(tag)
-            url = next_link(response.headers.get("link"))   # caller's parser
-            params = None                                    # next link carries query
+            url = next_link(response.headers.get("link"))  # caller's parser
+            params = None  # next link carries query
 ```
 
 `process` and `next_link` are caller-defined. Pick a Link-header parser that fits your project — there are several on PyPI, and the format is small enough to hand-roll.

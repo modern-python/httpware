@@ -152,7 +152,7 @@ When `acquire_timeout` elapses without a slot opening, `AsyncBulkhead` raises `B
 
 ```python
 from httpware.middleware.resilience import AsyncCircuitBreaker  # async
-from httpware.middleware.resilience import CircuitBreaker        # sync
+from httpware.middleware.resilience import CircuitBreaker  # sync
 ```
 
 Classic consecutive-failure circuit breaker. Counts failures and prevents requests from reaching a downstream that is known to be broken.
@@ -208,8 +208,8 @@ from httpware.middleware.resilience import AsyncCircuitBreaker
 
 breaker = AsyncCircuitBreaker(
     failure_rate_threshold=0.5,  # open at ≥50% failures
-    window_seconds=30.0,         # over a rolling 30s window
-    minimum_calls=20,            # but only once 20+ calls are observed
+    window_seconds=30.0,  # over a rolling 30s window
+    minimum_calls=20,  # but only once 20+ calls are observed
 )
 ```
 
