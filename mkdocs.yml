@@ -61,6 +61,10 @@ extra_css:
 extra_javascript:
   - demos/engine.js
 
+exclude_docs: |
+  /agents/
+  /adr/
+
 validation:
   omitted_files: warn
   absolute_links: warn

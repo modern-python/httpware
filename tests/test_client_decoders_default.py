@@ -1,7 +1,6 @@
 """Default decoder resolution under varying extras-installed states.
 
-Covers the behavior matrix in planning/specs/2026-06-09-multi-decoder-design.md
-— `AsyncClient()` / `Client()` resolve `decoders=None` against the
+`AsyncClient()` / `Client()` resolve `decoders=None` against the
 `import_checker` flags at __init__ time.
 """
 

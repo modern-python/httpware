@@ -132,6 +132,5 @@ Note this decoder is **two-pass** (`json.loads`, then `structure`). The built-in
 
 ## See also
 
-- **[`architecture/decoders.md`](https://github.com/modern-python/httpware/blob/main/architecture/decoders.md) (Seam B)** — the formal protocol contract: dispatch order, the `can_decode` no-raise obligation, the single-pass rule, and the per-instance adapter cache.
 - **`src/httpware/decoders/pydantic.py` and `msgspec.py`** — the built-in adapters as reference implementations, including how they memoize a `can_decode` verdict and cache the underlying parser per model.
 - **[Quick-Start: typed responses](index.md)** — composing `response_model=` with the default decoder list.

@@ -87,8 +87,7 @@ def test_is_otel_installed_uses_opentelemetry_trace_probe() -> None:
     source = __import__("inspect").getsource(import_checker)
     fail_msg = (
         "import_checker must probe via importlib.metadata.distribution('opentelemetry-api') "
-        "(PEP 420 namespace hazard + sys.modules side-effect); "
-        "see planning/audit/2026-06-07-deep-audit.md (Low finding on import_checker.py:8)."
+        "(PEP 420 namespace hazard + sys.modules side-effect)."
     )
     assert "distribution" in source, fail_msg
     assert '"opentelemetry-api"' in source, fail_msg

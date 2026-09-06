@@ -1,8 +1,7 @@
 """Dispatch routing across multiple registered decoders.
 
-Covers the routing examples in planning/specs/2026-06-09-multi-decoder-design.md
-§ Architecture — native types route via their library regardless of order,
-shared shapes route to the first decoder in the list.
+Native types route via their library regardless of order; shared shapes
+route to the first decoder in the list.
 """
 
 import contextlib

@@ -1,7 +1,5 @@
 """AsyncBulkhead middleware — concurrency limiter via asyncio.Semaphore.
 
-See architecture/resilience.md (Bulkhead section) for the contract.
-
 The middleware owns an asyncio.Semaphore(max_concurrent). On each request,
 it acquires a slot (bounded by acquire_timeout via asyncio.timeout) and
 releases the slot in a try/finally so success, exceptions, and cancellation

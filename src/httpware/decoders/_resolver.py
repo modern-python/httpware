@@ -8,7 +8,7 @@ client calls `resolve` before `_dispatch` — so a missing decoder fails before
 the request goes out — and `_BoundDecoder.decode` after the response arrives.
 
 Both clients hold one `_DecoderResolver`; it is fully synchronous, so there is
-no sync/async split. See architecture/decoders.md for the full Seam B contract.
+no sync/async split.
 """
 
 from typing import Generic, TypeVar

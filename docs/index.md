@@ -154,7 +154,7 @@ event names. See **[Observability](observability.md)** for the full contract.
 - **[Observability](observability.md)** — the stdlib-`logging` and OTel span-event contract emitted by the resilience middleware.
 - **[Testing guide](testing.md)** — mock-transport injection pattern for testing code that uses `httpware`.
 - **[Recipes](recipes/modern-di.md)** — wiring `AsyncClient` into a `modern-di` container.
-- **[Architecture Notes](https://github.com/modern-python/httpware/blob/main/architecture/overview.md)** — per-capability design notes — invariants, the three protocol seams, exception contract, module layout, testing patterns — under `architecture/`. Lives in the repo under `architecture/`.
+- **[Decision records](https://github.com/modern-python/httpware/tree/main/docs/adr)** — the alternatives that were considered and rejected, and why.
 - **[Contributing](dev/contributing.md)** — setup, conventions, workflow.
 - **[Release notes](https://github.com/modern-python/httpware/releases)** — per-version changelogs.
 

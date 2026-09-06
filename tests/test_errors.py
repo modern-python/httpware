@@ -1,6 +1,7 @@
 """Tests for the status-keyed exception tree in httpware.errors."""
 
 import builtins
+import inspect
 import pickle
 from http import HTTPStatus
 
@@ -32,6 +33,7 @@ from httpware.errors import (
     TransportError,
     UnauthorizedError,
     UnprocessableEntityError,
+    _KeywordReduceMixin,
 )
 
 
@@ -466,3 +468,45 @@ def test_response_too_large_error_pickle_round_trip() -> None:
     assert restored.limit == 10  # noqa: PLR2004 — literal mirrors construction above
     assert restored.content_length is None
     assert restored.reason == "streamed"
+
+
+def _keyword_reduce_instances() -> tuple[ClientError, ...]:
+    return (
+        RetryBudgetExhaustedError(last_response=None, last_exception=None, attempts=3),
+        BulkheadFullError(max_concurrent=1, acquire_timeout=None),
+        CircuitOpenError(retry_after=None),
+        DecodeError(response=_make_response(200), model=_DecodeErrorModel, original=ValueError("x")),
+        MissingDecoderError(model=_Foo, registered_names=()),
+        ResponseTooLargeError(status_code=200, limit=10, content_length=None, reason="streamed"),
+    )
+
+
+def test_every_keyword_reduce_class_has_a_case_here() -> None:
+    """INVARIANT: no class carries _KeywordReduceMixin without its precondition being checked.
+
+    The mixin is safe only for classes whose instance __dict__ mirrors their keyword-only
+    __init__, and that is a property of each class rather than of the mixin. A seventh class
+    added to the tree would otherwise inherit __reduce__ and inherit nothing that checks it,
+    which is precisely how the root-level version rejected in docs/adr/0011 would have
+    failed. Enumerating the subclasses here makes adding one an edit somebody has to make.
+    """
+    assert {type(exc) for exc in _keyword_reduce_instances()} == set(_KeywordReduceMixin.__subclasses__())
+
+
+@pytest.mark.parametrize("exc", _keyword_reduce_instances(), ids=lambda e: type(e).__name__)
+def test_keyword_reduce_classes_dict_mirrors_their_init_parameters(exc: ClientError) -> None:
+    """INVARIANT: a _KeywordReduceMixin instance's __dict__ is exactly its __init__ keywords.
+
+    __reduce__ replays the instance __dict__ as keyword arguments, so the two drift apart
+    silently: storing a derived attribute alongside the declared fields, or accepting a
+    keyword that __init__ consumes without assigning, both leave a class that constructs,
+    reprs and raises perfectly well. The damage appears only in a process that unpickles the
+    exception — a Celery worker or a multiprocessing pool — which is rarely the process the
+    suite runs in, and never the one the author is looking at.
+    """
+    keywords = {
+        name
+        for name, parameter in inspect.signature(type(exc).__init__).parameters.items()
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    }
+    assert set(vars(exc)) == keywords

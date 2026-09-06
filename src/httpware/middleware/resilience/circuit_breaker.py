@@ -1,7 +1,5 @@
 """CircuitBreaker + AsyncCircuitBreaker — consecutive-failure and failure-rate circuit breakers.
 
-See architecture/resilience.md (CircuitBreaker + AsyncTimeout section) for the contract.
-
 A counted failure is a NetworkError, an httpware TimeoutError, or a StatusError whose
 status_code is in the effective failure set (default: all 5xx). 4xx — including 429 —
 count as successes: 429 means healthy-but-throttling, and tripping on it amplifies

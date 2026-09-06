@@ -196,6 +196,5 @@ Sync and async middleware classes do not interop: a `Middleware` cannot be passe
 
 ## See also
 
-- **[`architecture/middleware.md`](https://github.com/modern-python/httpware/blob/main/architecture/middleware.md) (Seam A)** — the formal protocol contract and why the chain is frozen at construction.
 - **`src/httpware/middleware/resilience/`** — `AsyncRetry`, `AsyncBulkhead`, `RetryBudget` as real-world consumers of this exact protocol.
 - **[Quick-Start composition example](index.md#with-resilience-middleware)** — composing built-in middleware.

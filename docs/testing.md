@@ -113,4 +113,4 @@ For middleware with state-keeping (counters, circuit-breaker state), assert on i
 
 - **[Middleware guide](middleware.md)** — write the middleware you're testing.
 - **[Resilience reference](resilience.md)** — testing `AsyncRetry`/`AsyncBulkhead` configurations.
-- **[`architecture/testing.md`](https://github.com/modern-python/httpware/blob/main/architecture/testing.md)** — the project's own testing conventions: `pytest-asyncio` auto-mode, `httpx2.MockTransport` over `respx`, Hypothesis property-based tests, and the 100%-coverage bar.
+- **`AGENTS.md`** — the project's own testing conventions, and the admission check that decides where a new fact belongs.
