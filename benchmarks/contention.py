@@ -6,8 +6,9 @@ eats the gain. Run under both interpreters and compare:
     uv run --python 3.11 benchmarks/contention.py
     uv run --python 3.14t benchmarks/contention.py
 
-Not a test and not a CI gate (shared-runner perf is too noisy); a characterization tool with a
-recorded baseline in planning/audits/2026-07-18-free-threading-audit.md.
+Not a test and not a CI gate (shared-runner perf is too noisy); a characterization tool. Free-
+threading support here is a correctness certification, not a performance claim: this benchmark
+measured 3.14t as roughly 1.9x *slower* than GIL 3.11 on a single-shared-lock hot loop.
 """
 
 import sys

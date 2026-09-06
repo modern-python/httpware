@@ -145,7 +145,7 @@ except RetryBudgetExhaustedError as exc:
 
 ## `DecodeError`
 
-`DecodeError` is raised when `response_model=` is set on a request and the active `ResponseDecoder` failed to parse the response body. The HTTP call itself succeeded — status was 2xx/3xx and the transport delivered the body intact — but the body could not be coerced into the requested model. The exception is raised independently of which decoder is in use (`PydanticDecoder`, `MsgspecDecoder`, or a third-party adapter), so `except httpware.ClientError` is sufficient to cover the response-model decode path.
+`DecodeError` is raised when `response_model=` is set on a request and the active `ResponseDecoder` failed to parse the response body. The HTTP call itself succeeded — status was 2xx/3xx and the transport delivered the body intact — but the body could not be coerced into the requested model. The exception is raised independently of which decoder is in use (`PydanticDecoder`, `MsgspecDecoder`, or a third-party decoder), so `except httpware.ClientError` is sufficient to cover the response-model decode path.
 
 Fields:
 
@@ -219,4 +219,4 @@ except ResponseTooLargeError as exc:
 
 - **[Resilience reference](resilience.md)** — `AsyncRetry`, `RetryBudget`, `AsyncBulkhead` parameter tables.
 - **[Middleware guide](middleware.md)** — the `@async_on_error` decorator can translate exceptions into responses.
-- **[`architecture/errors.md`](https://github.com/modern-python/httpware/blob/main/architecture/errors.md)** — the formal exception contract.
+- **`src/httpware/errors.py`** — the tree itself; the construction rules for both halves of it are enforced in `tests/test_errors.py`.

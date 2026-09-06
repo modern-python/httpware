@@ -341,4 +341,3 @@ The same ordering rationale from [Composition](#composition) applies — `Bulkhe
 - **[Middleware guide](middleware.md)** — write your own resilience middleware against the same protocol `AsyncRetry` and `AsyncBulkhead` use.
 - **[Errors reference](errors.md)** — `RetryBudgetExhaustedError`, `BulkheadFullError`, `CircuitOpenError`, and the broader exception tree.
 - **[Observability](observability.md)** — the operational events these middleware emit.
-- **[`architecture/middleware.md`](https://github.com/modern-python/httpware/blob/main/architecture/middleware.md)** — the formal Middleware/Seam-A contract.
