@@ -161,7 +161,7 @@ def test_per_status_subclasses_construct(status: int, expected: type[StatusError
     ],
 )
 def test_status_error_leaves_do_not_override_init(cls: type[StatusError]) -> None:
-    """CLAUDE.md invariant: StatusError leaf classes must not define their own __init__."""
+    """AGENTS.md invariant: StatusError leaf classes must not define their own __init__."""
     assert "__init__" not in cls.__dict__, (
         f"{cls.__name__} defines __init__ — StatusError leaves must inherit StatusError.__init__ directly"
     )
