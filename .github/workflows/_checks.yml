@@ -44,8 +44,7 @@ jobs:
       - run: uv python install ${{ matrix.python-version }}
       - run: uv python pin ${{ matrix.python-version }}
       - run: just install
-      - run: just test --cov-report xml
-
+      - run: just test-ci
   pytest-freethreaded:
     runs-on: ubuntu-latest
     steps:
@@ -59,8 +58,7 @@ jobs:
       - run: uv python pin 3.14t
       - run: just install
       - run: uv run --no-sync python -c "import sys; assert not sys._is_gil_enabled(), 'GIL is enabled'"
-      - run: just test --cov-report xml
-
+      - run: just test-ci
   links:
     runs-on: ubuntu-latest
     steps:
