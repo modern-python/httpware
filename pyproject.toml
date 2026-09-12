@@ -99,7 +99,7 @@ isort.no-lines-before = ["standard-library", "local-folder"]
 "tests/**" = ["S101"]
 
 [tool.pytest.ini_options]
-addopts = "--cov=. --cov-report term-missing --cov-fail-under=100"
+addopts = ""
 asyncio_mode = "auto"
 pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
@@ -111,3 +111,4 @@ markers = [
 run.concurrency = ["thread"]
 run.omit = ["benchmarks/*"]
 report.exclude_also = ["if typing.TYPE_CHECKING:", 'pytest\.fail\(']
+report.fail_under = 100
