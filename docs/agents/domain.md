@@ -1,46 +1,38 @@
 # Domain Docs
 
-How the engineering skills should consume this repo's domain documentation when exploring the
-codebase. This repo is **single-context**.
+How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
 ## Before exploring, read these
 
-- **`CONTEXT.md`** at the repo root: what this repo is, and the glossary.
-- **`docs/adr/`**: read the decision records that touch the area you're about to work in.
+- **`CONTEXT.md`** at the repo root.
+- **`docs/adr/`**: read ADRs that touch the area you're about to work in.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest
-creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions
-actually get resolved.
+If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
 ## File structure
+
+Single-context repo:
 
 ```
 /
 ├── CONTEXT.md
 ├── docs/adr/
-│   ├── 0001-….md
-│   └── 0002-….md
-├── src/httpware/
-└── tests/
+│   ├── 0001-no-opentelemetry-middleware.md
+│   └── 0002-sync-async-parity-is-hand-maintained.md
+└── src/
 ```
-
-There is no `CONTEXT-MAP.md` and no per-package `CONTEXT.md`: one package, one context. There is
-also no `architecture/` and no `planning/` — the present is the source, and what must stay true is
-a test whose docstring opens `INVARIANT:`.
 
 ## Use the glossary's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a
-test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly
-avoids: write `middleware` and not `hook`, `terminal` and not `transport`, `decoder` and not
-`adapter`, `cap` and not `limit`.
+When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift to synonyms the glossary explicitly avoids.
 
-If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language
-the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
+If the concept you need isn't in the glossary yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
 
-## Where a new fact goes
+## Flag ADR conflicts
 
-Run the admission check in `AGENTS.md` before writing anything down.
+If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
+
+> _Contradicts ADR-0001 (no opentelemetry middleware), but worth reopening because…_
 
 ## Link style inside `docs/`
 
@@ -52,10 +44,3 @@ working in both renderings:
 - **Never link from a file inside `docs/` to a path outside it.** It cannot resolve in both
   renderings: MkDocs emits `links.not_found` and ships the link verbatim, so it 404s on the site.
   Cite `src/httpware/...`, `tests/...`, and root files as inline code, never as links.
-
-## Flag ADR conflicts
-
-If your output contradicts an existing decision record, surface it explicitly rather than silently
-overriding:
-
-> _Contradicts ADR-NNNN (its title), but worth reopening because…_
