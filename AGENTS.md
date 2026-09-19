@@ -45,7 +45,9 @@ Every module under `src/httpware/` is named for what it does; read it. What a si
   `DecodeError`. A decoder's `can_decode` runs outside that wrap, so it must never raise.
 - `_internal/` is the cross-module private home; `_internal/observability.py:_emit_event` is the
   single fan-out to both a logging record and an OTel span event, and the event names it takes are
-  a public contract (see `CONTEXT.md`).
+  a public contract (see `CONTEXT.md`). Logic shared only by a sync/async sibling pair stays a
+  free function in the module that owns the behaviour; `_internal/` is for sharing across
+  otherwise unrelated modules.
 - `middleware/resilience/` keeps the shared logic objects (`_RetryPolicy`, `_CircuitBreakerState`,
   `RetryBudget`, `_backoff`, `_event_loop_guard`) written once and driven by both worlds. New
   resilience logic goes in a shared object, not into each world's shell.

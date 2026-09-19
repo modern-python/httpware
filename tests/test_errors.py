@@ -486,9 +486,11 @@ def test_every_keyword_reduce_class_has_a_case_here() -> None:
 
     The mixin is safe only for classes whose instance __dict__ mirrors their keyword-only
     __init__, and that is a property of each class rather than of the mixin. A seventh class
-    added to the tree would otherwise inherit __reduce__ and inherit nothing that checks it,
-    which is precisely how the root-level version rejected in docs/adr/0011 would have
-    failed. Enumerating the subclasses here makes adding one an edit somebody has to make.
+    added to the tree would otherwise inherit __reduce__ and inherit nothing that checks it.
+    A root-level __reduce__ on ClientError was rejected for the same reason: the argless
+    subclasses keep their message in args and have an empty __dict__, so replaying it would
+    silently drop the message. Enumerating the subclasses here makes adding one an edit
+    somebody has to make.
     """
     assert {type(exc) for exc in _keyword_reduce_instances()} == set(_KeywordReduceMixin.__subclasses__())
 
