@@ -28,7 +28,7 @@ def test_client_and_asyncclient_expose_the_same_public_methods() -> None:
     """INVARIANT: Client and AsyncClient carry identical features; only close/aclose differ.
 
     Parity is hand-maintained rather than generated
-    (docs/adr/0003-sync-async-parity-is-hand-maintained.md), so the only thing
+    (docs/adr/0002-sync-async-parity-is-hand-maintained.md), so the only thing
     standing between the two surfaces and a slow drift is this comparison. A feature added to
     AsyncClient alone still ships, still passes its own tests, and still type-checks — sync
     callers simply never get it, and nobody finds out until one of them goes looking. The
@@ -84,7 +84,7 @@ def test_every_resilience_middleware_ships_both_worlds_except_timeout() -> None:
     """INVARIANT: each resilience middleware has a sync and an Async* form; Timeout is the sole exception.
 
     A sync sibling cannot be written for the total deadline — sync Python cannot interrupt a
-    blocking call mid-flight — and docs/adr/0003-sync-async-parity-is-hand-maintained.md records
+    blocking call mid-flight — and docs/adr/0002-sync-async-parity-is-hand-maintained.md records
     that as a deliberate, argued break.
     The risk is that one argued exception becomes cover for unargued ones: the next
     async-only middleware is far easier to justify once the suite is already asymmetric. The
