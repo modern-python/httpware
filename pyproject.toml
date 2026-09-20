@@ -38,8 +38,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pydantic = ["pydantic>=2.0,<3.0"]
-msgspec = ["msgspec>=0.18"]
+pydantic = [
+    "pydantic>=2.0,<3.0; python_version < '3.14'",
+    # pydantic-core ships no cp314 wheel before pydantic 2.12.
+    "pydantic>=2.12,<3.0; python_version >= '3.14'",
+]
+msgspec = [
+    # 0.18.5 is the first release whose can_decode agrees with decode on Annotated types;
+    # 0.20 is the first with a cp314 wheel.
+    "msgspec>=0.18.5; python_version < '3.14'",
+    "msgspec>=0.20; python_version >= '3.14'",
+]
 otel = ["opentelemetry-api>=1.20"]
 all = ["httpware[pydantic,msgspec,otel]"]
 
