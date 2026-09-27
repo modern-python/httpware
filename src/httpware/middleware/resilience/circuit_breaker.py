@@ -490,8 +490,9 @@ class AsyncKeyedCircuitBreaker:
 
     `key` maps a request to its circuit key; the default is the request URL's origin as a string
     such as "https://api.example" (scheme, host and non-default port; never userinfo). Every
-    circuit behaves exactly like an AsyncCircuitBreaker built with the same arguments. Circuits are created on first use and
-    kept for the breaker's lifetime, so the key must take a small, bounded set of values.
+    circuit behaves exactly like an AsyncCircuitBreaker built with the same arguments. Circuits
+    are created on first use and kept for the breaker's lifetime, so the key must take a small,
+    bounded set of values.
     """
 
     def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
