@@ -74,8 +74,6 @@ def _parse_retry_after(value: str) -> float | None:
         parsed = email.utils.parsedate_to_datetime(value)
     except (TypeError, ValueError):
         return None
-    if parsed is None:  # pragma: no cover — parsedate_to_datetime raises rather than returning None in CPython 3.11+
-        return None
     now = datetime.datetime.now(datetime.UTC)
     delta = (parsed - now).total_seconds()
     return max(0.0, delta)
