@@ -8,7 +8,6 @@ readme = "README.md"
 keywords = [
     "http-client",
     "httpx",
-    "async",
     "asyncio",
     "resilience",
     "retry",
