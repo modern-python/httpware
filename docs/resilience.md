@@ -271,7 +271,7 @@ Every `AsyncCircuitBreaker` parameter, with the same defaults, plus:
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `key` | `request.url.origin` | Maps a request to its circuit key. Any hashable value works. The default origin combines scheme, host and port, normalized, so `https://A.example/x` and `https://a.example:443/y` share a circuit while `http://a.example` and `https://a.example:8443` each get their own. |
+| `key` | the request's origin | Maps a request to its circuit key. Any hashable value works. The default is the origin as a string built from scheme, host and port, such as `https://a.example` or `http://a.example:8080`. Hosts are lowercased and default ports dropped, so `https://A.example/x` and `https://a.example:443/y` share a circuit, while `http://a.example` and `https://a.example:8443` each get their own. Userinfo is never part of it. |
 
 ### Circuit lifetime
 

@@ -192,8 +192,17 @@ async def test_events_carry_the_circuit_key(caplog: pytest.LogCaptureFixture) ->
                 await client.get("https://a.test/x")
     records = [r for r in caplog.records if r.name == "httpware.circuit_breaker"]
     assert [r.event for r in records] == ["circuit.opened", "circuit.rejected"]  # ty: ignore[unresolved-attribute]
-    expected = str(httpx2.URL("https://a.test").origin)
-    assert all(r.circuit_key == expected for r in records)  # ty: ignore[unresolved-attribute]
+    assert all(r.circuit_key == "https://a.test" for r in records)  # ty: ignore[unresolved-attribute]
+
+
+async def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pytest.LogCaptureFixture) -> None:
+    handler = _PerHost(failing={"a.test"})
+    async with _client(handler, breaker=AsyncKeyedCircuitBreaker(failure_threshold=1)) as client:
+        with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
+            await _fail_n(client, "https://user:secret@A.test:443/x?q=1", 1)
+            await _fail_n(client, "http://a.test:8080/x", 1)
+    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
+    assert keys == ["https://a.test", "http://a.test:8080"]
 
 
 def test_cross_loop_use_raises_runtimeerror() -> None:

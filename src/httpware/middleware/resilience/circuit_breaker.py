@@ -366,8 +366,8 @@ def _call_sync(
     return response
 
 
-def _origin(request: httpx2.Request) -> Hashable:
-    return request.url.origin
+def _origin(request: httpx2.Request) -> str:
+    return f"{request.url.scheme}://{request.url.netloc.decode('ascii')}"
 
 
 class _KeyedStates:
@@ -488,9 +488,9 @@ class CircuitBreaker:
 class AsyncKeyedCircuitBreaker:
     """Async circuit breaker with one independent circuit per circuit key.
 
-    `key` maps a request to its circuit key; the default is `request.url.origin`, so scheme,
-    host and port together pick the circuit. Every circuit behaves exactly like an
-    AsyncCircuitBreaker built with the same arguments. Circuits are created on first use and
+    `key` maps a request to its circuit key; the default is the request URL's origin as a string
+    such as "https://api.example" (scheme, host and non-default port; never userinfo). Every
+    circuit behaves exactly like an AsyncCircuitBreaker built with the same arguments. Circuits are created on first use and
     kept for the breaker's lifetime, so the key must take a small, bounded set of values.
     """
 
