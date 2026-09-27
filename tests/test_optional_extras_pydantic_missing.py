@@ -20,10 +20,10 @@ class _FakeDecoder:
     """Test stand-in for ResponseDecoder; never called at runtime."""
 
     def can_decode(self, model: type) -> bool:  # noqa: ARG002 — name pinned by ResponseDecoder protocol
-        return True  # pragma: no cover
+        return True  # pragma: no cover — never invoked; the tests only check the stored decoders tuple
 
     def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002 — name pinned by ResponseDecoder protocol
-        return model()  # pragma: no cover
+        return model()  # pragma: no cover — never invoked; the tests only check the stored decoders tuple
 
 
 def test_pydantic_decoder_module_imports_when_pydantic_absent() -> None:

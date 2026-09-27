@@ -460,7 +460,7 @@ def test_is_streaming_body_true_for_async_iterable_files() -> None:
     """_is_streaming_body returns True for an async-iterable, covering the files= path."""
 
     async def streamed_files() -> typing.AsyncIterator[bytes]:
-        yield b"x"  # pragma: no cover
+        yield b"x"  # pragma: no cover — never iterated; the test only classifies the generator object
 
     assert _is_streaming_body(streamed_files()) is True
 
@@ -469,7 +469,7 @@ def test_is_streaming_body_async_true_for_sync_generator() -> None:
     """_is_streaming_body_async must return True for sync generators — they're non-replayable."""
 
     def sync_gen() -> typing.Iterator[bytes]:
-        yield b"x"  # pragma: no cover
+        yield b"x"  # pragma: no cover — never iterated; the test only classifies the generator object
 
     assert _is_streaming_body(sync_gen()) is True
 

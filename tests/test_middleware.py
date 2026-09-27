@@ -21,15 +21,13 @@ def _make_request(url: str = "https://example.test/x") -> httpx2.Request:
     return httpx2.Request("GET", url)
 
 
-def _make_response(status: int = HTTPStatus.OK, *, request: httpx2.Request | None = None) -> httpx2.Response:
-    if request is None:  # pragma: no cover
-        request = _make_request()
+def _make_response(status: int = HTTPStatus.OK, *, request: httpx2.Request) -> httpx2.Response:
     return httpx2.Response(status, request=request)
 
 
 async def test_middleware_protocol_is_runtime_checkable() -> None:
     class _OkMiddleware:
-        async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002  # pragma: no cover
+        async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002  # pragma: no cover — never invoked; the test only checks isinstance()
             return await next(request)
 
     assert isinstance(_OkMiddleware(), AsyncMiddleware)
@@ -103,9 +101,9 @@ async def test_after_response_decorator_transforms_response() -> None:
 async def test_on_error_decorator_can_translate_exception() -> None:
     @async_on_error
     async def swallow(request: httpx2.Request, exc: Exception) -> httpx2.Response | None:
-        if isinstance(exc, RuntimeError) and str(exc) == "boom":
-            return _make_response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
-        return None  # pragma: no cover
+        assert isinstance(exc, RuntimeError)
+        assert str(exc) == "boom"
+        return _make_response(HTTPStatus.SERVICE_UNAVAILABLE, request=request)
 
     async def terminal(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
         msg = "boom"
@@ -136,7 +134,7 @@ async def test_on_error_returns_none_reraises() -> None:
 def test_before_request_repr() -> None:
     @async_before_request
     async def my_transform(request: httpx2.Request) -> httpx2.Request:
-        return request  # pragma: no cover
+        return request  # pragma: no cover — never invoked; the test only checks repr()
 
     assert "async_before_request" in repr(my_transform)
     assert "my_transform" in repr(my_transform)
@@ -145,7 +143,7 @@ def test_before_request_repr() -> None:
 def test_after_response_repr() -> None:
     @async_after_response
     async def my_transform(request: httpx2.Request, response: httpx2.Response) -> httpx2.Response:  # noqa: ARG001
-        return response  # pragma: no cover
+        return response  # pragma: no cover — never invoked; the test only checks repr()
 
     assert "async_after_response" in repr(my_transform)
     assert "my_transform" in repr(my_transform)
@@ -154,7 +152,7 @@ def test_after_response_repr() -> None:
 def test_on_error_repr() -> None:
     @async_on_error
     async def my_handler(request: httpx2.Request, exc: Exception) -> httpx2.Response | None:  # noqa: ARG001
-        return None  # pragma: no cover
+        return None  # pragma: no cover — never invoked; the test only checks repr()
 
     assert "async_on_error" in repr(my_handler)
     assert "my_handler" in repr(my_handler)
@@ -165,7 +163,7 @@ async def test_on_error_lets_cancelled_propagate() -> None:
     async def swallow_all(
         request: httpx2.Request,  # noqa: ARG001
         exc: Exception,  # noqa: ARG001
-    ) -> httpx2.Response | None:  # pragma: no cover
+    ) -> httpx2.Response | None:  # pragma: no cover — never invoked; CancelledError must bypass on_error
         msg = "should not catch CancelledError"
         raise AssertionError(msg)
 

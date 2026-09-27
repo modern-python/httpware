@@ -131,7 +131,7 @@ async def test_send_with_response_runs_middleware_chain() -> None:
 
 
 async def test_send_with_response_raises_missing_decoder_before_http_call() -> None:
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked when MissingDecoderError fires")
 
     transport = httpx2.MockTransport(handler)

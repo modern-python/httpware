@@ -54,7 +54,7 @@ def test_auto_raises_on_4xx_with_body_preread() -> None:
 
     client = _client(handler)
     with pytest.raises(NotFoundError) as info, client.stream("GET", "https://example.test/missing"):
-        pytest.fail("should have raised before reaching block body")
+        pytest.fail("should have raised before reaching block body")  # pragma: no cover — stream() raises on enter
     assert info.value.response.status_code == _NOT_FOUND
     assert info.value.response.content == body  # body was pre-read; accessible
 
@@ -67,7 +67,7 @@ def test_auto_raises_on_5xx_with_body_preread() -> None:
 
     client = _client(handler)
     with pytest.raises(ServiceUnavailableError) as info, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert info.value.response.content == body
 
 
@@ -77,7 +77,7 @@ def test_auto_raises_unknown_4xx_falls_back_to_client_status_error() -> None:
 
     client = _client(handler)
     with pytest.raises(ClientStatusError) as info, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert type(info.value) is ClientStatusError
     assert info.value.response.status_code == _UNKNOWN_4XX
 
@@ -88,7 +88,7 @@ def test_auto_raises_unknown_5xx_falls_back_to_server_status_error() -> None:
 
     client = _client(handler)
     with pytest.raises(ServerStatusError) as info, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert type(info.value) is ServerStatusError
     assert info.value.response.status_code == _UNKNOWN_5XX
 
@@ -109,7 +109,7 @@ def test_network_error_during_request_maps_to_network_error() -> None:
 
     client = _client(handler)
     with pytest.raises(NetworkError, match="connect refused"), client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
 
 
 def test_network_error_during_body_consumption_maps_to_network_error() -> None:
@@ -139,7 +139,7 @@ def test_timeout_during_stream_maps_to_httpware_timeout() -> None:
 
     client = _client(handler)
     with pytest.raises(HttpwareTimeoutError, match="read timeout"), client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
 
 
 def test_invalid_url_maps_to_bare_transport_error() -> None:
@@ -149,7 +149,7 @@ def test_invalid_url_maps_to_bare_transport_error() -> None:
 
     client = _client(handler)
     with pytest.raises(TransportError) as info, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert not isinstance(info.value, NetworkError)
 
 
@@ -173,7 +173,7 @@ def test_bypasses_middleware_chain() -> None:
     invocations = {"n": 0}
 
     class _RecordingMiddleware:
-        def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002  # pragma: no cover
+        def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002  # pragma: no cover — never invoked; stream() bypasses the middleware chain, which the test asserts
             invocations["n"] += 1
             return next(request)
 
@@ -316,7 +316,7 @@ def test_stream_raises_response_too_large_when_over_cap_sync() -> None:
 
     client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=10)
     with pytest.raises(ResponseTooLargeError) as caught, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert caught.value.limit == 10  # noqa: PLR2004 — mirrors max_response_body_bytes above
     assert caught.value.content_length == 200  # noqa: PLR2004 — len(body) above
     client.close()
@@ -330,7 +330,7 @@ def test_stream_reads_error_body_when_under_cap_sync() -> None:
 
     client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=1000)
     with pytest.raises(NotFoundError) as caught, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert caught.value.response.content == body
     client.close()
 
@@ -343,7 +343,7 @@ def test_stream_unbounded_by_default_reads_large_error_body_sync() -> None:
 
     client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
     with pytest.raises(InternalServerError) as caught, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert caught.value.response.content == body
     client.close()
 
@@ -354,7 +354,7 @@ def test_stream_error_pre_read_streamed_over_cap_sync() -> None:
 
     client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=70)
     with pytest.raises(ResponseTooLargeError) as caught, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert caught.value.reason == "streamed"
     assert caught.value.content_length is None
     client.close()
@@ -372,7 +372,7 @@ def test_stream_error_pre_read_within_cap_gzip_decoded_sync() -> None:
         httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), max_response_body_bytes=1_000_000
     )
     with pytest.raises(InternalServerError) as caught, client.stream("GET", "https://example.test/x"):
-        pytest.fail("unreachable")
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
     assert caught.value.response.content == b"boom" * 50
     client.close()
 
