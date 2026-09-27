@@ -279,7 +279,7 @@ A circuit is created on the first request for its key and kept for as long as th
 
 ### Observability
 
-The same events as `AsyncCircuitBreaker`, on the same `httpware.circuit_breaker` logger, each carrying one extra attribute: `circuit_key`, the `str()` of the request's circuit key.
+The same events as `AsyncCircuitBreaker`, on the same `httpware.circuit_breaker` logger, each carrying one extra attribute: `circuit_key`, the `str()` of the request's circuit key. Unlike `url`, `circuit_key` is not redacted: it reaches log records and span events exactly as the key function returns it, so a custom `key` must not return credentials, tokens or other sensitive values. The default origin carries none.
 
 ### Example
 
