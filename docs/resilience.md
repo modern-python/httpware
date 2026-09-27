@@ -16,6 +16,7 @@ A key ordering constraint: `AsyncBulkhead` must sit outside `AsyncRetry` (before
 - [`RetryBudget`](#retrybudget)
 - [`AsyncBulkhead`](#asyncbulkhead)
 - [`AsyncCircuitBreaker` / `CircuitBreaker`](#asynccircuitbreaker-circuitbreaker)
+- [`AsyncKeyedCircuitBreaker` / `KeyedCircuitBreaker`](#asynckeyedcircuitbreaker-keyedcircuitbreaker)
 - [`AsyncTimeout`](#asynctimeout)
 - [Sync `Retry` and `Bulkhead`](#sync-retry-and-bulkhead)
 
@@ -252,6 +253,49 @@ async with AsyncClient(
 ```
 
 Sync usage is identical: `Client` + `CircuitBreaker`, no `await`.
+
+## `AsyncKeyedCircuitBreaker` / `KeyedCircuitBreaker`
+
+```python
+from httpware.middleware.resilience import AsyncKeyedCircuitBreaker  # async
+from httpware.middleware.resilience import KeyedCircuitBreaker  # sync
+```
+
+One independent circuit per **circuit key**, for a client whose requests go to more than one upstream. A plain `AsyncCircuitBreaker` holds a single circuit, so one failing upstream would fast-fail requests to every healthy one; the keyed breaker opens only the failing upstream's circuit.
+
+Each circuit behaves exactly like an [`AsyncCircuitBreaker`](#asynccircuitbreaker-circuitbreaker) built with the same arguments: same states, failure classification, rate mode, half-open probe and events. The probe slot is per circuit, so two upstreams recovering at once each get their own probe.
+
+### Constructor
+
+Every `AsyncCircuitBreaker` parameter, with the same defaults, plus:
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `key` | `request.url.origin` | Maps a request to its circuit key. Any hashable value works. The default origin combines scheme, host and port, normalized, so `https://A.example/x` and `https://a.example:443/y` share a circuit while `http://a.example` and `https://a.example:8443` each get their own. |
+
+### Circuit lifetime
+
+A circuit is created on the first request for its key and kept for as long as the breaker lives; nothing is evicted or pruned. Memory grows with the number of distinct keys, so `key` must map to a small, bounded set — configured upstreams, not a value taken from user input. A key function that returns something unbounded, such as the full URL, grows the map forever.
+
+### Observability
+
+The same events as `AsyncCircuitBreaker`, on the same `httpware.circuit_breaker` logger, each carrying one extra attribute: `circuit_key`, the `str()` of the request's circuit key.
+
+### Example
+
+```python
+from httpware import AsyncClient
+from httpware.middleware.resilience import AsyncKeyedCircuitBreaker, AsyncRetry
+
+
+async with AsyncClient(
+    middleware=[AsyncKeyedCircuitBreaker(failure_threshold=5, reset_timeout=60.0), AsyncRetry()],
+) as client:
+    await client.get("https://suggest-a.example/v1/suggest")
+    await client.get("https://suggest-b.example/v1/suggest")  # unaffected if suggest-a is down
+```
+
+The keyed breaker takes the circuit breaker's place in the [composition](#composition): outside `AsyncRetry`, so it counts one outcome per retry sequence. Sync usage is identical: `Client` + `KeyedCircuitBreaker`, no `await`.
 
 ## `AsyncTimeout`
 

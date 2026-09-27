@@ -50,6 +50,11 @@ The circuit breaker's unit of account: a `NetworkError`, an httpware `TimeoutErr
 circuit state. "Failure" alone is ambiguous here: a failed request is very often not a counted
 failure.
 
+**Circuit key**:
+The value a keyed circuit breaker computes from a request to pick its circuit; requests with equal
+keys share one circuit. The default is the URL's origin: scheme, host and port.
+_Avoid_: host — the host alone merges upstreams that differ only in scheme or port.
+
 **Cap**:
 `max_response_body_bytes` — the bound on how many bytes httpware buffers on the caller's behalf.
 Counted *decoded*, status-agnostic, and never applied to user-driven `stream()` iteration.

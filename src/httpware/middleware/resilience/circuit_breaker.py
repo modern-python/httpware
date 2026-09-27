@@ -1,5 +1,8 @@
 """CircuitBreaker + AsyncCircuitBreaker — consecutive-failure and failure-rate circuit breakers.
 
+KeyedCircuitBreaker + AsyncKeyedCircuitBreaker run one such circuit per circuit key (default:
+the request URL's origin), so one failing upstream does not open the circuit for the others.
+
 A counted failure is a NetworkError, an httpware TimeoutError, or a StatusError whose
 status_code is in the effective failure set (default: all 5xx). 4xx — including 429 —
 count as successes: 429 means healthy-but-throttling, and tripping on it amplifies
@@ -33,11 +36,12 @@ cannot be shared with an async one.
 
 import asyncio
 import enum
+import functools
 import logging
 import threading
 import time
 import typing
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Hashable
 
 import httpx2
 
@@ -57,6 +61,11 @@ _CROSS_LOOP_MSG = (
     "AsyncCircuitBreaker is bound to a single event loop. First seen on {first!r}; "
     "current request is on {current!r}. Use one AsyncCircuitBreaker per loop; "
     "cross-thread sharing requires the sync CircuitBreaker primitive."
+)
+_KEYED_CROSS_LOOP_MSG = (
+    "AsyncKeyedCircuitBreaker is bound to a single event loop. First seen on {first!r}; "
+    "current request is on {current!r}. Use one AsyncKeyedCircuitBreaker per loop; "
+    "cross-thread sharing requires the sync KeyedCircuitBreaker primitive."
 )
 
 _DEFAULT_FAILURE_STATUS_CODES = frozenset(range(500, 600))
@@ -146,6 +155,7 @@ class _CircuitBreakerState:
         window_seconds: float,
         minimum_calls: int,
         now: Callable[[], float],
+        key: str | None = None,
     ) -> None:
         if failure_threshold < 1:
             raise ValueError(_FAILURE_THRESHOLD_INVALID)
@@ -173,6 +183,7 @@ class _CircuitBreakerState:
         self._window = _RollingWindow(window_seconds) if self._rate_mode else None
         self._window_seconds = window_seconds
         self._now = now
+        self._key = key
         self._state = CircuitState.CLOSED
         self._consecutive_failures = 0
         self._consecutive_successes = 0
@@ -299,13 +310,85 @@ class _CircuitBreakerState:
         message: str,
         attributes: dict[str, typing.Any],
     ) -> None:
-        _emit_event(
-            _LOGGER,
-            event_name,
-            level=level,
-            message=message,
-            attributes={**attributes, "method": request.method, "url": str(request.url)},
-        )
+        attributes = {**attributes, "method": request.method, "url": str(request.url)}
+        if self._key is not None:
+            attributes["circuit_key"] = self._key
+        _emit_event(_LOGGER, event_name, level=level, message=message, attributes=attributes)
+
+
+async def _call_async(state: _CircuitBreakerState, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
+    role = state.admit(request)
+    try:
+        response = await next(request)
+    except StatusError as exc:
+        if state.is_failure_status(exc.response.status_code):
+            state.on_failure(role, request)
+        else:
+            state.on_success(role, request)
+        raise
+    except (NetworkError, TimeoutError):
+        state.on_failure(role, request)
+        raise
+    except BaseException:
+        state.release_probe(role)
+        raise
+    state.on_success(role, request)
+    return response
+
+
+def _call_sync(
+    state: _CircuitBreakerState,
+    lock: threading.Lock,
+    request: httpx2.Request,
+    next: Next,  # noqa: A002
+) -> httpx2.Response:
+    with lock:
+        role = state.admit(request)
+    try:
+        response = next(request)
+    except StatusError as exc:
+        with lock:
+            if state.is_failure_status(exc.response.status_code):
+                state.on_failure(role, request)
+            else:
+                state.on_success(role, request)
+        raise
+    except (NetworkError, TimeoutError):
+        with lock:
+            state.on_failure(role, request)
+        raise
+    except BaseException:
+        with lock:
+            state.release_probe(role)
+        raise
+    with lock:
+        state.on_success(role, request)
+    return response
+
+
+def _origin(request: httpx2.Request) -> Hashable:
+    return request.url.origin
+
+
+class _KeyedStates:
+    """One lazily created _CircuitBreakerState per circuit key; the map is never pruned.
+
+    Not synchronized: the async wrapper relies on its single event loop, the sync wrapper
+    calls `get` under its lock.
+    """
+
+    def __init__(self, key: Callable[[httpx2.Request], Hashable], **config: typing.Any) -> None:  # noqa: ANN401
+        self._key = key
+        self._new_state = functools.partial(_CircuitBreakerState, **config)
+        self._new_state()  # validates the config at construction instead of on the first request
+        self._states: dict[Hashable, _CircuitBreakerState] = {}
+
+    def get(self, request: httpx2.Request) -> _CircuitBreakerState:
+        circuit_key = self._key(request)
+        state = self._states.get(circuit_key)
+        if state is None:
+            state = self._states[circuit_key] = self._new_state(key=str(circuit_key))
+        return state
 
 
 class AsyncCircuitBreaker:
@@ -355,23 +438,7 @@ class AsyncCircuitBreaker:
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Admit, forward, then record the outcome. Fast-fail when the circuit is not closed."""
         self._check_loop()
-        role = self._state.admit(request)
-        try:
-            response = await next(request)
-        except StatusError as exc:
-            if self._state.is_failure_status(exc.response.status_code):
-                self._state.on_failure(role, request)
-            else:
-                self._state.on_success(role, request)
-            raise
-        except (NetworkError, TimeoutError):
-            self._state.on_failure(role, request)
-            raise
-        except BaseException:
-            self._state.release_probe(role)
-            raise
-        self._state.on_success(role, request)
-        return response
+        return await _call_async(self._state, request, next)
 
 
 class CircuitBreaker:
@@ -415,25 +482,93 @@ class CircuitBreaker:
 
     def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
         """Admit, forward, then record the outcome. Fast-fail when the circuit is not closed."""
+        return _call_sync(self._state, self._lock, request, next)
+
+
+class AsyncKeyedCircuitBreaker:
+    """Async circuit breaker with one independent circuit per circuit key.
+
+    `key` maps a request to its circuit key; the default is `request.url.origin`, so scheme,
+    host and port together pick the circuit. Every circuit behaves exactly like an
+    AsyncCircuitBreaker built with the same arguments. Circuits are created on first use and
+    kept for the breaker's lifetime, so the key must take a small, bounded set of values.
+    """
+
+    def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
+        self,
+        *,
+        key: Callable[[httpx2.Request], Hashable] = _origin,
+        failure_threshold: int = 5,
+        reset_timeout: float = 30.0,
+        success_threshold: int = 1,
+        failure_status_codes: Collection[int] | None = None,
+        failure_rate_threshold: float | None = None,
+        window_seconds: float = 30.0,
+        minimum_calls: int = 20,
+        _now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._states = _KeyedStates(
+            key,
+            failure_threshold=failure_threshold,
+            reset_timeout=reset_timeout,
+            success_threshold=success_threshold,
+            failure_status_codes=failure_status_codes,
+            failure_rate_threshold=failure_rate_threshold,
+            window_seconds=window_seconds,
+            minimum_calls=minimum_calls,
+            now=_now,
+        )
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_lock = threading.Lock()
+
+    def _check_loop(self) -> None:
+        check_event_loop(
+            lambda: self._loop,
+            lambda loop: setattr(self, "_loop", loop),
+            self._loop_lock,
+            _KEYED_CROSS_LOOP_MSG,
+        )
+
+    async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
+        """Pick the request's circuit, then admit, forward and record the outcome on it."""
+        self._check_loop()
+        return await _call_async(self._states.get(request), request, next)
+
+
+class KeyedCircuitBreaker:
+    """Sync circuit breaker with one independent circuit per circuit key. Mirror of AsyncKeyedCircuitBreaker.
+
+    One threading.Lock serializes circuit lookup and every transition across all keys.
+    """
+
+    def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
+        self,
+        *,
+        key: Callable[[httpx2.Request], Hashable] = _origin,
+        failure_threshold: int = 5,
+        reset_timeout: float = 30.0,
+        success_threshold: int = 1,
+        failure_status_codes: Collection[int] | None = None,
+        failure_rate_threshold: float | None = None,
+        window_seconds: float = 30.0,
+        minimum_calls: int = 20,
+        _now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._states = _KeyedStates(
+            key,
+            failure_threshold=failure_threshold,
+            reset_timeout=reset_timeout,
+            success_threshold=success_threshold,
+            failure_status_codes=failure_status_codes,
+            failure_rate_threshold=failure_rate_threshold,
+            window_seconds=window_seconds,
+            minimum_calls=minimum_calls,
+            now=_now,
+        )
+        self._lock = threading.Lock()
+
+    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
+        """Pick the request's circuit, then admit, forward and record the outcome on it."""
         with self._lock:
-            role = self._state.admit(request)
-        try:
-            response = next(request)
-        except StatusError as exc:
-            with self._lock:
-                if self._state.is_failure_status(exc.response.status_code):
-                    self._state.on_failure(role, request)
-                else:
-                    self._state.on_success(role, request)
-            raise
-        except (NetworkError, TimeoutError):
-            with self._lock:
-                self._state.on_failure(role, request)
-            raise
-        except BaseException:
-            with self._lock:
-                self._state.release_probe(role)
-            raise
-        with self._lock:
-            self._state.on_success(role, request)
-        return response
+            state = self._states.get(request)
+        return _call_sync(state, self._lock, request, next)
