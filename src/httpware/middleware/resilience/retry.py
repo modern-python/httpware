@@ -250,8 +250,8 @@ class AsyncRetry:
                 delay = self._policy.decide(attempt=attempt, request=request, exc=exc)
             await self._sleep(delay)
 
-        msg = "unreachable"  # pragma: no cover
-        raise AssertionError(msg)  # pragma: no cover
+        msg = "unreachable"  # pragma: no cover — decide() raises on the final attempt
+        raise AssertionError(msg)  # pragma: no cover — decide() raises on the final attempt
 
 
 class Retry:
@@ -291,5 +291,5 @@ class Retry:
                 delay = self._policy.decide(attempt=attempt, request=request, exc=exc)
             self._sleep(delay)
 
-        msg = "unreachable"  # pragma: no cover
-        raise AssertionError(msg)  # pragma: no cover
+        msg = "unreachable"  # pragma: no cover — decide() raises on the final attempt
+        raise AssertionError(msg)  # pragma: no cover — decide() raises on the final attempt

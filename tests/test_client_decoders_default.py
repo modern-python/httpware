@@ -47,10 +47,10 @@ def test_async_empty_explicit_decoders() -> None:
 
 def test_async_explicit_decoders_skip_default_probe() -> None:
     class _Custom:
-        def can_decode(self, model: type) -> bool:  # noqa: ARG002  # pragma: no cover
+        def can_decode(self, model: type) -> bool:  # noqa: ARG002  # pragma: no cover — never invoked; the test only checks the stored decoders tuple
             return True
 
-        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover
+        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover — never invoked; the test only checks the stored decoders tuple
             return None
 
     custom = _Custom()

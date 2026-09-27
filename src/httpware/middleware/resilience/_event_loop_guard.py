@@ -30,8 +30,5 @@ def check_event_loop(
         cached = get_loop()
         if cached is None:
             set_loop(current)
-        # pragma below: inner double-check-with-lock race arm. Reachable only when two
-        # threads pass the outer check and race for loop_lock — free-threaded CPython can
-        # reach it, but only nondeterministically, so it stays excluded from coverage.
-        elif cached is not current:  # pragma: no cover
+        elif cached is not current:
             raise RuntimeError(message_template.format(first=cached, current=current))

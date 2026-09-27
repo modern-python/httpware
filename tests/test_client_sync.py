@@ -67,10 +67,10 @@ def test_default_decoders_includes_pydantic_when_installed() -> None:
 
 def test_explicit_decoders_is_honored() -> None:
     class _Stub:
-        def can_decode(self, model: type) -> bool:  # noqa: ARG002  # pragma: no cover
+        def can_decode(self, model: type) -> bool:  # noqa: ARG002  # pragma: no cover — never invoked; the test only checks the stored decoders tuple
             return True
 
-        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover
+        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover — never invoked; the test only checks the stored decoders tuple
             return None
 
     stub = _Stub()
@@ -86,7 +86,7 @@ def test_empty_decoders_is_honored() -> None:
 
 
 def test_sync_missing_decoder_raised_before_http_call() -> None:
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked when MissingDecoderError fires")
 
     transport = httpx2.MockTransport(handler)
@@ -122,7 +122,7 @@ def test_construction_with_optional_forwarded_kwargs(kwargs: dict) -> None:
 
 def test_explicit_middleware_is_honored() -> None:
     class _Tag:
-        def __call__(self, request, next) -> httpx2.Response:  # noqa: A002, ANN001  # pragma: no cover
+        def __call__(self, request, next) -> httpx2.Response:  # noqa: A002, ANN001  # pragma: no cover — never invoked; the test only checks the stored middleware tuple
             return next(request)
 
     client = Client(middleware=(_Tag(),))

@@ -73,7 +73,7 @@ def test_with_response_decode_failure_raises_decode_error() -> None:
 
 
 def test_with_response_missing_decoder_before_http_call() -> None:
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked when MissingDecoderError fires")
 
     client = Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler)), decoders=[])

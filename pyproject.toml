@@ -123,5 +123,5 @@ markers = [
 [tool.coverage]
 run.concurrency = ["thread"]
 run.omit = ["benchmarks/*"]
-report.exclude_also = ["if typing.TYPE_CHECKING:", 'pytest\.fail\(']
+report.exclude_also = ["if typing.TYPE_CHECKING:"]
 report.fail_under = 100

@@ -138,7 +138,7 @@ async def test_async_list_of_basemodel_routes_to_pydantic() -> None:
 async def test_async_missing_decoder_with_empty_list() -> None:
     """Empty decoder list and response_model= raises before HTTP call."""
 
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked")
 
     transport = httpx2.MockTransport(handler)
@@ -158,10 +158,10 @@ async def test_async_missing_decoder_when_none_claim() -> None:
         def can_decode(self, model: type) -> bool:  # noqa: ARG002
             return False
 
-        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover
+        def decode(self, content: bytes, model: type) -> object:  # noqa: ARG002  # pragma: no cover — never invoked; can_decode() rejects every model
             return None
 
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked")
 
     transport = httpx2.MockTransport(handler)
@@ -244,7 +244,7 @@ def test_sync_list_of_basemodel_routes_to_pydantic() -> None:
 
 
 def test_sync_missing_decoder_with_empty_list() -> None:
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked")
 
     transport = httpx2.MockTransport(handler)
@@ -260,7 +260,7 @@ def test_sync_missing_decoder_with_empty_list() -> None:
 async def test_async_msgspec_only_list_of_basemodel_preflight_raises() -> None:
     """MsgspecDecoder-only client raises MissingDecoderError for list[BaseModel] without sending a request."""
 
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked: pre-flight must reject first")
 
     transport = httpx2.MockTransport(handler)
@@ -276,7 +276,7 @@ async def test_async_msgspec_only_list_of_basemodel_preflight_raises() -> None:
 def test_sync_msgspec_only_list_of_basemodel_preflight_raises() -> None:
     """Sync MsgspecDecoder-only client raises MissingDecoderError for list[BaseModel] without sending a request."""
 
-    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover
+    def handler(_: httpx2.Request) -> httpx2.Response:  # pragma: no cover — never invoked; decoder check fails first
         pytest.fail("transport should not be invoked: pre-flight must reject first")
 
     transport = httpx2.MockTransport(handler)

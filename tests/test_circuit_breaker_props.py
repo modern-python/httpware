@@ -47,7 +47,7 @@ async def test_open_circuit_never_forwards_before_reset_timeout(
     async def _ok(request: httpx2.Request) -> httpx2.Response:
         nonlocal forwarded
         forwarded += 1  # pragma: no cover — invariant: OPEN never forwards, so this never runs
-        return httpx2.Response(200, request=request)  # pragma: no cover
+        return httpx2.Response(200, request=request)  # pragma: no cover — invariant: OPEN never forwards
 
     async def _five_hundred(request: httpx2.Request) -> httpx2.Response:
         raise InternalServerError(httpx2.Response(500, request=request))
