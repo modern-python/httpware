@@ -13,7 +13,7 @@ Logger names and event names are the stable public contract:
 | `httpware.circuit_breaker` | `circuit.opened` (WARNING), `circuit.rejected` (WARNING), `circuit.half_open` (INFO), `circuit.closed` (INFO) |
 | `httpware.timeout` | `timeout.exceeded` (WARNING) |
 
-Each log record carries an `event` field with the event-name string (e.g. `event="circuit.opened"`), usable for log-aggregator filtering. See [resilience.md](resilience.md) for the full event tables per middleware.
+Each log record carries an `event` field with the event-name string (e.g. `event="circuit.opened"`), usable for log-aggregator filtering. Events from `AsyncKeyedCircuitBreaker` / `KeyedCircuitBreaker` also carry `circuit_key`, naming the circuit they belong to. See [resilience.md](resilience.md) for the full event tables per middleware.
 
 ```python
 import logging
