@@ -6,6 +6,8 @@ handling, budget refusal, and the delay returned on a normal retry. The jitter
 path is random, so it is asserted by bounds; the Retry-After path by exact value.
 """
 
+import datetime
+
 import httpx2
 import pytest
 
@@ -31,6 +33,7 @@ _BASE_DELAY = 0.1
 _MAX_DELAY = 5.0
 _RETRY_AFTER_HEADER = "2"
 _RETRY_AFTER_SECONDS = 2.0
+_DATE_AHEAD_SECONDS = 3.0
 
 
 def _policy(
@@ -161,6 +164,25 @@ def test_respect_retry_after_false_ignores_header() -> None:
     exc = _status_exc(503, request, retry_after="2")
     delay = _policy(respect_retry_after=False).decide(attempt=0, request=request, exc=exc)
     assert delay <= _BASE_DELAY  # jitter, not the 2.0 header value
+
+
+@pytest.mark.parametrize("zone", ["-0000", "", "XYZ"])
+def test_retry_after_date_without_a_usable_zone_is_read_as_gmt(zone: str) -> None:
+    future = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=_DATE_AHEAD_SECONDS)
+    header = f"{future:%a, %d %b %Y %H:%M:%S} {zone}".rstrip()
+    request = _request("PUT")
+    delay = _policy().decide(attempt=0, request=request, exc=_status_exc(503, request, retry_after=header))
+    assert _DATE_AHEAD_SECONDS - 2 < delay <= _DATE_AHEAD_SECONDS
+
+
+@pytest.mark.parametrize(
+    "header",
+    ["Wed, 21 Oct 99999999999999999999 07:28:00 GMT", "Wed, 21 Oct 2015 07:28:00 +99999999999999999999"],
+)
+def test_retry_after_date_out_of_range_falls_back_to_backoff(header: str) -> None:
+    request = _request("PUT")
+    delay = _policy().decide(attempt=0, request=request, exc=_status_exc(503, request, retry_after=header))
+    assert delay <= _BASE_DELAY
 
 
 # ---- budget refusal
