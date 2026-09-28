@@ -145,6 +145,16 @@ def _assemble_request_kwargs(  # noqa: PLR0913 — 9 per-request kwargs from htt
     return kwargs
 
 
+def _merge_url_query(
+    url: httpx2.URL | str, params: typing.Any | None, client_params: httpx2.QueryParams
+) -> tuple[httpx2.URL | str, typing.Any | None]:
+    """Fold the URL's own query into `params`; httpx2 would otherwise replace it."""
+    parsed = httpx2.URL(url)
+    if not parsed.query or (params is None and not client_params):
+        return url, params
+    return parsed.copy_with(query=None), parsed.params.merge(params)
+
+
 class AsyncClient:
     """Async HTTP client: thin wrapper around httpx2 with typed decoding and middleware."""
 
@@ -261,8 +271,9 @@ class AsyncClient:
         return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
-        """Delegate request construction to the wrapped httpx2.AsyncClient."""
-        return self._httpx2_client.build_request(method, url, **kwargs)
+        """Delegate request construction to the wrapped httpx2.AsyncClient, keeping the URL's own query."""
+        merged_url, params = _merge_url_query(url, kwargs.pop("params", None), self._httpx2_client.params)
+        return self._httpx2_client.build_request(method, merged_url, params=params, **kwargs)
 
     def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
@@ -279,6 +290,7 @@ class AsyncClient:
         data: typing.Any | None = None,
         files: typing.Any | None = None,
     ) -> httpx2.Request:
+        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -290,7 +302,7 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        request = self._httpx2_client.build_request(method, url, **kwargs)
+        request = self._httpx2_client.build_request(method, merged_url, **kwargs)
         if _is_streaming_body_async(content) or _is_streaming_body_async(data) or _is_streaming_body_async(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
@@ -1046,6 +1058,7 @@ class AsyncClient:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions via _httpx2_exception_mapper.
         """
+        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -1058,7 +1071,7 @@ class AsyncClient:
             files=files,
         )
 
-        async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, url, **kwargs) as response:
+        async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, merged_url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
                 cap = self._max_response_body_bytes
                 if cap is None:
@@ -1234,8 +1247,9 @@ class Client:
         return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
-        """Delegate request construction to the wrapped httpx2.Client."""
-        return self._httpx2_client.build_request(method, url, **kwargs)
+        """Delegate request construction to the wrapped httpx2.Client, keeping the URL's own query."""
+        merged_url, params = _merge_url_query(url, kwargs.pop("params", None), self._httpx2_client.params)
+        return self._httpx2_client.build_request(method, merged_url, params=params, **kwargs)
 
     def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
@@ -1252,6 +1266,7 @@ class Client:
         data: typing.Any | None = None,
         files: typing.Any | None = None,
     ) -> httpx2.Request:
+        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -1263,7 +1278,7 @@ class Client:
             data=data,
             files=files,
         )
-        request = self._httpx2_client.build_request(method, url, **kwargs)
+        request = self._httpx2_client.build_request(method, merged_url, **kwargs)
         if _is_streaming_body_sync(content) or _is_streaming_body_sync(data) or _is_streaming_body_sync(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
@@ -2016,6 +2031,7 @@ class Client:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions via _httpx2_exception_mapper_sync.
         """
+        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -2028,7 +2044,7 @@ class Client:
             files=files,
         )
 
-        with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, url, **kwargs) as response:
+        with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, merged_url, **kwargs) as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
                 cap = self._max_response_body_bytes
                 if cap is None:
