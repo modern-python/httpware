@@ -34,6 +34,10 @@ _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
     "httpx2_client=... cannot be combined with any of "
     f"{_FORWARDED_KWARG_NAMES}; configure the httpx2 client you pass instead."
 )
+_BASE_URL_QUERY_MESSAGE = (
+    "base_url must not contain a query string: httpx2 appends request paths after it, "
+    "producing malformed URLs. Pass the query as params=... instead."
+)
 
 
 def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
@@ -79,6 +83,12 @@ def _validate_httpx2_client_conflict(  # noqa: PLR0913 — 7 forwarded kwargs fr
     }
     if any(value not in (None, "") for value in forwarded.values()):
         raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE)
+
+
+def _reject_base_url_query(base_url: httpx2.URL | str) -> None:
+    """Raise ValueError if base_url carries a query string."""
+    if httpx2.URL(base_url).query:
+        raise ValueError(_BASE_URL_QUERY_MESSAGE)
 
 
 def _assemble_httpx2_client_kwargs(  # noqa: PLR0913 — 7 forwarded kwargs from caller's constructor
@@ -191,9 +201,11 @@ class AsyncClient:
                 limits=limits,
                 auth=auth,
             )
+            _reject_base_url_query(httpx2_client.base_url)
             self._httpx2_client = httpx2_client
             self._owns_client = False
         else:
+            _reject_base_url_query(base_url)
             kwargs = _assemble_httpx2_client_kwargs(
                 base_url=base_url,
                 headers=headers,
@@ -1143,9 +1155,11 @@ class Client:
                 limits=limits,
                 auth=auth,
             )
+            _reject_base_url_query(httpx2_client.base_url)
             self._httpx2_client = httpx2_client
             self._owns_client = False
         else:
+            _reject_base_url_query(base_url)
             kwargs = _assemble_httpx2_client_kwargs(
                 base_url=base_url,
                 headers=headers,
