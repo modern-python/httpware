@@ -62,6 +62,8 @@ with Client(base_url="https://jsonplaceholder.typicode.com") as client:
     print(response.json())
 ```
 
+`base_url` must not contain a query string: constructing a client with one raises `ValueError`. Put query parameters shared by every request in `params=` instead.
+
 Typed decoding via `response_model=` works the same way in both worlds:
 
 ```python
