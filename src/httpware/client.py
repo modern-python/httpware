@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from http import HTTPStatus
 
 import httpx2
+import typing_extensions
 
 from httpware._internal import import_checker
 from httpware._internal.body_cap import _read_capped, _read_capped_async, _validate_max_response_body_bytes
@@ -75,7 +76,7 @@ def _reject_base_url_query(base_url: httpx2.URL | str) -> None:
         raise ValueError(_BASE_URL_QUERY_MESSAGE)
 
 
-class _ClientOptionsBase(typing.TypedDict, total=False):
+class _ClientOptionsBase(typing_extensions.TypedDict, total=False):
     base_url: str
     headers: dict[str, str] | None
     params: dict[str, str] | None
@@ -93,14 +94,14 @@ class _ClientOptionsBase(typing.TypedDict, total=False):
     default_encoding: str | Callable[[bytes], str | None]
 
 
-class _AsyncClientOptions(_ClientOptionsBase, total=False):
+class _AsyncClientOptions(_ClientOptionsBase, total=False, closed=True):
     """Keyword arguments `AsyncClient` forwards to the `httpx2.AsyncClient` it owns."""
 
     transport: httpx2.AsyncBaseTransport | None
     mounts: Mapping[str, httpx2.AsyncBaseTransport | None] | None
 
 
-class _ClientOptions(_ClientOptionsBase, total=False):
+class _ClientOptions(_ClientOptionsBase, total=False, closed=True):
     """Keyword arguments `Client` forwards to the `httpx2.Client` it owns."""
 
     transport: httpx2.BaseTransport | None

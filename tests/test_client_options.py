@@ -110,6 +110,20 @@ def test_unsupported_option_is_typeerror(client_cls: type, key: str) -> None:
         client_cls(**{key: object()})
 
 
+def test_type_checkers_reject_unsupported_async_options() -> None:
+    with pytest.raises(TypeError, match="verfy"):
+        AsyncClient(verfy=True)  # ty: ignore[unknown-argument]
+    with pytest.raises(TypeError, match="cert"):
+        AsyncClient(cert="client.pem")  # ty: ignore[unknown-argument]
+
+
+def test_type_checkers_reject_unsupported_sync_options() -> None:
+    with pytest.raises(TypeError, match="verfy"):
+        Client(verfy=True)  # ty: ignore[unknown-argument]
+    with pytest.raises(TypeError, match="cert"):
+        Client(cert="client.pem")  # ty: ignore[unknown-argument]
+
+
 @pytest.mark.parametrize("client_cls", [AsyncClient, Client])
 def test_follow_redirects_with_body_cap_is_valueerror(client_cls: type) -> None:
     with pytest.raises(ValueError, match="follow_redirects"):
