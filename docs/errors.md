@@ -190,7 +190,7 @@ Unlike `DecodeError`, this error fires *before* the HTTP request — no traffic 
 
 ## `ResponseTooLargeError`
 
-Both `Client` and `AsyncClient` accept a `max_response_body_bytes: int | None = None` constructor argument. It's an opt-in cap — the default `None` means unbounded, matching current behavior. When set, a response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned. The check is status-agnostic (a `200` can trip it just as easily as a `4xx`/`5xx`), and it counts **decoded** bytes. It fires from the non-streaming terminal (`send()` / verb methods) and from `stream()`'s internal error pre-read; bytes you pull yourself via `stream()` iteration are never capped.
+Both `Client` and `AsyncClient` accept a `max_response_body_bytes: int | None = None` constructor argument. It's an opt-in cap — the default `None` means unbounded, matching current behavior. When set, a response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned. The check is status-agnostic (a `200` can trip it just as easily as a `4xx`/`5xx`), and it counts **decoded** bytes. It fires from the non-streaming terminal (`send()` / verb methods) and from `stream()`'s internal error pre-read; bytes you pull yourself via `stream()` iteration are never capped. Combining the cap with `follow_redirects=True`, on the client or on a passed `httpx2_client`, raises `ValueError`: `httpx2` reads every intermediate redirect body without it.
 
 `ResponseTooLargeError` carries:
 
