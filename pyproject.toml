@@ -34,6 +34,9 @@ classifiers = [
 version = "0"
 dependencies = [
     "httpx2>=2.0.0,<3.0",
+    # 4.14.0 is the first whose closed TypedDicts keep their keys on Python 3.14, and the
+    # cp314 pydantic floor (2.12) needs 4.14.1.
+    "typing-extensions>=4.14.1",
 ]
 
 [project.optional-dependencies]
