@@ -1,8 +1,8 @@
 # Testing guide
 
-`httpware`'s test seam is `httpx2`. Pass any `httpx2.AsyncClient` (including one built on `httpx2.MockTransport`) to `AsyncClient(httpx2_client=...)` — the middleware chain still runs end-to-end, only the wire is mocked. No special test mode, no monkey-patching, no `respx`.
+`httpware`'s test seam is `httpx2`. Pass an `httpx2.MockTransport` as `AsyncClient(transport=...)` — the middleware chain still runs end-to-end, only the wire is mocked, and the client still owns and closes its `httpx2` client. No special test mode, no monkey-patching, no `respx`.
 
-`httpx2_client=` is mutually exclusive with `base_url`, `headers`, `params`, `cookies`, `timeout`, `limits`, and `auth`: passing any of those alongside a pre-built `httpx2_client=` raises `TypeError`. Configure the `httpx2.AsyncClient`/`httpx2.Client` you pass instead.
+A pre-built `httpx2.AsyncClient`/`httpx2.Client` can be passed as `httpx2_client=` instead. It is mutually exclusive with every `httpx2` client option (`base_url`, `headers`, `transport`, `verify`, ...): passing any of them alongside it raises `TypeError`. Configure the client you pass instead; `httpware` will not close it.
 
 ## The basic pattern
 
@@ -19,8 +19,7 @@ def handler(request: httpx2.Request) -> httpx2.Response:
 
 
 async def test_get_user() -> None:
-    transport = httpx2.MockTransport(handler)
-    async with AsyncClient(httpx2_client=httpx2.AsyncClient(transport=transport)) as client:
+    async with AsyncClient(transport=httpx2.MockTransport(handler)) as client:
         response = await client.get("https://api.example.test/users/1")
     assert response.status_code == HTTPStatus.OK
     assert response.json()["name"] == "Alice"
@@ -32,7 +31,7 @@ If you use `pytest-asyncio` in auto-mode (`asyncio_mode = "auto"` under `[tool.p
 
 ### Sync `Client`
 
-The same pattern works for the sync `Client` — pass an `httpx2.Client` (not `httpx2.AsyncClient`) built on `httpx2.MockTransport`:
+The same pattern works for the sync `Client`; `httpx2.MockTransport` serves both worlds:
 
 ```python
 from http import HTTPStatus
@@ -46,7 +45,7 @@ def test_get_returns_typed_response() -> None:
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(HTTPStatus.OK, request=request, json={"ok": True})
 
-    with Client(httpx2_client=httpx2.Client(transport=httpx2.MockTransport(handler))) as client:
+    with Client(transport=httpx2.MockTransport(handler)) as client:
         response = client.get("https://example.test/x")
 
     assert response.status_code == HTTPStatus.OK
@@ -76,9 +75,8 @@ class _ResponseSequence:
 
 async def test_retry_succeeds_after_503() -> None:
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
-    transport = httpx2.MockTransport(handler)
     async with AsyncClient(
-        httpx2_client=httpx2.AsyncClient(transport=transport),
+        transport=httpx2.MockTransport(handler),
         middleware=[AsyncRetry(base_delay=0.001, max_delay=0.002)],
     ) as client:
         response = await client.get("https://example.test/x")
@@ -96,7 +94,7 @@ Compose your middleware with the mock transport to exercise the chain end-to-end
 async def test_my_middleware_adds_header() -> None:
     handler = _ResponseSequence([HTTPStatus.OK])
     async with AsyncClient(
-        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+        transport=httpx2.MockTransport(handler),
         middleware=[MyHeaderMiddleware()],
     ) as client:
         await client.get("https://example.test/x")

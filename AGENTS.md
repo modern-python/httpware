@@ -59,7 +59,7 @@ Every module under `src/httpware/` is named for what it does; read it. What a si
 
 ### Testing patterns
 
-Transport mocking is `httpx2.MockTransport` passed as `httpx2_client=`, never `respx` — `respx`
+Transport mocking is `httpx2.MockTransport` passed as `transport=`, never `respx` — `respx`
 targets `httpx`, not `httpx2`, and patches its internals. Concurrency-sensitive components carry
 Hypothesis property tests in `test_*_props.py`, and `stress`-marked tests drive real thread
 parallelism: they run under the GIL for coverage, but the proof comes from the free-threaded

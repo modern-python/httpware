@@ -1,8 +1,9 @@
 """Client + AsyncClient — thin httpx2 wrappers with typed decoding and middleware."""
 
 import contextlib
+import ssl
 import typing
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from http import HTTPStatus
 
 import httpx2
@@ -29,10 +30,17 @@ from httpware.middleware.chain import compose, compose_async
 T = typing.TypeVar("T")
 
 
-_FORWARDED_KWARG_NAMES = ("base_url", "headers", "params", "cookies", "timeout", "limits", "auth")
 _HTTPX2_CLIENT_CONFLICT_MESSAGE = (
-    "httpx2_client=... cannot be combined with any of "
-    f"{_FORWARDED_KWARG_NAMES}; configure the httpx2 client you pass instead."
+    "httpx2_client=... cannot be combined with httpx2 client options {names}; "
+    "configure the httpx2 client you pass instead."
+)
+_UNSUPPORTED_OPTION_HINTS = {
+    "cert": "cert=... is deprecated by httpx2; pass verify=<ssl.SSLContext> configured with .load_cert_chain().",
+    "event_hooks": "event_hooks=... is not supported; use middleware=... instead.",
+}
+_FOLLOW_REDIRECTS_WITH_BODY_CAP_MESSAGE = (
+    "follow_redirects=True cannot be combined with max_response_body_bytes: httpx2 reads every "
+    "intermediate redirect body without the cap."
 )
 _BASE_URL_QUERY_MESSAGE = (
     "base_url must not contain a query string: httpx2 appends request paths after it, "
@@ -61,63 +69,75 @@ def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
     return tuple(decoders)
 
 
-def _validate_httpx2_client_conflict(  # noqa: PLR0913 — 7 forwarded kwargs from caller's constructor
-    *,
-    base_url: str,
-    headers: dict[str, str] | None,
-    params: dict[str, str] | None,
-    cookies: dict[str, str] | None,
-    timeout: httpx2.Timeout | float | None,
-    limits: httpx2.Limits | None,
-    auth: httpx2.Auth | None,
-) -> None:
-    """Raise TypeError if httpx2_client=... is combined with a forwarded kwarg."""
-    forwarded = {
-        "base_url": base_url,
-        "headers": headers,
-        "params": params,
-        "cookies": cookies,
-        "timeout": timeout,
-        "limits": limits,
-        "auth": auth,
-    }
-    if any(value not in (None, "") for value in forwarded.values()):
-        raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE)
-
-
 def _reject_base_url_query(base_url: httpx2.URL | str) -> None:
     """Raise ValueError if base_url carries a query string."""
     if httpx2.URL(base_url).query:
         raise ValueError(_BASE_URL_QUERY_MESSAGE)
 
 
-def _assemble_httpx2_client_kwargs(  # noqa: PLR0913 — 7 forwarded kwargs from caller's constructor
+class _ClientOptionsBase(typing.TypedDict, total=False):
+    base_url: str
+    headers: dict[str, str] | None
+    params: dict[str, str] | None
+    cookies: dict[str, str] | None
+    timeout: httpx2.Timeout | float | None
+    limits: httpx2.Limits | None
+    auth: httpx2.Auth | None
+    verify: ssl.SSLContext | bool
+    trust_env: bool
+    http1: bool
+    http2: bool
+    proxy: httpx2.URL | str | httpx2.Proxy | None
+    follow_redirects: bool
+    max_redirects: int
+    default_encoding: str | Callable[[bytes], str | None]
+
+
+class _AsyncClientOptions(_ClientOptionsBase, total=False):
+    """Keyword arguments `AsyncClient` forwards to the `httpx2.AsyncClient` it owns."""
+
+    transport: httpx2.AsyncBaseTransport | None
+    mounts: Mapping[str, httpx2.AsyncBaseTransport | None] | None
+
+
+class _ClientOptions(_ClientOptionsBase, total=False):
+    """Keyword arguments `Client` forwards to the `httpx2.Client` it owns."""
+
+    transport: httpx2.BaseTransport | None
+    mounts: Mapping[str, httpx2.BaseTransport | None] | None
+
+
+def _is_unset(value: object) -> bool:
+    return value is None or (isinstance(value, str) and not value)
+
+
+def _select_httpx2_options(
+    owner: str,
+    options: Mapping[str, typing.Any],
+    supported: frozenset[str],
     *,
-    base_url: str,
-    headers: dict[str, str] | None,
-    params: dict[str, str] | None,
-    cookies: dict[str, str] | None,
-    timeout: httpx2.Timeout | float | None,
-    limits: httpx2.Limits | None,
-    auth: httpx2.Auth | None,
+    httpx2_client: httpx2.Client | httpx2.AsyncClient | None,
+    max_response_body_bytes: int | None,
 ) -> dict[str, typing.Any]:
-    """Build the kwargs dict for constructing the owned httpx2 client."""
-    kwargs: dict[str, typing.Any] = {}
-    if base_url:
-        kwargs["base_url"] = base_url
-    if headers is not None:
-        kwargs["headers"] = headers
-    if params is not None:
-        kwargs["params"] = params
-    if cookies is not None:
-        kwargs["cookies"] = cookies
-    if timeout is not None:
-        kwargs["timeout"] = timeout
-    if limits is not None:
-        kwargs["limits"] = limits
-    if auth is not None:
-        kwargs["auth"] = auth
-    return kwargs
+    """Return the options to forward to the owned httpx2 client, dropping unset ones.
+
+    Raise TypeError for unsupported options or options combined with `httpx2_client`, and
+    ValueError when the client would follow redirects under a body cap.
+    """
+    unsupported = sorted(options.keys() - supported)
+    if unsupported:
+        hints = "".join(
+            f" {_UNSUPPORTED_OPTION_HINTS[name]}" for name in unsupported if name in _UNSUPPORTED_OPTION_HINTS
+        )
+        msg = f"{owner}() got unexpected keyword arguments {unsupported}.{hints}"
+        raise TypeError(msg)
+    forwarded = {name: value for name, value in options.items() if not _is_unset(value)}
+    if httpx2_client is not None and forwarded:
+        raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE.format(names=sorted(forwarded)))
+    follows = httpx2_client.follow_redirects if httpx2_client is not None else forwarded.get("follow_redirects")
+    if follows and max_response_body_bytes is not None:
+        raise ValueError(_FOLLOW_REDIRECTS_WITH_BODY_CAP_MESSAGE)
+    return forwarded
 
 
 def _assemble_request_kwargs(  # noqa: PLR0913 — 9 per-request kwargs from httpx2 call signatures
@@ -175,47 +195,30 @@ class AsyncClient:
     _dispatch: AsyncNext
     _max_response_body_bytes: int | None
 
-    def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
+    def __init__(
         self,
         *,
-        base_url: str = "",
-        headers: dict[str, str] | None = None,
-        params: dict[str, str] | None = None,
-        cookies: dict[str, str] | None = None,
-        timeout: httpx2.Timeout | float | None = None,
-        limits: httpx2.Limits | None = None,
-        auth: httpx2.Auth | None = None,
         httpx2_client: httpx2.AsyncClient | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[AsyncMiddleware] = (),
         max_response_body_bytes: int | None = None,
+        **httpx2_options: typing.Unpack[_AsyncClientOptions],
     ) -> None:
         _validate_max_response_body_bytes(max_response_body_bytes)
+        forwarded = _select_httpx2_options(
+            type(self).__name__,
+            httpx2_options,
+            _AsyncClientOptions.__optional_keys__,
+            httpx2_client=httpx2_client,
+            max_response_body_bytes=max_response_body_bytes,
+        )
         if httpx2_client is not None:
-            _validate_httpx2_client_conflict(
-                base_url=base_url,
-                headers=headers,
-                params=params,
-                cookies=cookies,
-                timeout=timeout,
-                limits=limits,
-                auth=auth,
-            )
             _reject_base_url_query(httpx2_client.base_url)
             self._httpx2_client = httpx2_client
             self._owns_client = False
         else:
-            _reject_base_url_query(base_url)
-            kwargs = _assemble_httpx2_client_kwargs(
-                base_url=base_url,
-                headers=headers,
-                params=params,
-                cookies=cookies,
-                timeout=timeout,
-                limits=limits,
-                auth=auth,
-            )
-            self._httpx2_client = httpx2.AsyncClient(**kwargs)
+            _reject_base_url_query(forwarded.get("base_url", ""))
+            self._httpx2_client = httpx2.AsyncClient(**forwarded)
             self._owns_client = True
 
         self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()
@@ -1129,47 +1132,30 @@ class Client:
     _dispatch: Next
     _max_response_body_bytes: int | None
 
-    def __init__(  # noqa: PLR0913 — wide constructor is the cost of a single-call API
+    def __init__(
         self,
         *,
-        base_url: str = "",
-        headers: dict[str, str] | None = None,
-        params: dict[str, str] | None = None,
-        cookies: dict[str, str] | None = None,
-        timeout: httpx2.Timeout | float | None = None,
-        limits: httpx2.Limits | None = None,
-        auth: httpx2.Auth | None = None,
         httpx2_client: httpx2.Client | None = None,
         decoders: Sequence[ResponseDecoder] | None = None,
         middleware: Sequence[Middleware] = (),
         max_response_body_bytes: int | None = None,
+        **httpx2_options: typing.Unpack[_ClientOptions],
     ) -> None:
         _validate_max_response_body_bytes(max_response_body_bytes)
+        forwarded = _select_httpx2_options(
+            type(self).__name__,
+            httpx2_options,
+            _ClientOptions.__optional_keys__,
+            httpx2_client=httpx2_client,
+            max_response_body_bytes=max_response_body_bytes,
+        )
         if httpx2_client is not None:
-            _validate_httpx2_client_conflict(
-                base_url=base_url,
-                headers=headers,
-                params=params,
-                cookies=cookies,
-                timeout=timeout,
-                limits=limits,
-                auth=auth,
-            )
             _reject_base_url_query(httpx2_client.base_url)
             self._httpx2_client = httpx2_client
             self._owns_client = False
         else:
-            _reject_base_url_query(base_url)
-            kwargs = _assemble_httpx2_client_kwargs(
-                base_url=base_url,
-                headers=headers,
-                params=params,
-                cookies=cookies,
-                timeout=timeout,
-                limits=limits,
-                auth=auth,
-            )
-            self._httpx2_client = httpx2.Client(**kwargs)
+            _reject_base_url_query(forwarded.get("base_url", ""))
+            self._httpx2_client = httpx2.Client(**forwarded)
             self._owns_client = True
 
         self._decoders = tuple(decoders) if decoders is not None else _build_default_decoders()

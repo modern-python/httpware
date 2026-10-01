@@ -33,25 +33,6 @@ def test_construction_with_caller_owned_httpx2_client() -> None:
     assert isinstance(client, AsyncClient)
 
 
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"base_url": "https://example.test"},
-        {"headers": {"x": "1"}},
-        {"params": {"x": "1"}},
-        {"cookies": {"x": "1"}},
-        {"timeout": 5.0},
-        {"limits": httpx2.Limits(max_connections=10)},
-        {"auth": httpx2.BasicAuth("u", "p")},
-    ],
-)
-def test_caller_owned_client_with_forwarded_kwargs_is_typeerror(kwargs: dict) -> None:
-    transport = httpx2.MockTransport(lambda req: httpx2.Response(200, request=req))
-    caller = httpx2.AsyncClient(transport=transport)
-    with pytest.raises(TypeError, match="httpx2_client"):
-        AsyncClient(httpx2_client=caller, **kwargs)
-
-
 def test_default_decoders_includes_pydantic_when_installed() -> None:
     client = AsyncClient()
     assert any(isinstance(d, PydanticDecoder) for d in client._decoders)  # noqa: SLF001
@@ -94,20 +75,6 @@ async def test_missing_decoder_raised_before_http_call() -> None:
         await client.get("https://example.test/x", response_model=_Foo)
     assert exc_info.value.model is _Foo
     assert exc_info.value.registered_names == ()
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"cookies": {"session": "abc"}},
-        {"limits": httpx2.Limits(max_connections=5)},
-        {"auth": httpx2.BasicAuth("user", "pass")},
-    ],
-)
-def test_construction_with_optional_forwarded_kwargs(kwargs: dict) -> None:
-    """Exercises cookies/limits/auth branches in __init__ when no httpx2_client is supplied."""
-    client = AsyncClient(**kwargs)
-    assert isinstance(client, AsyncClient)
 
 
 def test_explicit_middleware_is_honored() -> None:

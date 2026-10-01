@@ -64,6 +64,21 @@ with Client(base_url="https://jsonplaceholder.typicode.com") as client:
 
 `base_url` must not contain a query string: constructing a client with one raises `ValueError`. Put query parameters shared by every request in `params=` instead.
 
+Every other keyword of `httpx2.AsyncClient`/`httpx2.Client` (`verify`, `proxy`, `http2`, `transport`, `follow_redirects`, ...) is forwarded to the `httpx2` client that `httpware` builds and closes. Two are refused: `cert`, deprecated by `httpx2` in favour of an `ssl.SSLContext` passed as `verify`, and `event_hooks`, which run below the middleware chain; use [middleware](middleware.md) instead.
+
+```python
+import ssl
+
+from httpware import AsyncClient
+
+client = AsyncClient(
+    base_url="https://internal.example",
+    verify=ssl.create_default_context(cafile="/etc/ssl/internal-ca.pem"),
+)
+```
+
+To share one connection pool between several clients, build the `httpx2` client yourself and pass it as `httpx2_client=`. It is then yours to close, and none of the options above can be combined with it.
+
 Typed decoding via `response_model=` works the same way in both worlds:
 
 ```python
