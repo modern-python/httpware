@@ -1,18 +1,18 @@
-# Security Policy
+# Security policy
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
 If you discover a security vulnerability in `httpware`, please report it privately via [GitHub Security Advisories](https://github.com/modern-python/httpware/security/advisories/new).
 
-**Do not file a public GitHub issue for security reports.**
+Do not file a public GitHub issue for security reports.
 
-## Disclosure Timeline
+## Disclosure timeline
 
-- We commit to acknowledging your report within **7 days**.
-- We aim to provide a fix or detailed mitigation plan within **30 days** of confirmation.
-- We follow a **90-day private disclosure window** before public disclosure of the vulnerability and fix, unless a coordinated earlier disclosure is in the interest of users (e.g., the vulnerability is already being actively exploited).
+- We acknowledge reports within 7 days.
+- We aim to provide a fix or a detailed mitigation plan within 30 days of confirming the report.
+- We keep a vulnerability and its fix private for 90 days before disclosing them, unless an earlier coordinated disclosure serves users better, for example when the vulnerability is already being exploited.
 
-## Supported Versions
+## Supported versions
 
 Security fixes are provided for:
 
@@ -31,5 +31,5 @@ In scope:
 
 Out of scope:
 
-- Vulnerabilities in transitive dependencies (`httpx2`, `pydantic`, etc.) — report those upstream. We will fast-track a `httpware` release pinning the patched version once an upstream fix is available.
+- Vulnerabilities in dependencies such as `httpx2` or `pydantic`. Report those upstream; once a fix is released there, we will quickly publish an httpware release that requires the patched version.
 - Misconfiguration in consuming applications.

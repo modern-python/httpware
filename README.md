@@ -18,32 +18,33 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 
-**Typed, resilient HTTP clients for Python — typed errors, typed response bodies, and composable resilience (retry, bulkhead, circuit breaker), sync or async.**
+Typed, resilient HTTP clients for Python, sync and async.
 
 ## Why httpware
 
-- **Errors you can catch by name** — a 404 raises `NotFoundError`, a 429
-  `RateLimitedError`, automatically; everything else bubbles up under one
-  `httpware.StatusError` base. No `raise_for_status()`, no status-code
-  branching.
-- **Typed response bodies** — `response_model=User` decodes the body straight
-  to your pydantic or msgspec type; a missing decoder fails fast, *before* the
-  request goes out.
-- **Composable resilience** — retry + retry-budget, bulkhead, circuit breaker,
-  and timeout as middleware over standard `httpx2`.
+- A 4xx or 5xx response raises an exception named after its status, such as
+  `NotFoundError` for 404 or `RateLimitedError` for 429. All of them subclass
+  `httpware.StatusError`, so you never call `raise_for_status()`.
+- `response_model=User` decodes the body into your pydantic or msgspec type.
+  If no installed decoder handles the type, the call fails before the request
+  is sent.
+- Retry with a retry budget, bulkhead, circuit breaker, and timeout ship as
+  middleware you compose per client.
 
-Built on `httpx2`: httpware re-exports `httpx2.Request`/`httpx2.Response` and stays a thin wrapper, not a new HTTP abstraction.
+httpware is a thin layer over `httpx2`: requests and responses are plain
+`httpx2.Request` and `httpx2.Response` objects.
 
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
 ## Install
 
 ```bash
-pip install httpware                # core only — no decoder
-pip install httpware[pydantic]      # + PydanticDecoder — BaseModel, dataclasses, primitives, generics
-pip install httpware[msgspec]       # + MsgspecDecoder — Struct, dataclasses, primitives, generics
-pip install httpware[pydantic,msgspec]   # both — BaseModel routes to pydantic, Struct to msgspec
-pip install httpware[all]           # everything (pydantic, msgspec, otel)
+pip install httpware                     # core only, no decoder
+pip install httpware[pydantic]           # PydanticDecoder: BaseModel, dataclasses, primitives, generics
+pip install httpware[msgspec]            # MsgspecDecoder: Struct, dataclasses, primitives, generics
+pip install httpware[pydantic,msgspec]   # both; BaseModel goes to pydantic, Struct to msgspec
+pip install httpware[otel]               # OpenTelemetry span events
+pip install httpware[all]                # pydantic, msgspec, and otel
 ```
 
 ## Quickstart
@@ -71,22 +72,24 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The sync `Client` is identical — swap `AsyncClient` → `Client` and drop the `await` / `async with`. A 4xx/5xx response raises a typed `StatusError`; a malformed body raises `DecodeError`. Both subclass `httpware.ClientError`.
+The sync `Client` works the same way: use `Client` instead of `AsyncClient`, and drop `await` and `async with`. A 4xx/5xx response raises a typed `StatusError`; a malformed body raises `DecodeError`. Both subclass `httpware.ClientError`.
 
 ## Documentation
 
-Full guides live at **[httpware.modern-python.org](https://httpware.modern-python.org)**:
+Full guides live at [httpware.modern-python.org](https://httpware.modern-python.org):
 
-- **[Quickstart & observability](https://httpware.modern-python.org/)** — resilience middleware, streaming, and the stable logger/event contract.
-- **[Middleware](https://httpware.modern-python.org/middleware/)** — write your own (auth, tracing, request-ID propagation).
-- **[Resilience](https://httpware.modern-python.org/resilience/)** — retry + retry-budget, bulkhead, circuit breaker, timeout.
-- **[Errors](https://httpware.modern-python.org/errors/)** — the exception tree and catching strategies.
-- **[Testing](https://httpware.modern-python.org/testing/)** — `httpx2.MockTransport` injection.
-- **[Recipes](https://httpware.modern-python.org/recipes/modern-di/)** — DI wiring, phase-decorator patterns, link-header pagination.
+- [Quickstart](https://httpware.modern-python.org/): first requests, client options, streaming.
+- [Resilience](https://httpware.modern-python.org/resilience/): retry and retry budget, bulkhead, circuit breaker, timeout.
+- [Errors](https://httpware.modern-python.org/errors/): the exception tree and how to catch it.
+- [Decoders](https://httpware.modern-python.org/decoders/): typed response bodies and custom decoders.
+- [Middleware](https://httpware.modern-python.org/middleware/): writing your own (auth, tracing, request IDs).
+- [Observability](https://httpware.modern-python.org/observability/): logger and event names, OpenTelemetry wiring.
+- [Testing](https://httpware.modern-python.org/testing/): injecting `httpx2.MockTransport`.
+- [Recipes](https://httpware.modern-python.org/recipes/modern-di/): DI wiring, phase decorators, Link header pagination.
 
 ## 🗒️ [Release notes](https://github.com/modern-python/httpware/releases) · 📦 [PyPI](https://pypi.org/project/httpware) · 📝 [License](https://github.com/modern-python/httpware/blob/main/LICENSE)
 
 ## Part of `modern-python`
 
 Browse the full list of templates and libraries in
-[`modern-python`](https://github.com/modern-python) — see the org profile for the categorized index.
+[`modern-python`](https://github.com/modern-python); the org profile has the categorized index.

@@ -1,8 +1,8 @@
 # Testing guide
 
-`httpware`'s test seam is `httpx2`. Pass an `httpx2.MockTransport` as `AsyncClient(transport=...)` — the middleware chain still runs end-to-end, only the wire is mocked, and the client still owns and closes its `httpx2` client. No special test mode, no monkey-patching, no `respx`.
+To test code that uses httpware, pass an `httpx2.MockTransport` as `AsyncClient(transport=...)`. Only the network is replaced: the middleware chain runs as usual, and the client still creates and closes its `httpx2` client.
 
-A pre-built `httpx2.AsyncClient`/`httpx2.Client` can be passed as `httpx2_client=` instead. It is mutually exclusive with every `httpx2` client option (`base_url`, `headers`, `transport`, `verify`, ...): passing any of them alongside it raises `TypeError`. Configure the client you pass instead; `httpware` will not close it.
+You can pass a ready-made `httpx2.AsyncClient` or `httpx2.Client` as `httpx2_client=` instead. It can't be combined with any `httpx2` client option (`base_url`, `headers`, `transport`, `verify`, ...); passing one raises `TypeError`. Configure the client you pass, and close it yourself, since httpware won't.
 
 ## The basic pattern
 
@@ -25,13 +25,13 @@ async def test_get_user() -> None:
     assert response.json()["name"] == "Alice"
 ```
 
-The handler can be sync or async; `httpx2.MockTransport` supports both. The test above uses a sync handler.
+The handler can be sync, as above, or async.
 
-If you use `pytest-asyncio` in auto-mode (`asyncio_mode = "auto"` under `[tool.pytest.ini_options]`), async test functions don't need the `@pytest.mark.asyncio` decorator.
+If you use `pytest-asyncio` in auto mode (`asyncio_mode = "auto"` under `[tool.pytest.ini_options]`), async test functions don't need the `@pytest.mark.asyncio` decorator.
 
 ### Sync `Client`
 
-The same pattern works for the sync `Client`; `httpx2.MockTransport` serves both worlds:
+The same works for the sync `Client`:
 
 ```python
 from http import HTTPStatus
@@ -54,7 +54,7 @@ def test_get_returns_typed_response() -> None:
 
 ## Recording / stateful handlers
 
-For tests that need to vary the response by call count or assert on the requests that came in, use a handler with instance state:
+To change the response from call to call, or to check the requests that were sent, give the handler some state:
 
 ```python
 from httpware import AsyncRetry
@@ -84,11 +84,11 @@ async def test_retry_succeeds_after_503() -> None:
     assert len(handler.calls) == 2  # initial + 1 retry
 ```
 
-The `base_delay`/`max_delay` are set tiny so the test runs instantly — no need for `freezegun` or sleep injection in most cases.
+The tiny `base_delay` and `max_delay` keep the test fast, so you usually don't need `freezegun` or a fake sleep.
 
 ## Testing your custom middleware
 
-Compose your middleware with the mock transport to exercise the chain end-to-end:
+Run your middleware against the mock transport to test it inside the real chain:
 
 ```python
 async def test_my_middleware_adds_header() -> None:
@@ -101,14 +101,13 @@ async def test_my_middleware_adds_header() -> None:
     assert handler.calls[0].headers["X-My-Header"] == "expected-value"
 ```
 
-For middleware with state-keeping (counters, circuit-breaker state), assert on instance attributes after running the call.
+For middleware that keeps state, such as a counter, assert on its attributes after the call.
 
 ## Why not `respx`?
 
-`httpware` deliberately uses `httpx2.MockTransport` instead of `respx` for its own tests. `MockTransport` is a first-party `httpx2` API — supported by the maintainers, stable across versions, part of the public API surface. `respx` targets the original `httpx` package (its README requires `httpx 0.25+`, with no stated `httpx2` support) and has a documented history of breaking across `httpx` major-version bumps, since it patches `httpx`/`httpcore` internals directly. Stick with `MockTransport` unless you have a specific reason not to.
+httpware's own tests use `httpx2.MockTransport`, which is part of `httpx2`'s public API. `respx` is built for the original `httpx` package: its README requires `httpx 0.25+` and says nothing about `httpx2`. It also patches `httpx` and `httpcore` internals, which has broken it across `httpx` major versions before.
 
 ## See also
 
-- **[Middleware guide](middleware.md)** — write the middleware you're testing.
-- **[Resilience reference](resilience.md)** — testing `AsyncRetry`/`AsyncBulkhead` configurations.
-- **`AGENTS.md`** — the project's own testing conventions, and the admission check that decides where a new fact belongs.
+- [Middleware](middleware.md): writing the middleware you're testing.
+- [Resilience](resilience.md): the parameters of the middleware you're configuring.

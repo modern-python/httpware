@@ -1,19 +1,19 @@
 # Middleware
 
-`httpware`'s primary extension point is the **AsyncMiddleware protocol**. Middleware lets you add cross-cutting behavior — request-ID propagation, auth header injection, structured tracing, custom resilience policies, anything that wraps "send a request, get a response" — without subclassing `AsyncClient` or touching the transport.
+Middleware is the main way to extend httpware. A middleware wraps every call a client makes, so it can add request IDs or auth headers, record traces, or apply your own resilience policy without subclassing `AsyncClient` or touching the transport.
 
-The built-in `AsyncRetry` and `AsyncBulkhead` middleware are themselves implementations of this protocol; nothing about them is privileged. If you want a circuit breaker, a rate limiter, or a header-injecting auth layer, write a middleware.
+The built-in retry, bulkhead, circuit breaker and timeout are ordinary middleware written against the same protocol. A rate limiter or an auth layer you write yourself plugs in the same way.
 
 ## Choosing where behavior lives
 
-Middleware is for *cross-cutting* concerns — behavior that should apply to every call through a client. For everything else, reach for a more specific tool:
+Middleware is for behavior that applies to every call through a client. Other cases have a better place:
 
-- **Per-call behavior that doesn't apply to other calls:** pass it through `request.extensions=` (or the `extensions=` kwarg at the call site) instead of a middleware.
-- **Instance state or two-sided inspection** (a counter, a CircuitBreaker's open/closed flag, timing that needs both the request and its response, or interleaving behavior around the `await next(...)` call): write a raw `AsyncMiddleware`/`Middleware` class rather than a phase decorator — decorators are a convenience for the cases where a single function suffices.
-- **Transform that doesn't need `httpware`'s exception mapping or chain ordering** (pure request/response side effects at the lowest level, including post-redirect hops): use `event_hooks` on an `httpx2` client you build yourself and pass as `httpx2_client=`. Phase decorators and middleware participate in the `httpware` chain (they see `httpware` exceptions and compose with `AsyncRetry`/`AsyncBulkhead`); `event_hooks` run a layer below, on every transport attempt. That is also why `httpware` refuses `event_hooks=` as a client option: an `httpx2.HTTPStatusError` raised in a hook (say, by `raise_for_status()`) reaches the chain as a plain `TransportError` instead of a `StatusError`, so `AsyncRetry` never retries it and the circuit breaker never counts it.
-- **URL or header validation:** `httpx2` owns it — don't reimplement.
-- **HTTP-level span creation for tracing:** install `opentelemetry-instrumentation-httpx` instead of writing an OTel middleware in httpware. `opentelemetry-instrumentation-httpx` already covers transport-level tracing, so a separate httpware layer would duplicate it. See [Observability](observability.md).
-- **Redaction:** httpware redacts URLs before they reach logs, telemetry, and error messages — `user:pass@` userinfo is stripped and sensitive query- and fragment-parameter values are masked (`_internal/redaction.py`). It does **not** inspect or redact headers or request/response bodies, so if your own middleware logs those, redact them yourself (e.g. with a `logging.Filter`).
+- Behavior for a single call: pass it through `request.extensions=` (or the `extensions=` kwarg at the call site) instead of a middleware.
+- Instance state or logic on both sides of the call (a counter, a circuit breaker's open/closed flag, timing that needs both the request and its response): write an `AsyncMiddleware` or `Middleware` class. Phase decorators only cover logic that fits in one function.
+- Side effects that don't need httpware's exceptions or chain order, including on post-redirect hops: use `event_hooks` on an `httpx2` client you build yourself and pass as `httpx2_client=`. Middleware and phase decorators run in the httpware chain, see httpware exceptions, and compose with `AsyncRetry` and `AsyncBulkhead`. `event_hooks` run a layer below, on every transport attempt. That is also why `httpware` refuses `event_hooks=` as a client option: an `httpx2.HTTPStatusError` raised in a hook (say, by `raise_for_status()`) reaches the chain as a plain `TransportError` instead of a `StatusError`, so `AsyncRetry` never retries it and the circuit breaker never counts it.
+- URL or header validation: `httpx2` already does it.
+- Creating HTTP spans for tracing: install `opentelemetry-instrumentation-httpx`, which already traces every transport call. See [Observability](observability.md).
+- Redaction: httpware redacts URLs before they reach logs, telemetry, and error messages. It strips `user:pass@` userinfo and masks the values of sensitive query and fragment parameters ([Errors](errors.md#excresponse-access-pattern) lists them). It does not touch headers or bodies, so if your middleware logs those, redact them yourself, for example with a `logging.Filter`.
 
 ## Writing your own
 
@@ -38,17 +38,17 @@ The chain is composed once at `AsyncClient.__init__` and frozen for the client's
 
 Calling `await next(request)` forwards to the next layer (or, eventually, to the terminal that hits `httpx2`). You can:
 
-- **Forward unchanged:** `return await next(request)`
-- **Modify the request first:** mutate `request.headers` (or build a replacement) before forwarding
-- **Inspect or replace the response:** call `await next(...)`, then act on what comes back
-- **Short-circuit:** return a synthesized `httpx2.Response` without calling `next` at all
-- **Wrap the call in error handling:** `try: return await next(...) except ...` to translate failures
+- forward it unchanged with `return await next(request)`
+- change `request.headers`, or build a new request, before forwarding
+- call `await next(...)` and inspect or replace the response
+- return your own `httpx2.Response` without calling `next`
+- wrap `await next(...)` in `try`/`except` to translate failures
 
-Whatever you do, return an `httpx2.Response`. Raising an exception propagates up the chain (AsyncRetry catches retryable exceptions; everything else surfaces to the caller).
+Either return an `httpx2.Response` or raise. An exception travels up the chain: `AsyncRetry` catches the ones it retries, and the rest reach the caller.
 
 ### Phase decorators
 
-For the common cases where you don't need state-keeping on `self` and don't need to wrap the full `await next(...)` call, `httpware.middleware` exports three decorators that turn a single async function into an `AsyncMiddleware`:
+When you need no state on `self` and don't need to wrap `await next(...)`, three decorators turn a single async function into an `AsyncMiddleware`:
 
 ```python
 from httpware import async_before_request, async_after_response, async_on_error
@@ -60,11 +60,11 @@ from httpware import async_before_request, async_after_response, async_on_error
 | `@async_after_response` | `async (request, response) -> response` | Transform the incoming response (decode, log, attach metadata). |
 | `@async_on_error` | `async (request, exc) -> response \| None` | Translate or absorb a failure. Return `None` to re-raise. Catches `Exception` (not `BaseException`), so `asyncio.CancelledError` propagates. |
 
-See the **[Phase decorator recipes](recipes/phase-decorator-patterns.md)** for worked examples covering each decorator: bearer-token injection, correlation-ID propagation from `contextvars`, status-class counter, and `NetworkError` fallback.
+The [phase decorator recipes](recipes/phase-decorator-patterns.md) have an example for each decorator: bearer-token injection, a correlation ID from `contextvars`, a status-class counter, and a `NetworkError` fallback.
 
 ### Worked example: request-ID propagation
 
-A `RequestIdMiddleware` that assigns a per-call UUID, injects it as an outgoing header, and logs it alongside the response status. This is the canonical "trace every request through your distributed system" pattern.
+This `RequestIdMiddleware` gives each call a UUID, sends it as a header, and logs it with the response status, so you can follow one request across services.
 
 ```python
 import logging
@@ -80,12 +80,9 @@ _LOGGER = logging.getLogger("myapp.request_id")
 
 
 class RequestIdMiddleware:
-    """Assign a per-call X-Request-Id; log it on response.
+    """Assign a per-call X-Request-Id and log it with the response status.
 
-    Place OUTSIDE AsyncRetry so all attempts of the same call share one ID
-    (so a single call's retries all surface under the same correlation
-    key in your logs, and match the URL attribute on httpware.retry's
-    emitted events).
+    Place it before AsyncRetry so every attempt of one call shares the ID.
     """
 
     def __init__(self, *, header: str = "X-Request-Id") -> None:
@@ -110,13 +107,13 @@ async def main() -> None:
         await client.get("/users/1")
 ```
 
-A note on logger names: the example logs under `myapp.request_id`, NOT under `httpware.*`. The `httpware.*` namespace is reserved for events emitted by the library itself (see [Observability](observability.md) — `httpware.retry`, `httpware.bulkhead`, `httpware.circuit_breaker`, and `httpware.timeout` are stable contracts). Consumer middleware should use your application's own logger namespace.
+The example logs under `myapp.request_id`. Keep your middleware's logs in your application's namespace: `httpware.*` is reserved for the library's own loggers, whose names are a stable contract (see [Observability](observability.md)).
 
-The example pairs naturally with the 0.6.0 observability events: a `httpware.retry` `retry.giving_up` log record carries a `url` attribute, and your `RequestIdMiddleware` set an `X-Request-Id` for that same call. Correlate the two in your log aggregator and you have end-to-end visibility from "this user's request" to "we gave up after N retries."
+A `retry.giving_up` record from `httpware.retry` carries the call's `url`, and this middleware logged an `X-Request-Id` for the same call. Joining the two in your log aggregator tells you which request gave up after its retries.
 
 ### Enriching the active span
 
-See **[Wiring OpenTelemetry](observability.md#wiring-opentelemetry)** for how to wire the OTel SDK and `opentelemetry-instrumentation-httpx` so `httpware` HTTP calls get a span at all. Once a span is active, your own middleware can attach to it the same way `httpware`'s built-in resilience middleware does — no additional setup needed:
+httpware calls only get a span once you set up the OTel SDK and `opentelemetry-instrumentation-httpx`; [Wiring OpenTelemetry](observability.md#wiring-opentelemetry) shows how. With a span active, your middleware can add to it the same way the built-in resilience middleware do:
 
 ```python
 import httpx2
@@ -132,17 +129,17 @@ class SpanEnrichingMiddleware:
         return response
 ```
 
-When no span is active, `get_current_span()` returns a `NonRecordingSpan` whose `set_attribute`/`add_event` are documented no-ops, so this is safe to call unconditionally.
+When no span is active, `get_current_span()` returns a `NonRecordingSpan` whose `set_attribute` and `add_event` do nothing, so the call is always safe.
 
 ### Sync middleware
 
-The same protocol shape, sync flavor. Use these when wiring middleware into a sync `Client` instead of `AsyncClient`.
+A sync `Client` takes sync middleware, which has the same shape without `async`:
 
 ```python
 from httpware import Middleware, Next, before_request, after_response, on_error
 ```
 
-A sync `Middleware` is a structural protocol — any callable with the right signature satisfies it:
+`Middleware` is a structural protocol, so any callable with the right signature works:
 
 ```python
 import logging
@@ -168,7 +165,7 @@ with Client(base_url="https://api.example.com", middleware=[LoggingMiddleware()]
     client.get("/users/1")
 ```
 
-Phase decorators (`@before_request`, `@after_response`, `@on_error`) have the same semantics as their `@async_*` siblings, but wrap sync functions:
+`@before_request`, `@after_response` and `@on_error` behave like their `@async_*` versions but wrap sync functions:
 
 ```python
 import uuid
@@ -192,9 +189,9 @@ with Client(base_url="https://api.example.com", middleware=[add_request_id]) as 
     client.get("/users/1")
 ```
 
-Sync and async middleware classes do not interop: a `Middleware` cannot be passed to `AsyncClient(middleware=...)` and vice versa. Pick the flavor matching your client.
+Sync and async middleware don't mix: pass `Middleware` to `Client` and `AsyncMiddleware` to `AsyncClient`.
 
 ## See also
 
-- **`src/httpware/middleware/resilience/`** — `AsyncRetry`, `AsyncBulkhead`, `RetryBudget` as real-world consumers of this exact protocol.
-- **[Quick-Start composition example](index.md#with-resilience-middleware)** — composing built-in middleware.
+- [Resilience](resilience.md): the built-in middleware and the order to compose them in.
+- [`src/httpware/middleware/resilience/`](https://github.com/modern-python/httpware/tree/main/src/httpware/middleware/resilience): the built-in middleware's source, written against this same protocol.

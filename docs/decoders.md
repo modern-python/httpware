@@ -1,8 +1,8 @@
 # Decoders
 
-`httpware`'s typed-response extension point is the **`ResponseDecoder` protocol**. A decoder turns raw response bytes into a typed object: when you pass `response_model=` to `send` / `send_with_response`, the client walks its decoder list, picks the first one that claims your model, and hands it the body.
+A decoder turns raw response bytes into a typed object. When you pass `response_model=` to a request, the client goes through its decoder list, picks the first decoder that accepts your type, and hands it the body.
 
-The built-in `PydanticDecoder` and `MsgspecDecoder` are themselves implementations of this protocol; nothing about them is privileged. Reach for a custom decoder when you need a body **format** the built-ins don't speak (CSV, XML, MessagePack, a bespoke binary frame) or a **type system** they don't cover (`attrs`, `marshmallow`, your own class hierarchy). If pydantic or msgspec already decodes your model, you don't need one — see [When NOT to write a decoder](#when-not-to-write-a-decoder).
+`PydanticDecoder` and `MsgspecDecoder` implement the same `ResponseDecoder` protocol you would. Write your own when the body is in a format the built-ins can't read (CSV, XML, MessagePack, a custom binary format) or the type comes from a library they don't support (`attrs`, `marshmallow`, your own classes). If pydantic or msgspec already decodes your type, you don't need one; see [When not to write a decoder](#when-not-to-write-a-decoder).
 
 ## The protocol
 
@@ -20,30 +20,29 @@ class ResponseDecoder(Protocol):
     def decode(self, content: bytes, model: type[T]) -> T: ...
 ```
 
-Two methods, two distinct jobs:
+`can_decode(model)` decides whether the decoder takes a type. The client asks each decoder in `decoders=[...]` order and uses the first one that returns `True`. Accept every type you can handle and let the list order express the caller's preference, but reject types that belong to another library: a CSV decoder should not accept a `pydantic.BaseModel`. `can_decode` must never raise. It runs before the request and outside the `DecodeError` wrapping that protects `decode`, so an exception there reaches the caller as something other than a `ClientError`. If the decoder can't tell, return `False`.
 
-- **`can_decode(model) -> bool`** — the dispatch predicate. The client walks `decoders=[...]` in order and picks the **first** decoder that returns `True`. Claim every model you can actually handle (broad is correct — list ordering, not narrow predicates, encodes the caller's preference), but **reject another library's native types**: a CSV decoder has no business claiming a `pydantic.BaseModel`. `can_decode` **MUST NOT raise** — it runs at dispatch time, before the HTTP call and *outside* the `DecodeError` wrap that protects `decode`, so an exception here escapes `httpware`'s `ClientError` contract instead of being translated. A decoder that can't decide must return `False` (decline), not raise.
-- **`decode(content, model) -> T`** — the decode itself, raw response bytes in, a `model` instance out. Any exception you raise here is caught by the client and wrapped as `httpware.DecodeError` (carrying `response`, `model`, and the `original` exception). You do **not** need to raise `DecodeError` yourself — raise whatever your parser raises and let the seam translate it.
+`decode(content, model)` takes the raw body and returns an instance of `model`. The client wraps any exception it raises in `httpware.DecodeError`, with `response`, `model` and the `original` exception attached, so raise whatever your parser raises.
 
-The protocol is `@runtime_checkable` and structural: any object with these two methods satisfies it. You do not subclass anything.
+The protocol is structural and `@runtime_checkable`: any object with these two methods satisfies it, with no base class.
 
 ## How the client resolves a model
 
-Both clients take `decoders: Sequence[ResponseDecoder] | None = None`, composed once at `__init__` and frozen for the client's lifetime.
+Both clients take `decoders: Sequence[ResponseDecoder] | None = None`. The list is fixed when the client is built.
 
-- **Order is preference.** `decoders=[CsvDecoder(), PydanticDecoder()]` asks the CSV decoder first; pydantic only sees models CSV declined. List position is how you disambiguate a shape two decoders could both claim.
-- **`decoders=None`** resolves against installed extras — pydantic-first when both are present, either-only when one is, an empty tuple when neither. To *add* a decoder without losing the built-ins, list them explicitly: `decoders=[CsvDecoder(), PydanticDecoder()]`.
-- **No claimer is a pre-flight error.** When `response_model=` is set and no decoder claims it, the client raises `MissingDecoderError` **before** sending the request — you find out at wiring time, not after a wasted round-trip. This is distinct from `DecodeError`: `MissingDecoderError` means *nothing handles this model* (fix: install an extra or pass `decoders=[...]`); `DecodeError` means *a decoder ran and the payload was malformed* (fix: the server or the model). See [Errors](errors.md).
+- Order is preference. With `decoders=[CsvDecoder(), PydanticDecoder()]`, pydantic only sees the types the CSV decoder declined. When two decoders could both handle a type, the earlier one wins.
+- `decoders=None` uses the installed extras: pydantic then msgspec when both are installed, whichever one is installed, or no decoders at all. Passing a list replaces the defaults, so include the built-ins you still want: `decoders=[CsvDecoder(), PydanticDecoder()]`.
+- If `response_model=` is set and no decoder accepts it, the client raises `MissingDecoderError` before sending the request. That means nothing handles the type, and the fix is to install an extra or pass `decoders=[...]`. A `DecodeError` instead means a decoder ran and the body didn't fit the type, which points at the server or the model. See [Errors](errors.md).
 
-## Decoders are sync — for both clients
+## One sync protocol for both clients
 
-Unlike middleware, which has separate `AsyncMiddleware` and `Middleware` flavors, there is **one** `ResponseDecoder` protocol, shared by `AsyncClient` and `Client` alike. `decode` is a synchronous method: by the time it runs, the body has already been read off the wire, so decoding is pure CPU work with nothing to await. Write one decoder and pass it to either client.
+Middleware comes in sync and async versions, but there is only one `ResponseDecoder` protocol, used by both clients. `decode` is synchronous because the body has already been read when it runs, so there is nothing to await. The same decoder works with either client.
 
 ## Writing your own
 
 ### Worked example: a CSV decoder
 
-A decoder for `text/csv` endpoints that returns a `list` of dataclass rows. Both built-ins are JSON, so this is the case they can't cover — and it shows the seam's real shape: raw bytes in, typed object out, no JSON anywhere.
+This decoder reads `text/csv` responses into a `list` of dataclass rows. Both built-ins only read JSON, so they can't handle this case.
 
 ```python
 import csv
@@ -77,7 +76,7 @@ class CsvDecoder:
         return [row_type(**{name: field_types[name](value) for name, value in row.items()}) for row in reader]
 ```
 
-`can_decode` is total and never raises: a non-`list` model, a bare `list`, or `list[int]` all fall through to `False`. `decode` coerces each CSV cell with its field's type (CSV values arrive as strings) — a real decoder would handle optionals, dates, and missing columns; this is where your domain logic goes. Wire it ahead of the built-ins so it gets first refusal on `list[...]` models while pydantic still handles everything else:
+`can_decode` never raises: a non-`list` type, a bare `list` and `list[int]` all return `False`. `decode` converts each CSV cell, which arrives as a string, with its field's type. A real decoder would also handle optional fields, dates and missing columns. Put it before the built-ins so it sees `list[...]` types first, while pydantic still handles everything else:
 
 ```python
 @dataclasses.dataclass
@@ -103,7 +102,7 @@ The same decoder instance works with a sync `Client(decoders=[CsvDecoder(), Pyda
 
 ### A note on claiming the right models
 
-`can_decode` is a contract with the *rest of the list*. Claim too broadly and you steal models from decoders behind you; claim too narrowly and your decoder never runs. The rule of thumb: claim exactly the types you natively own, and reject another library's. An adapter for a third-party type system narrows its claim to that system — for example, a [`cattrs`](https://catt.rs)-backed decoder for `attrs` classes:
+`can_decode` affects the other decoders in the list. Accept too much and you take types from the decoders after yours; accept too little and yours never runs. Accept exactly the types your decoder is for, and reject types from other libraries. A decoder for a third-party type system should accept only that system's types, as in this [`cattrs`](https://catt.rs) decoder for `attrs` classes:
 
 ```python
 import json
@@ -122,15 +121,15 @@ class CattrsDecoder:
         return self._converter.structure(json.loads(content), model)
 ```
 
-Note this decoder is **two-pass** (`json.loads`, then `structure`). The built-in adapters deliberately decode in a single bytes-in pass (`TypeAdapter.validate_json`, `msgspec.json.Decoder.decode`) to skip the intermediate `dict` allocation — but that's a *performance choice for the built-ins*, not a protocol obligation. A custom decoder may go two-pass when its underlying library only structures from native Python objects; you pay one extra allocation, nothing more.
+This decoder makes two passes: `json.loads`, then `structure`. The built-ins decode straight from bytes (`TypeAdapter.validate_json`, `msgspec.json.Decoder.decode`) to avoid building an intermediate `dict`, but that is only an optimization. Two passes are fine when your library can only work from Python objects; the cost is one extra allocation.
 
-### When NOT to write a decoder
+### When not to write a decoder
 
-- **Your model is JSON.** Dataclasses, `TypedDict`s, primitives, pydantic models, and msgspec `Struct`s are all covered by the built-in `PydanticDecoder` / `MsgspecDecoder`. Install the extra (`httpware[pydantic]` or `httpware[msgspec]`) instead of writing a decoder.
-- **You only want raw bytes or text.** Don't pass `response_model=` at all — call `send` (or a verb method) without it and read `response.content` / `response.text` directly. Decoders are for *typed* bodies.
-- **The transform is per-call, not per-type.** If the shaping depends on the request rather than the model, it's a [middleware](middleware.md) concern, not a decoder.
+- The body is JSON. `PydanticDecoder` and `MsgspecDecoder` handle dataclasses, `TypedDict`s, primitives, pydantic models and msgspec `Struct`s. Install `httpware[pydantic]` or `httpware[msgspec]`.
+- You want raw bytes or text. Leave out `response_model=` and read `response.content` or `response.text`.
+- The shaping depends on the request rather than the type. That belongs in [middleware](middleware.md).
 
 ## See also
 
-- **`src/httpware/decoders/pydantic.py` and `msgspec.py`** — the built-in adapters as reference implementations, including how they memoize a `can_decode` verdict and cache the underlying parser per model.
-- **[Quick-Start: typed responses](index.md)** — composing `response_model=` with the default decoder list.
+- [`src/httpware/decoders/`](https://github.com/modern-python/httpware/tree/main/src/httpware/decoders): the built-in decoders, including how they cache `can_decode` results and parsers per type.
+- [Quickstart: typed responses](index.md#typed-responses): `response_model=` with the default decoders.

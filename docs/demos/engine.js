@@ -369,9 +369,9 @@ window.HttpwareDemo = (function () {
 
   function herdTemplate(config) {
     const title = config.title || 'Now scale it to 20 clients';
-    const intro = config.intro || 'One client retrying a blip is invisible. Twenty clients retrying an ' +
-      'outage is a traffic weapon — unless their retries are spread out and capped. ' +
-      'These strips show <b>backend call-rate over time</b>. Press play and watch the shape.';
+    const intro = config.intro || 'One client retrying a blip goes unnoticed. Twenty clients retrying an ' +
+      'outage multiply the load on the backend unless their retries are spread out and capped. ' +
+      'These strips show the <b>backend call rate over time</b>. Press play and watch the shape.';
     return `
 <div class="hw-wrap herd-wrap">
   <h2>${esc(title)}</h2>
@@ -877,7 +877,7 @@ window.HttpwareDemo = (function () {
         els.play.disabled = false;
         els.scenLabel.textContent = 'Scenario: ' + selectedScenario.label;
         els.note.textContent = "Faithful model of httpware's " + describeChain(selectedScenario.chainB) +
-          ' — not httpware running in your browser.';
+          '; httpware itself is not running in your browser.';
         brk = null; bulk = null; retryCfg = null; budget = null; budgetExhausted = false;
         tmoCfg = null; timedOutCount = 0;
         setupOutageBar(selectedScenario);

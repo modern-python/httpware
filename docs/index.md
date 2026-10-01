@@ -7,15 +7,7 @@
 
 </div>
 
-A Python HTTP client framework with sync and async clients for building resilient service clients. `httpware` is a thin opinionated wrapper around `httpx2` — it re-exports `httpx2.Request`/`httpx2.Response` as the public request/response surface, adds a middleware chain (with a built-in resilience suite: `AsyncRetry`/`Retry` + `RetryBudget`, `AsyncBulkhead`/`Bulkhead`, `AsyncCircuitBreaker`/`CircuitBreaker`, and `AsyncTimeout`), opt-in typed response decoding, and a status-keyed exception tree raised automatically on 4xx/5xx.
-
-## Why httpware
-
-Typed exceptions per HTTP status, typed response bodies, and composable
-resilience (retry, bulkhead, circuit breaker, timeout) — a thin wrapper over
-`httpx2`, not a new HTTP abstraction. See the
-[project README](https://github.com/modern-python/httpware#why-httpware) for
-the full pitch.
+httpware wraps `httpx2` to give you sync and async clients for calling other services. It adds a middleware chain with built-in retry, bulkhead, circuit breaker and timeout, optional typed response decoding, and an exception per HTTP status raised automatically on 4xx and 5xx. Requests and responses are plain `httpx2.Request` and `httpx2.Response` objects.
 
 > **Status:** Pre-1.0. Public API is subject to change between minor releases until v1.0.
 
@@ -28,14 +20,16 @@ pip install httpware
 Optional extras:
 
 ```bash
-pip install httpware[pydantic]   # PydanticDecoder — handles BaseModel + dataclasses + primitives + generics
-pip install httpware[msgspec]    # MsgspecDecoder — handles Struct + dataclasses + primitives + generics
-pip install httpware[pydantic,msgspec]   # both extras — both decoders register; BaseModel routes to pydantic, Struct to msgspec
+pip install httpware[pydantic]           # PydanticDecoder: BaseModel, dataclasses, primitives, generics
+pip install httpware[msgspec]            # MsgspecDecoder: Struct, dataclasses, primitives, generics
+pip install httpware[pydantic,msgspec]   # both; BaseModel goes to pydantic, Struct to msgspec
+pip install httpware[otel]               # OpenTelemetry span events
+pip install httpware[all]                # pydantic, msgspec, and otel
 ```
 
 ## First request
 
-**Async usage:**
+Async:
 
 ```python
 import asyncio
@@ -52,7 +46,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-**Sync usage:**
+Sync:
 
 ```python
 from httpware import Client
@@ -62,24 +56,9 @@ with Client(base_url="https://jsonplaceholder.typicode.com") as client:
     print(response.json())
 ```
 
-`base_url` must not contain a query string: constructing a client with one raises `ValueError`. Put query parameters shared by every request in `params=` instead.
+### Typed responses
 
-Every other keyword of `httpx2.AsyncClient`/`httpx2.Client` (`verify`, `proxy`, `http2`, `transport`, `follow_redirects`, ...) is forwarded to the `httpx2` client that `httpware` builds and closes. Two are refused: `cert`, deprecated by `httpx2` in favour of an `ssl.SSLContext` passed as `verify`, and `event_hooks`, which run below the middleware chain; use [middleware](middleware.md) instead.
-
-```python
-import ssl
-
-from httpware import AsyncClient
-
-client = AsyncClient(
-    base_url="https://internal.example",
-    verify=ssl.create_default_context(cafile="/etc/ssl/internal-ca.pem"),
-)
-```
-
-To share one connection pool between several clients, build the `httpx2` client yourself and pass it as `httpx2_client=`. It is then yours to close, and none of the options above can be combined with it.
-
-Typed decoding via `response_model=` works the same way in both worlds:
+Pass `response_model=` to get a decoded body instead of the response. It works the same way on both clients:
 
 ```python
 from httpware import AsyncClient
@@ -97,20 +76,13 @@ async def main() -> None:
         print(user.name)
 ```
 
-Need the raw response **and** a decoded body from the same call (e.g., for header-based pagination)? See [Link header pagination](recipes/link-header-pagination.md) — it uses `send_with_response`.
+The client tries its `decoders` in order and uses the first one whose `can_decode` returns `True`, so list order decides which decoder wins when more than one could handle a type. If none can, the call raises `MissingDecoderError` before the request is sent. See [Decoders](decoders.md) for the resolution rules and how pydantic and msgspec types are routed.
 
-### Decoder dispatch
-
-When `response_model=` is set, the client walks `decoders` in order and picks
-the first decoder whose `can_decode` returns `True`; ordering encodes your
-preference for shapes more than one decoder could claim. If none claims your
-`response_model`, the call raises `MissingDecoderError` *before* the HTTP
-request. See **[Decoders](decoders.md)** for the resolution rules and
-pydantic/msgspec routing.
+To get the raw response and the decoded body from the same call, for example to read pagination headers, use `send_with_response`. The [Link header pagination](recipes/link-header-pagination.md) recipe shows it in a loop.
 
 ### With resilience middleware
 
-Compose resilience middleware at construction; `AsyncBulkhead` goes outside `AsyncRetry` so one slot covers all retry attempts.
+Pass resilience middleware when you build the client. Put `AsyncBulkhead` before `AsyncRetry` so one slot covers all retry attempts of a call.
 
 ```python
 from httpware import AsyncClient, AsyncBulkhead, AsyncRetry
@@ -127,9 +99,11 @@ async def main() -> None:
         user = await client.get("/users/1", response_model=User)
 ```
 
+[Resilience](resilience.md) has the full recommended order, including the circuit breaker and timeout.
+
 ### Streaming responses
 
-For large responses or server-sent events, stream the body chunk-by-chunk. `stream()` is an async context manager:
+For large responses or server-sent events, stream the body in chunks. `stream()` is an async context manager:
 
 ```python
 from httpware import AsyncClient
@@ -142,39 +116,52 @@ async def main() -> None:
                 process(chunk)
 ```
 
-`stream()` auto-raises `StatusError` subclasses on 4xx/5xx with the response body pre-read, so `exc.response.content` is accessible from the caught exception.
+`stream()` raises `StatusError` subclasses on 4xx and 5xx like every other call. It reads the error body first, so `exc.response.content` is available on the caught exception.
 
-It does NOT pass through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, and any custom middleware are bypassed. (AsyncRetry separately refuses to retry any request — stream or non-stream — whose body was an async-iterable, since streams can't replay across attempts.)
+`stream()` does not go through the middleware chain: `AsyncRetry`, `AsyncBulkhead`, and your own middleware are all skipped. Separately, `AsyncRetry` never retries a request whose body was an async iterable, streamed or not, because the iterable cannot be replayed.
+
+## Client options
+
+`base_url` must not contain a query string; a client built with one raises `ValueError`. Put query parameters shared by every request in `params=` instead.
+
+The other keywords of `httpx2.AsyncClient` and `httpx2.Client` (`verify`, `proxy`, `http2`, `transport`, `follow_redirects`, ...) are passed through to the `httpx2` client that httpware builds and closes. Two are refused. `cert` is deprecated by `httpx2` in favour of an `ssl.SSLContext` passed as `verify`. `event_hooks` run below the middleware chain, so use [middleware](middleware.md) instead.
+
+```python
+import ssl
+
+from httpware import AsyncClient
+
+client = AsyncClient(
+    base_url="https://internal.example",
+    verify=ssl.create_default_context(cafile="/etc/ssl/internal-ca.pem"),
+)
+```
+
+To share one connection pool between several clients, build the `httpx2` client yourself and pass it as `httpx2_client=`. You then close it yourself, and you cannot combine it with any of the options above.
 
 ### Capping response body size
 
-Both clients accept an opt-in `max_response_body_bytes: int | None = None`. When set, a response body that exceeds the cap raises `ResponseTooLargeError` instead of being returned; the default `None` is unbounded. See **[Errors](errors.md#responsetoolargeerror)** for the full trip conditions.
+Both clients accept `max_response_body_bytes: int | None = None`. When it is set, a response body larger than the cap raises `ResponseTooLargeError` instead of being returned. The default, `None`, sets no limit. [Errors](errors.md#responsetoolargeerror) lists exactly when the cap applies.
 
-## Errors
+## Errors and observability
 
-All errors inherit `httpware.ClientError`: 4xx/5xx responses raise a typed
-`StatusError` subclass automatically, and `response_model=` decode failures
-raise `DecodeError`. See **[Errors](errors.md)** for the full tree and
-catching strategies.
+Every exception httpware raises subclasses `httpware.ClientError`. A 4xx or 5xx response raises a `StatusError` subclass, and a body that fails `response_model=` decoding raises `DecodeError`. [Errors](errors.md) has the full tree.
 
-## Observability
-
-Every resilience middleware emits stdlib-`logging` records (always) and OTel
-span events (when `opentelemetry-api` is installed), under stable logger and
-event names. See **[Observability](observability.md)** for the full contract.
+The resilience middleware log through stdlib `logging` and, when `opentelemetry-api` is installed, add span events. Logger and event names are stable; [Observability](observability.md) lists them.
 
 ## Where to go next
 
-- **[Resilience reference](resilience.md)** — every parameter on `AsyncRetry`, `RetryBudget`, and `AsyncBulkhead`; the retry-rule matrix; Retry-After parsing; budget sharing.
-- **[Middleware guide](middleware.md)** — write your own middleware. Covers the AsyncMiddleware Protocol, the phase decorators, a worked Request-ID propagation example, and OpenTelemetry wiring.
-- **[Errors reference](errors.md)** — the full exception tree, catching strategies, `exc.response.*` access pattern.
-- **[Observability](observability.md)** — the stdlib-`logging` and OTel span-event contract emitted by the resilience middleware.
-- **[Testing guide](testing.md)** — mock-transport injection pattern for testing code that uses `httpware`.
-- **[Recipes](recipes/modern-di.md)** — wiring `AsyncClient` into a `modern-di` container.
-- **[Decision records](https://github.com/modern-python/httpware/tree/main/docs/adr)** — the alternatives that were considered and rejected, and why.
-- **[Contributing](dev/contributing.md)** — setup, conventions, workflow.
-- **[Release notes](https://github.com/modern-python/httpware/releases)** — per-version changelogs.
+- [Resilience](resilience.md): every parameter of retry, retry budget, bulkhead, circuit breaker and timeout, plus the order to compose them in.
+- [Middleware](middleware.md): the middleware protocol, phase decorators, and a request-ID example.
+- [Errors](errors.md): the exception tree, catching strategies, and what each exception carries.
+- [Decoders](decoders.md): how `response_model=` picks a decoder, and how to write your own.
+- [Observability](observability.md): logger and event names, and OpenTelemetry wiring.
+- [Testing](testing.md): testing code that uses httpware with `httpx2.MockTransport`.
+- [Recipes](recipes/modern-di.md): `modern-di` wiring, phase decorator patterns, Link header pagination.
+- [Decision records](https://github.com/modern-python/httpware/tree/main/docs/adr): alternatives that were considered and rejected, and why.
+- [Contributing](dev/contributing.md): setup, conventions, workflow.
+- [Release notes](https://github.com/modern-python/httpware/releases): changes in each version.
 
 ## Part of `modern-python`
 
-`httpware` ships under the [`modern-python`](https://github.com/modern-python) org. See the org profile for the categorized index of related templates and libraries.
+httpware is part of the [`modern-python`](https://github.com/modern-python) org. The org profile has the categorized index of related templates and libraries.

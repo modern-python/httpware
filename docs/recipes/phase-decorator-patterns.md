@@ -1,14 +1,12 @@
 # Phase decorator recipes
 
-The `@async_before_request`, `@async_after_response`, and `@async_on_error` decorators from `httpware.middleware` turn a single async function into an `AsyncMiddleware`. Reach for them when the logic fits one function — no `self` state, no need to bracket `await next(...)` from both sides.
+`@async_before_request`, `@async_after_response` and `@async_on_error` turn a single async function into an `AsyncMiddleware`. Use them when the logic fits in one function, with no state on `self` and no code on both sides of `await next(...)`.
 
-When the same logic would fit `httpx2.event_hooks` instead, prefer the hook: it's a layer below httpware's exception mapping and chain ordering, and is the right place for transforms that don't need either. Phase decorators participate in the middleware chain — they see `httpware` exceptions (mapped from `httpx2` ones), and they compose with `AsyncRetry`, `AsyncBulkhead`, and other middleware in a documented order.
-
-This page collects four worked recipes — one minimal and one realistic for `@async_before_request`, a response-status counter for `@async_after_response`, and a `NetworkError` fallback for `@async_on_error`.
+Phase decorators run in the middleware chain: they see httpware exceptions and take their place in the chain order next to `AsyncRetry` and `AsyncBulkhead`. Logic that needs neither can also be an `httpx2` event hook; [Middleware](../middleware.md#choosing-where-behavior-lives) explains the difference.
 
 ## `@async_before_request`: bearer token
 
-The smallest useful case — add a static `Authorization` header to every outgoing request.
+Add a fixed `Authorization` header to every request:
 
 ```python
 import httpx2
@@ -31,11 +29,11 @@ async def main() -> None:
         await client.get("/me")
 ```
 
-`add_bearer` is now an `AsyncMiddleware` instance; pass it directly into `middleware=[…]`. Order in the list is outer→inner — if you add `AsyncRetry()` after, the bearer header is set on every retry attempt (which is what you want — each attempt is a real HTTP call and needs auth).
+`add_bearer` is now an `AsyncMiddleware`, so it goes straight into `middleware=[...]`. If you add `AsyncRetry()` after it, every retry attempt carries the header too.
 
 ## `@async_before_request`: correlation ID from `contextvars`
 
-A more realistic case — propagate a correlation ID set by your application's surrounding context (FastAPI middleware, structlog binder, etc.). The decorator pulls the ID out of a `ContextVar` and stamps it on the outgoing request.
+Your application may already keep a correlation ID in a `ContextVar`, set by FastAPI middleware or a structlog binder. This middleware copies it onto each outgoing request:
 
 ```python
 import contextvars
@@ -69,14 +67,13 @@ async def main() -> None:
         await client.get("/me")  # request carries X-Correlation-Id: abc-123
 ```
 
-Two notes worth calling out:
+`propagate_correlation_id` runs once per call, before `AsyncRetry`, and the request it changes is the one every attempt resends, so all attempts share the header.
 
-- **Placement matters.** `propagate_correlation_id` sits *before* `AsyncRetry` in the chain, so it re-runs for each retry attempt. The header is set on every attempt, but the ID itself stays the same across attempts because `ContextVar` state doesn't change between them.
-- **vs `event_hooks`.** This is also expressible as `event_hooks={"request": [propagate_correlation_id]}` on the wrapped httpx2 client, with one functional difference: hooks run *below* the httpware chain, so they fire on every transport attempt including post-redirect hops. For correlation IDs the behaviour is usually equivalent; for anything that should fire once per *logical* call (e.g. a UUID generated inline), the phase decorator is correct.
+The undecorated function would also work as a request hook, `event_hooks={"request": [...]}`, on an `httpx2` client you pass as `httpx2_client=`. Hooks run below the chain, on every transport attempt and every redirect hop. That makes no difference for a correlation ID read from a `ContextVar`, but a value generated in the function, like a fresh UUID, would change on each attempt.
 
 ## `@async_after_response`: counter by status class
 
-Side-effect-only recipe — increment a counter keyed by status class (`2xx`, `4xx`, `5xx`) every time a response comes back. The decorator returns the response unchanged.
+Count responses by status class (`2xx`, `4xx`, `5xx`) and return each response unchanged:
 
 ```python
 from collections.abc import Callable
@@ -112,16 +109,14 @@ async def main() -> None:
         await client.get("/me")
 ```
 
-Notes:
-
-- The factory function `status_class_counter(metric_sink)` is the canonical way to parameterize a phase decorator — the decorated function itself takes no extra args, but the enclosing factory can.
-- **Why not request *latency* here?** Wall-clock timing requires bracketing the `await next(request)` call from both sides — `@async_after_response` only sees the response on the way back, so it can't measure the call duration. (`response.elapsed` from httpx2 is also unavailable at this chain point because the body isn't read yet.) Use a raw `AsyncMiddleware` class for timing — see [middleware.md](../middleware.md) for that pattern.
-- Wiring real sinks: pass `statsd.incr` (statsd), a `prometheus_client.Counter` `.inc` method (Prometheus), or `datadog.statsd.increment` (Datadog). The signature `Callable[[str, int], None]` is loose on purpose.
-- This middleware does NOT see exceptions. Failed requests (caught by `AsyncRetry`, raised as `StatusError`, or surfaced as `NetworkError`) never reach `@async_after_response`. If you want counts of *attempted* requests including failures, install a `httpware.retry` log handler or write a raw `AsyncMiddleware` that brackets the call.
+- The decorated function can't take extra arguments, so a factory such as `status_class_counter(metric_sink)` is how you pass it settings.
+- It can't measure latency. Timing needs code before and after `await next(request)`, and `@async_after_response` only runs after. `response.elapsed` isn't set yet either, because the body hasn't been read at this point. Write an `AsyncMiddleware` class for timing; see [Middleware](../middleware.md).
+- `metric_sink` can be `statsd.incr`, the `.inc` method of a `prometheus_client.Counter`, or `datadog.statsd.increment`; the `Callable[[str, int], None]` type is kept loose for that reason.
+- It never sees failures. A request that ends in a `StatusError` or `NetworkError` never reaches `@async_after_response`. To count failed requests too, write an `AsyncMiddleware` class that wraps the call, or add a handler on the `httpware.retry` logger.
 
 ## `@async_on_error`: fallback on `NetworkError`
 
-When the upstream is unreachable, return a synthesized 503 with a sentinel header so callers can branch on degraded mode. The decorator returns a `Response` on `NetworkError`, and `None` for everything else (re-raise).
+When the upstream is unreachable, return a made-up 503 with a marker header so callers can switch to a degraded mode. The function returns a `Response` for `NetworkError` and `None`, which re-raises, for anything else.
 
 ```python
 import httpx2
@@ -156,15 +151,13 @@ async def main() -> None:
             ...  # degraded path
 ```
 
-Notes:
-
-- **`return None` re-raises.** The decorator only synthesizes a response for cases it actually handles; everything else propagates unchanged. Be specific about which exception types you absorb.
-- **Returning a 4xx/5xx response does NOT re-trigger status mapping.** The terminal raises `StatusError` on the upstream response; once your `@async_on_error` returns, the synthesized response flows up the chain unchanged. If you want callers to see a `ServiceUnavailableError`, raise it directly instead of synthesizing.
-- **Catches `Exception`, not `BaseException`.** `asyncio.CancelledError` propagates — your fallback won't accidentally swallow cooperative cancellation.
-- **Placement vs `AsyncRetry`.** Put `@async_on_error` *outside* `AsyncRetry` (`middleware=[fallback_on_network_error, AsyncRetry()]`) if you want the fallback to apply only after all retries have failed. Inside `AsyncRetry` (`middleware=[AsyncRetry(), fallback_on_network_error]`) the fallback fires on the first network error and `AsyncRetry` never sees it. The outer placement is almost always what you want.
+- Returning `None` re-raises the exception. Handle only the exception types you mean to absorb.
+- A 4xx or 5xx response you return is not turned into a `StatusError`. Status mapping happens once, on the upstream response, and your response travels up the chain as is. If callers should get a `ServiceUnavailableError`, raise it.
+- The decorator catches `Exception`, not `BaseException`, so `asyncio.CancelledError` still propagates.
+- Put the fallback before `AsyncRetry`, as in `middleware=[fallback_on_network_error, AsyncRetry()]`, so it only runs once all retries have failed. After `AsyncRetry`, it handles the first network error and `AsyncRetry` never gets to retry.
 
 ## See also
 
-- **[Middleware guide](../middleware.md)** — the protocol contract, the raw-`AsyncMiddleware` class form, and "when NOT to write a middleware".
-- **[Resilience reference](../resilience.md)** — `AsyncRetry`, `RetryBudget`, `AsyncBulkhead` parameters and behaviour.
-- **[Errors guide](../errors.md)** — `NetworkError`, `StatusError`, and the full exception tree.
+- [Middleware](../middleware.md): the middleware protocol, writing a middleware class, and when to use something else.
+- [Resilience](../resilience.md): the built-in resilience middleware and their parameters.
+- [Errors](../errors.md): `NetworkError`, `StatusError` and the rest of the exception tree.

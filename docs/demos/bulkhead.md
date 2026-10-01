@@ -1,8 +1,8 @@
 # Bulkhead
 
-One slow dependency can sink a whole client: if every worker blocks on the slow call,
-fast calls starve behind them. A bulkhead caps concurrency to that dependency — excess
-calls fail fast with `BulkheadFullError` instead of piling up and exhausting the client.
+One slow dependency can stall a whole client: workers block on the slow calls and fast
+calls wait behind them. A bulkhead caps how many calls to that dependency run at once,
+and calls over the cap fail fast with `BulkheadFullError` instead of queueing.
 
 <div class="hw-demo" id="bh-demo"></div>
 
@@ -17,13 +17,13 @@ document.addEventListener('DOMContentLoaded', function () {
   ],
   buildStops: () => [
     { when: (s) => s.now >= 1.2, spot: ['ifA', 'poolB'], title: 'Fast calls, healthy pool',
-      body: 'Both clients are humming. The httpware client has a bulkhead: at most 8 calls to this dependency at once.' },
+      body: 'Both clients are healthy. The httpware client has a bulkhead that allows at most 8 calls to this dependency at once.' },
     { when: (s) => s.now >= 2.4, spot: ['ifA'], title: 'The dependency turns slow (5s)',
-      body: 'Every call now takes 5s. The plain client has no cap — watch in-flight climb without limit as workers block.' },
-    { when: (s) => s.mw.rejected > 0, spot: ['poolB'], title: 'The bulkhead holds the line',
-      body: 'The httpware pool fills to 8 and STOPS admitting more — excess calls fail fast instead of piling up. The client stays responsive for everything else.' },
+      body: 'Every call now takes 5s. The plain client has no cap, so its in-flight count keeps climbing as workers block.' },
+    { when: (s) => s.mw.rejected > 0, spot: ['poolB'], title: 'The bulkhead is full',
+      body: 'The httpware pool fills to 8 and admits no more. Further calls fail fast instead of piling up, so the client can still serve other work.' },
     { when: (s) => s.now >= 6.0, spot: ['ifA', 'poolB'], title: 'Bounded vs unbounded',
-      body: 'Plain client: in-flight unbounded, whole client degraded. httpware: in-flight pinned at the pool size, blast radius contained to this one dependency.' },
+      body: 'The plain client has no limit on in-flight calls, and the whole client slows down. httpware stays at the pool size, and only calls to this dependency are affected.' },
   ],
   });
 });
