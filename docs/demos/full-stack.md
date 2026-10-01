@@ -1,8 +1,9 @@
-# Full stack: composing the patterns
+# Full stack: combining the patterns
 
-Real clients don't use one pattern — they compose. The recommended order is
+Real clients combine these patterns, in the recommended order
 `AsyncTimeout -> AsyncCircuitBreaker -> AsyncBulkhead -> AsyncRetry -> terminal`.
-Here a nasty multi-phase incident hits both clients; watch the layers interlock.
+Here both clients go through an incident in three phases, and each layer handles a
+different phase.
 
 <div class="hw-demo" id="fs-demo"></div>
 
@@ -26,18 +27,18 @@ document.addEventListener('DOMContentLoaded', function () {
   ],
   macroStrip: true,
   stageLabel: (now) => now < 2 ? 'healthy'
-    : now < 5 ? 'phase 1 — latency spike'
-    : now < 8 ? 'phase 2 — brownout'
-    : now < 12 ? 'phase 3 — hard down' : 'recovered',
+    : now < 5 ? 'phase 1: latency spike'
+    : now < 8 ? 'phase 2: brownout'
+    : now < 12 ? 'phase 3: hard down' : 'recovered',
   buildStops: () => [
-    { when: (s) => s.now >= 2.4, spot: ['poolB', 'elapsedB'], title: 'Phase 1 — latency spike',
-      body: 'Bulkhead caps concurrency so the slow phase can’t exhaust the client; timeout bounds each operation at 2s.' },
-    { when: (s) => s.now >= 5.4, spot: ['ifB'], title: 'Phase 2 — brownout',
-      body: 'Retry (within budget) recovers many of the transient errors; the budget keeps it from amplifying.' },
-    { when: (s) => s.mw.cb && s.mw.cb.state === 'OPEN', spot: ['brkB'], title: 'Phase 3 — hard down',
-      body: 'Consecutive failures trip the breaker OUTSIDE the retry loop, so it short-circuits the whole retry sequence — one outcome per exhausted sequence, not per attempt.' },
-    { when: (s) => s.now >= 13.5, spot: ['ifA', 'latA', 'ifB', 'latB'], title: 'The whole stack vs nothing',
-      body: 'Plain client: cascading meltdown across every phase. httpware: each layer absorbs the phase it’s built for. That is why they compose.' },
+    { when: (s) => s.now >= 2.4, spot: ['poolB', 'elapsedB'], title: 'Phase 1: latency spike',
+      body: 'The bulkhead caps concurrency so the slow phase cannot exhaust the client, and the timeout ends each operation after 2s.' },
+    { when: (s) => s.now >= 5.4, spot: ['ifB'], title: 'Phase 2: brownout',
+      body: 'Retry recovers many of the transient errors, and the budget stops it from adding much load.' },
+    { when: (s) => s.mw.cb && s.mw.cb.state === 'OPEN', spot: ['brkB'], title: 'Phase 3: hard down',
+      body: 'Repeated failures open the breaker. It sits before the retry layer, so it rejects whole retry sequences and counts one outcome per sequence, not per attempt.' },
+    { when: (s) => s.now >= 13.5, spot: ['ifA', 'latA', 'ifB', 'latB'], title: 'Full stack vs none',
+      body: 'The plain client fails through every phase. In the httpware client, each layer handles the phase it is built for.' },
   ],
   });
 });

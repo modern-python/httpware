@@ -56,7 +56,9 @@ DEFAULT_IDEMPOTENT_METHODS = frozenset(
 _RETRYABLE_EXCEPTIONS = (StatusError, NetworkError, TimeoutError)
 
 _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
-_STREAMING_BODY_REFUSAL_NOTE = "httpware: not retrying — request body is a stream that cannot replay across attempts"
+_STREAMING_BODY_REFUSAL_NOTE = (
+    "httpware: not retrying because the request body is a stream that cannot replay across attempts"
+)
 _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE = (
     "httpware: Retry-After ({retry_after}s) exceeded max_delay ({max_delay}s); giving up"
 )

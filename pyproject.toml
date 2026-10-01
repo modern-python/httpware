@@ -1,6 +1,6 @@
 [project]
 name = "httpware"
-description = "Python HTTP client framework with sync & async clients and built-in resilience"
+description = "Typed, resilient HTTP clients for Python, sync and async"
 authors = [{ name = "Artur Shiriev", email = "me@shiriev.ru" }]
 requires-python = ">=3.11,<4"
 license = "MIT"

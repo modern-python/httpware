@@ -1,8 +1,8 @@
 # Link header pagination
 
-GitLab, GitHub, and other APIs paginate via the [RFC 5988](https://datatracker.ietf.org/doc/html/rfc5988) `Link` response header: each page response carries a `Link: <…>; rel="next"` header pointing to the next page. To walk all pages you need both the decoded body **and** the response headers from the same call — `client.get(..., response_model=...)` returns only the body.
+GitLab, GitHub and other APIs paginate with the [RFC 5988](https://datatracker.ietf.org/doc/html/rfc5988) `Link` header: each page carries a `Link: <…>; rel="next"` header that points to the next one. Walking the pages takes both the decoded body and the headers of each response, but `client.get(..., response_model=...)` returns only the body.
 
-`send_with_response` returns both atomically. It routes the decoded body through the configured `ResponseDecoder`, so decoder failures surface as `DecodeError` — caught by `except httpware.ClientError` like every other failure mode.
+`send_with_response` returns the response and the decoded body together. Decoding goes through the client's decoders as usual, so a bad body raises `DecodeError`, which `except httpware.ClientError` catches like any other failure.
 
 ## The pagination loop
 
@@ -28,11 +28,11 @@ async def main() -> None:
             params = None  # next link carries query
 ```
 
-`process` and `next_link` are caller-defined. Pick a Link-header parser that fits your project — there are several on PyPI, and the format is small enough to hand-roll.
+`process` and `next_link` are yours to write. There are several Link header parsers on PyPI, and the format is small enough to parse by hand.
 
 ## Shorthand: per-verb `*_with_response`
 
-When you do not need a pre-built `Request` object, the per-verb siblings collapse the `build_request` + `send_with_response` two-step into a single call:
+If you don't need to build the `Request` yourself, each verb has a `*_with_response` method that does both steps in one call:
 
 ```python
 # two-step (pre-built request, required when you need full Request control)
@@ -43,13 +43,13 @@ response, tags = await client.send_with_response(request, response_model=list[Ta
 response, tags = await client.get_with_response(url, params=params, response_model=list[Tag])
 ```
 
-The full set of siblings is `get_with_response`, `post_with_response`, `put_with_response`, `patch_with_response`, `delete_with_response`, and `request_with_response`. There is no `head_with_response` or `options_with_response` — use `request_with_response` for those methods.
+The methods are `get_with_response`, `post_with_response`, `put_with_response`, `patch_with_response`, `delete_with_response` and `request_with_response`. For HEAD and OPTIONS, use `request_with_response`.
 
 ## When to use which API
 
-- **Body only, high-level verb:** `client.get(..., response_model=...)`
-- **Body only, custom `Request`:** `client.send(request, response_model=...)`
-- **Body + response metadata, simple URL:** `client.get_with_response(url, response_model=...)`
-- **Body + response metadata, pre-built `Request`:** `client.send_with_response(request, response_model=...)`
+| You need | From a URL | From a `Request` you built |
+|---|---|---|
+| The body | `client.get(url, response_model=...)` | `client.send(request, response_model=...)` |
+| The body and the response | `client.get_with_response(url, response_model=...)` | `client.send_with_response(request, response_model=...)` |
 
-`send_with_response` and the `*_with_response` siblings are not for streaming responses — use [`stream()`](../index.md#streaming-responses) for those.
+None of these stream. For streaming responses, use [`stream()`](../index.md#streaming-responses).

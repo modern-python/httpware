@@ -1,6 +1,6 @@
 # Wiring `AsyncClient` into `modern-di`
 
-If you wire your app's dependencies with [`modern-di`](https://modern-di.modern-python.org/) and want connection-pool teardown and middleware composition to flow through the container's lifecycle, this is the bridge. Both libraries ship under the [`modern-python`](https://github.com/modern-python) org.
+This recipe registers httpware clients in a [`modern-di`](https://modern-di.modern-python.org/) container, so the container builds each client with its middleware and closes its connection pool on shutdown. Both libraries are part of the [`modern-python`](https://github.com/modern-python) org.
 
 ## The minimal wire-up
 
@@ -29,25 +29,23 @@ async def main() -> None:
         await container.close_async()  # runs the AsyncClient.aclose finalizer
 ```
 
-> **modern-di 2.x.** Resolution is sync — `container.resolve(...)`, no `await`.
-> The root container is created plainly and torn down with `await
-> container.close_async()` (the `async with` form is for
-> `build_child_container(...)`, not the root). On modern-di 1.x, resolution was
-> awaited; pin accordingly if you are still on 1.x.
+!!! note "modern-di 2.x"
+    Resolution is sync: `container.resolve(...)`, with no `await`. Create the root
+    container directly and close it with `await container.close_async()`; the
+    `async with` form is for `build_child_container(...)`. In modern-di 1.x,
+    resolution was awaited.
 
-Breaking that down:
+- `Scope.APP` ties the client to the application's lifetime: one client per process, reusing its connection pool for every call.
+- `cache_settings=providers.CacheSettings(...)` makes the provider a singleton. Without it, `Factory` builds a new `AsyncClient` on every resolve.
+- `finalizer=AsyncClient.aclose` is the unbound async method. `modern-di` sees that it is async and awaits it when the container closes.
 
-- **`Scope.APP`** ties the client to the application lifetime. One client per process; the connection pool is reused across all calls.
-- **`cache_settings=providers.CacheSettings(...)`** is what makes the provider a singleton. Without it, `Factory` returns a fresh `AsyncClient` on every resolve.
-- **`finalizer=AsyncClient.aclose`** is the unbound async method. `modern-di` detects the async finalizer and `await`s it on container teardown (here, on `close_async()`).
+Don't write `finalizer=lambda c: c.aclose()`. The lambda is sync, so `modern-di` calls it without awaiting and the returned coroutine is dropped, leaking the connection pool. Pass the unbound method, or an `async def`.
 
-A common first instinct here is `finalizer=lambda c: c.aclose()`. **That does not work** — the lambda itself is sync, so `modern-di` calls it synchronously and discards the returned coroutine unawaited. The underlying connection pool leaks. Pass the unbound async method directly, or wrap in `async def`.
+The [`modern-di` factories docs](https://modern-di.modern-python.org/providers/factories/) cover `CacheSettings` in full, including scopes, `clear_cache`, and sync and async finalizers.
 
-See the [`modern-di` factories docs](https://modern-di.modern-python.org/providers/factories/) for the broader `CacheSettings` story (scopes, `clear_cache`, sync vs async finalizers).
+## A second backend collides on type
 
-## Adding a second backend hits a type collision
-
-The obvious move when you talk to a second backend — register another `Factory(creator=AsyncClient, ...)` — fails at container construction:
+Registering a second `Factory(creator=AsyncClient, ...)` for another backend fails when the container is built:
 
 ```python
 class ServiceClients(Group):
@@ -70,11 +68,11 @@ class ServiceClients(Group):
 # <class 'httpware.client.AsyncClient'>. To resolve this issue: ...
 ```
 
-`modern-di` resolves dependencies by `bound_type`, which defaults to the creator's return type. Both providers default to `bound_type=AsyncClient` and collide in the providers registry.
+`modern-di` resolves dependencies by `bound_type`, which defaults to the creator's return type, so both providers register as `AsyncClient`.
 
-## Fix: one wrapper subclass per backend
+## Fix: one subclass per backend
 
-Give each provider a distinct `bound_type` by subclassing `AsyncClient`:
+Subclass `AsyncClient` once per backend so each provider has its own `bound_type`:
 
 ```python
 from modern_di import Container, Group, Scope, providers
@@ -115,15 +113,11 @@ async def main() -> None:
         await container.close_async()
 ```
 
-A couple of notes:
-
-- Subclasses are **typing-only**. Empty body, no overrides. They inherit `__init__`, `aclose`, and every HTTP method unchanged.
-- Each `Factory` now has a distinct `bound_type`, so `container.resolve(UserApi)` and `container.resolve(BillingApi)` route to the right provider.
-- `modern-di`'s error suggestions are subclass-aware. If a caller asks for `container.resolve(AsyncClient)` after only the subclasses are registered, the error message points them at the right subclass.
+The subclasses are empty and exist only as types; they inherit everything from `AsyncClient`. `container.resolve(UserApi)` and `container.resolve(BillingApi)` now reach the right provider. If code asks for `container.resolve(AsyncClient)` when only the subclasses are registered, `modern-di`'s error message suggests the subclasses.
 
 ## Middleware in `kwargs=`
 
-`AsyncClient`'s middleware chain is composed once at construction and frozen for the client's lifetime. With a singleton-scoped `Factory`, "once at construction" means "once per container build." Drop the middleware list into `kwargs=`:
+A client's middleware is fixed when it is built, and a singleton `Factory` builds it once per container. Pass the middleware list in `kwargs=`:
 
 ```python
 from httpware import AsyncClient, AsyncBulkhead, AsyncRetry
@@ -141,11 +135,10 @@ class ServiceClients(Group):
     )
 ```
 
-Each cached singleton owns its own `AsyncBulkhead` and `AsyncRetry` state — what you want when different backends have different reliability profiles.
+Each client gets its own `AsyncBulkhead` and `AsyncRetry`, so one backend's failures don't use up another's slots or retry budget.
 
 ## See also
 
-- **[Quick-Start](../index.md)** — the base `AsyncClient` API.
-- **[Middleware guide](../middleware.md)** — what `AsyncBulkhead` and `AsyncRetry` are doing in `kwargs[middleware]`.
-- **[Resilience reference](../resilience.md)** — every parameter on `AsyncRetry`, `RetryBudget`, `AsyncBulkhead`.
-- **[`modern-di` factories](https://modern-di.modern-python.org/providers/factories/)** — `CacheSettings`, scopes, the broader provider story.
+- [Quickstart](../index.md): the `AsyncClient` API.
+- [Resilience](../resilience.md): every resilience middleware and its parameters.
+- [`modern-di` factories](https://modern-di.modern-python.org/providers/factories/): `CacheSettings`, scopes and other provider options.

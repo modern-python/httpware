@@ -1,6 +1,6 @@
 # Contributing to httpware
 
-Thank you for your interest in contributing. `httpware` is an open-source resilience-first async HTTP client framework for Python, maintained under the [`modern-python`](https://github.com/modern-python) org.
+Thank you for your interest in contributing. httpware is maintained under the [`modern-python`](https://github.com/modern-python) org.
 
 ## Quick start
 
@@ -14,24 +14,23 @@ just test           # pytest with coverage
 
 ## Development workflow
 
-1. **Open an issue first** for non-trivial changes — design discussion catches issues earlier than code review.
-2. **Branch from `main`**, use a descriptive name (`feat/retry-budget-jitter`, `fix/transport-cancel-leak`).
-3. **Run `just lint` and `just test`** locally before pushing. CI will reject changes that fail either.
-4. **Add tests** for any code change. Property-based tests (via Hypothesis) are required for concurrency-sensitive code (retry budget, bulkhead, retry interleaving).
-5. **Open a pull request** against `main`. PR titles use conventional-commits style (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
+1. For a non-trivial change, open an issue first so the design can be discussed before code review.
+2. Branch from `main` with a descriptive name, such as `feat/retry-budget-jitter` or `fix/transport-cancel-leak`.
+3. Run `just lint` and `just test` before pushing. CI rejects changes that fail either.
+4. Add tests for every code change. Concurrency-sensitive code (retry budget, bulkhead, retry interleaving) also needs property-based tests with Hypothesis.
+5. Open a pull request against `main`. PR titles follow conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`).
 
 ## Code style
 
 - `ruff format` enforces formatting; do not hand-format.
 - Type-check with `ty` (Astral). Use `# ty: ignore[<rule>]` for suppressions, not `# type: ignore`.
-- Do NOT use `from __future__ import annotations`. Python 3.11+ is the floor.
+- Don't use `from __future__ import annotations`; the minimum Python version is 3.11.
 - Module, class, and public-method docstrings are required (PEP 257).
 
 ## Architecture invariants
 
-These are project invariants, and **enforcement varies — do not assume CI will
-catch a violation.** `AGENTS.md` lists which ones are review-only. Do not break
-them in pull requests:
+Pull requests must keep these rules. CI does not check all of them; `AGENTS.md`
+lists the ones only enforced in review.
 
 - No `httpx2._*` (private API) usage anywhere in the library.
 - No `from __future__ import annotations`.
@@ -41,7 +40,7 @@ them in pull requests:
 
 ## Code of Conduct
 
-By participating in this project, you agree to abide by its Code of Conduct. Be excellent to one another.
+By participating in this project, you agree to follow the [`modern-python` Code of Conduct](https://github.com/modern-python/.github/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 

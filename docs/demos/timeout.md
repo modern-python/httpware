@@ -1,8 +1,8 @@
 # Timeout (total deadline)
 
-`httpx2`'s per-call timeouts bound a single request — but a retry loop with backoff
-can still run for many seconds in total. `AsyncTimeout` bounds the **whole** operation,
-including every retry and every backoff sleep, so one call can't blow your latency SLA.
+`httpx2`'s per-request timeouts bound a single request, but a retry loop with backoff
+can still run for many seconds in total. `AsyncTimeout` bounds the whole operation,
+every retry and backoff sleep included, so one call can't run past your latency target.
 
 <div class="hw-demo" id="to-demo"></div>
 
@@ -20,14 +20,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 timeout: { timeout: 2.0 } } },
   ],
   buildStops: () => [
-    { when: (s) => s.now >= 1.2, spot: ['ifB', 'elapsedB'], title: 'Retry helps... but costs time',
-      body: 'httpware retries the brownout. Each retry + backoff adds latency. Watch the elapsed clock on in-flight requests.' },
-    { when: (s) => s.now >= 3.0, spot: ['latA', 'elapsedB'], title: 'Unbounded retry = unbounded latency',
-      body: 'Without a total deadline, a request can churn through every retry and backoff — total wall-clock climbs past any SLA (see the plain lane p99).' },
+    { when: (s) => s.now >= 1.2, spot: ['ifB', 'elapsedB'], title: 'Retry helps but costs time',
+      body: 'httpware retries during the brownout, and each retry and backoff adds latency. Watch the elapsed time on in-flight requests.' },
+    { when: (s) => s.now >= 3.0, spot: ['latA', 'elapsedB'], title: 'Unbounded retry, unbounded latency',
+      body: 'Without a total deadline, a request can go through every retry and backoff, and its total time climbs past any SLA (see the plain lane p99).' },
     { when: (s) => s.mw.timedOut > 0, spot: ['elapsedB'], title: 'The deadline fires',
-      body: 'AsyncTimeout caps the WHOLE operation at 2s. A request that would keep retrying past the deadline is cut off with a bounded TimeoutError — predictable latency, always.' },
+      body: 'AsyncTimeout caps the whole operation at 2s. A request that would keep retrying past that is stopped with a TimeoutError.' },
     { when: (s) => s.now >= 10.0, spot: ['latA', 'elapsedB'], title: 'Bounded tail latency',
-      body: 'Retry rescues what it can within budget; the timeout guarantees the tail. Together they bound both failure and latency.' },
+      body: 'Retry recovers what it can within its budget, and the timeout caps the tail. Together they limit both failures and latency.' },
   ],
   });
 });

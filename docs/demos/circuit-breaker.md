@@ -1,9 +1,8 @@
-# Circuit Breaker
+# Circuit breaker
 
-When a backend goes down, a client without a breaker keeps sending every request
-into a slow timeout, piling up in-flight work until it exhausts itself. The breaker
-trips after repeated failures and **fast-fails** instead — keeping the client healthy
-and probing for recovery.
+When a backend goes down, a client without a breaker keeps sending requests that hang
+until they time out, and in-flight work piles up. A circuit breaker opens after repeated
+failures and fails fast instead, then lets a probe through to check for recovery.
 
 <div class="hw-demo" id="cb-demo"></div>
 
@@ -24,15 +23,15 @@ document.addEventListener('DOMContentLoaded', function () {
   ],
   buildStops: () => [
     { when: (s) => s.now >= 1.2, spot: ['ifA', 'ifB'], title: 'Two clients, one backend',
-      body: 'Both are healthy — in-flight near zero on each. The backend is about to die. Keep your eye on these two in-flight counters.' },
-    { when: (s) => s.now >= 2.35, spot: ['ifA'], title: 'Backend just went DOWN',
-      body: 'Every request now hangs ~3s then fails. This plain client keeps sending — watch this number start to climb.' },
-    { when: (s) => s.mw.state === 'OPEN', spot: ['brkB', 'ifB'], title: 'The breaker tripped OPEN',
-      body: '5 failures in a row -> circuit OPEN. It now fast-fails instantly; its in-flight stays flat while the plain client keeps piling up.' },
-    { when: (s) => s.now >= 5.6, spot: ['ifA', 'latA', 'ifB', 'latB'], title: 'The gap — this is the point',
-      body: 'Plain client: in-flight high AND p99 blown to 12s — drowning. Protected client: in-flight flat, p99 still 40ms. Same outage, two outcomes.' },
-    { when: (s) => s.mw.recovered, spot: ['brkB'], title: 'Recovery via one probe',
-      body: 'Backend is back. The breaker admits exactly ONE probe, sees success, and closes — no thundering herd.' },
+      body: 'Both are healthy, with almost nothing in flight. The backend is about to fail; watch these two in-flight counters.' },
+    { when: (s) => s.now >= 2.35, spot: ['ifA'], title: 'The backend is down',
+      body: 'Every request now hangs for about 3s and then fails. The plain client keeps sending, so its in-flight count starts to climb.' },
+    { when: (s) => s.mw.state === 'OPEN', spot: ['brkB', 'ifB'], title: 'The breaker opens',
+      body: 'Five failures in a row open the circuit. Requests now fail immediately, so in-flight stays flat while the plain client keeps piling up.' },
+    { when: (s) => s.now >= 5.6, spot: ['ifA', 'latA', 'ifB', 'latB'], title: 'Plain vs protected',
+      body: 'The plain client has a pile of requests in flight and a p99 of 12s. The protected client has a flat in-flight count and a p99 of 40ms.' },
+    { when: (s) => s.mw.recovered, spot: ['brkB'], title: 'Recovery through one probe',
+      body: 'The backend is back. The breaker lets one probe through, sees it succeed, and closes, instead of releasing all the waiting traffic at once.' },
   ],
   });
 });

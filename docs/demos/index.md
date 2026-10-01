@@ -1,15 +1,15 @@
 # Resilience demos
 
-Interactive, self-contained walk-throughs of each resilience pattern under load.
-Each runs a plain client and an httpware client through the **same** outage, side by
-side, and pauses to point out exactly what changes.
+Interactive walk-throughs of each resilience pattern under load. Each one runs a
+plain client and an httpware client through the same outage side by side, and pauses
+to point out what changes.
 
-- [Circuit Breaker](circuit-breaker.md) — stop hammering a dead backend
-- [Retry + Budget](retry.md) — rescue blips without causing a storm
-- [Bulkhead](bulkhead.md) — contain one slow dependency
-- [Timeout](timeout.md) — bound total latency across retries
-- [Full stack](full-stack.md) — how they compose
+- [Circuit breaker](circuit-breaker.md): stop sending requests to a dead backend.
+- [Retry and retry budget](retry.md): recover from blips without causing a retry storm.
+- [Bulkhead](bulkhead.md): keep one slow dependency from taking down the client.
+- [Timeout](timeout.md): bound total latency across retries.
+- [Full stack](full-stack.md): how the patterns combine.
 
 !!! note
-    These are a faithful **model** of httpware's behavior for teaching, not httpware
+    The demos simulate httpware's behavior for teaching; httpware itself is not
     running in your browser. See [Resilience](../resilience.md) for the real API.
