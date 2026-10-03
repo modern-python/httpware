@@ -14,9 +14,9 @@ def _looping(request: httpx2.Request) -> httpx2.Response:
     return httpx2.Response(HTTPStatus.FOUND, headers={"location": request.url.path + "x"})
 
 
-def _authorization_seen(seen: dict[str, str | None], location: str) -> httpx2.MockTransport:
+def _authorization_seen(seen: dict[tuple[str, str], str | None], location: str) -> httpx2.MockTransport:
     def handler(request: httpx2.Request) -> httpx2.Response:
-        seen[request.url.host] = request.headers.get("authorization")
+        seen[request.url.host, request.url.path] = request.headers.get("authorization")
         if request.url.path == "/start":
             return httpx2.Response(HTTPStatus.FOUND, headers={"location": location})
         return httpx2.Response(HTTPStatus.OK)
@@ -28,18 +28,6 @@ def _redirecting(request: httpx2.Request) -> httpx2.Response:
     if request.url.path == "/start":
         return httpx2.Response(HTTPStatus.FOUND, headers={"location": "/final"})
     return httpx2.Response(HTTPStatus.OK, content=b"done")
-
-
-async def test_async_follows_redirects_under_a_body_cap() -> None:
-    async with AsyncClient(
-        transport=httpx2.MockTransport(_redirecting),
-        follow_redirects=True,
-        max_response_body_bytes=1024,
-    ) as client:
-        response = await client.get("https://example.test/start")
-    assert response.status_code == HTTPStatus.OK
-    assert response.content == b"done"
-    assert str(response.url) == "https://example.test/final"
 
 
 def _huge_intermediate_body(pulled: list[bytes]) -> httpx2.MockTransport:
@@ -67,6 +55,18 @@ def _redirect_with_body(body: Callable[[], AsyncIterator[bytes] | Iterator[bytes
         return httpx2.Response(HTTPStatus.OK, content=b"done")
 
     return httpx2.MockTransport(handler)
+
+
+async def test_async_follows_redirects_under_a_body_cap() -> None:
+    async with AsyncClient(
+        transport=httpx2.MockTransport(_redirecting),
+        follow_redirects=True,
+        max_response_body_bytes=1024,
+    ) as client:
+        response = await client.get("https://example.test/start")
+    assert response.status_code == HTTPStatus.OK
+    assert response.content == b"done"
+    assert str(response.url) == "https://example.test/final"
 
 
 async def test_async_never_reads_an_intermediate_redirect_body() -> None:
@@ -139,15 +139,21 @@ async def test_async_too_many_redirects_is_the_same_error_with_or_without_a_cap(
 @pytest.mark.parametrize(
     ("location", "expected"),
     [
-        ("/final", {"example.test": "Basic dTpw"}),
-        ("https://other.test/final", {"example.test": "Basic dTpw", "other.test": None}),
+        (
+            "/final",
+            {("example.test", "/start"): "Basic dTpw", ("example.test", "/final"): "Basic dTpw"},
+        ),
+        (
+            "https://other.test/final",
+            {("example.test", "/start"): "Basic dTpw", ("other.test", "/final"): None},
+        ),
     ],
 )
 async def test_async_client_auth_does_not_follow_a_redirect_to_another_origin(
     location: str,
-    expected: dict[str, str | None],
+    expected: dict[tuple[str, str], str | None],
 ) -> None:
-    seen: dict[str, str | None] = {}
+    seen: dict[tuple[str, str], str | None] = {}
     async with AsyncClient(
         transport=_authorization_seen(seen, location),
         auth=httpx2.BasicAuth("u", "p"),
@@ -252,15 +258,21 @@ def test_sync_too_many_redirects_is_the_same_error_with_or_without_a_cap(cap: in
 @pytest.mark.parametrize(
     ("location", "expected"),
     [
-        ("/final", {"example.test": "Basic dTpw"}),
-        ("https://other.test/final", {"example.test": "Basic dTpw", "other.test": None}),
+        (
+            "/final",
+            {("example.test", "/start"): "Basic dTpw", ("example.test", "/final"): "Basic dTpw"},
+        ),
+        (
+            "https://other.test/final",
+            {("example.test", "/start"): "Basic dTpw", ("other.test", "/final"): None},
+        ),
     ],
 )
 def test_sync_client_auth_does_not_follow_a_redirect_to_another_origin(
     location: str,
-    expected: dict[str, str | None],
+    expected: dict[tuple[str, str], str | None],
 ) -> None:
-    seen: dict[str, str | None] = {}
+    seen: dict[tuple[str, str], str | None] = {}
     with Client(
         transport=_authorization_seen(seen, location),
         auth=httpx2.BasicAuth("u", "p"),
