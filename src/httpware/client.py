@@ -143,25 +143,34 @@ def _request_auth(client: httpx2.Client | httpx2.AsyncClient, request: httpx2.Re
     return _NO_AUTH
 
 
+async def _read_capped_and_close_async(streaming: httpx2.Response, cap: int) -> httpx2.Response:
+    """Buffer `streaming` under `cap` via `_read_capped_async`, closing it either way."""
+    try:
+        return await _read_capped_async(streaming, cap, streaming.request)
+    finally:
+        await streaming.aclose()
+
+
 async def _send_redirect_hops_async(
     client: httpx2.AsyncClient,
     request: httpx2.Request,
-    history: list[httpx2.Response],
+    prior_history: list[httpx2.Response],
 ) -> httpx2.Response:
     """Send `request` streaming, following redirects hop by hop without reading intermediate bodies.
 
-    The final response's history is `history` plus this call's redirect hops, as in httpx2.
+    Histories and the `max_redirects` count include `prior_history`, as in httpx2.
     """
-    hops = list(history)
-    response = await client.send(request, stream=True, follow_redirects=False, auth=_NO_AUTH)
-    while client.follow_redirects and response.next_request is not None:
+    hops = list(prior_history)
+    while True:
+        if len(hops) > client.max_redirects:
+            raise httpx2.TooManyRedirects(_TOO_MANY_REDIRECTS_MESSAGE, request=request)
+        response = await client.send(request, stream=True, follow_redirects=False, auth=_NO_AUTH)
+        response.history = list(hops)
+        if not client.follow_redirects or response.next_request is None:
+            return response
         await response.aclose()
         hops.append(response)
-        if len(hops) > client.max_redirects:
-            raise httpx2.TooManyRedirects(_TOO_MANY_REDIRECTS_MESSAGE, request=response.next_request)
-        response = await client.send(response.next_request, stream=True, follow_redirects=False, auth=_NO_AUTH)
-    response.history = hops
-    return response
+        request = response.next_request
 
 
 async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request, cap: int) -> httpx2.Response:
@@ -177,11 +186,7 @@ async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request
         while True:
             response = await _send_redirect_hops_async(client, request, history)
             if auth.requires_response_body:
-                streaming = response
-                try:
-                    response = await _read_capped_async(streaming, cap, streaming.request)
-                finally:
-                    await streaming.aclose()
+                response = await _read_capped_and_close_async(response, cap)
             try:
                 next_request = await flow.asend(response)
             except StopAsyncIteration:
@@ -190,6 +195,7 @@ async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request
                 await response.aclose()
                 raise
             await response.aclose()
+            response.history = list(history)
             history.append(response)
             request = next_request
     finally:
@@ -212,22 +218,31 @@ async def _stream_capped_async(
         await response.aclose()
 
 
+def _read_capped_and_close(streaming: httpx2.Response, cap: int) -> httpx2.Response:
+    """Sync mirror of `_read_capped_and_close_async`."""
+    try:
+        return _read_capped(streaming, cap, streaming.request)
+    finally:
+        streaming.close()
+
+
 def _send_redirect_hops(
     client: httpx2.Client,
     request: httpx2.Request,
-    history: list[httpx2.Response],
+    prior_history: list[httpx2.Response],
 ) -> httpx2.Response:
     """Sync mirror of `_send_redirect_hops_async`."""
-    hops = list(history)
-    response = client.send(request, stream=True, follow_redirects=False, auth=_NO_AUTH)
-    while client.follow_redirects and response.next_request is not None:
+    hops = list(prior_history)
+    while True:
+        if len(hops) > client.max_redirects:
+            raise httpx2.TooManyRedirects(_TOO_MANY_REDIRECTS_MESSAGE, request=request)
+        response = client.send(request, stream=True, follow_redirects=False, auth=_NO_AUTH)
+        response.history = list(hops)
+        if not client.follow_redirects or response.next_request is None:
+            return response
         response.close()
         hops.append(response)
-        if len(hops) > client.max_redirects:
-            raise httpx2.TooManyRedirects(_TOO_MANY_REDIRECTS_MESSAGE, request=response.next_request)
-        response = client.send(response.next_request, stream=True, follow_redirects=False, auth=_NO_AUTH)
-    response.history = hops
-    return response
+        request = response.next_request
 
 
 def _send_capped(client: httpx2.Client, request: httpx2.Request, cap: int) -> httpx2.Response:
@@ -240,11 +255,7 @@ def _send_capped(client: httpx2.Client, request: httpx2.Request, cap: int) -> ht
         while True:
             response = _send_redirect_hops(client, request, history)
             if auth.requires_response_body:
-                streaming = response
-                try:
-                    response = _read_capped(streaming, cap, streaming.request)
-                finally:
-                    streaming.close()
+                response = _read_capped_and_close(response, cap)
             try:
                 next_request = flow.send(response)
             except StopIteration:
@@ -253,6 +264,7 @@ def _send_capped(client: httpx2.Client, request: httpx2.Request, cap: int) -> ht
                 response.close()
                 raise
             response.close()
+            response.history = list(history)
             history.append(response)
             request = next_request
     finally:
@@ -369,10 +381,7 @@ class AsyncClient:
                     response = await self._httpx2_client.send(request)
                 else:
                     streaming = await _send_capped_async(self._httpx2_client, request, cap)
-                    try:
-                        response = await _read_capped_async(streaming, cap, streaming.request)
-                    finally:
-                        await streaming.aclose()
+                    response = await _read_capped_and_close_async(streaming, cap)
         except RuntimeError as exc:
             if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc
@@ -1310,10 +1319,7 @@ class Client:
                     response = self._httpx2_client.send(request)
                 else:
                     streaming = _send_capped(self._httpx2_client, request, cap)
-                    try:
-                        response = _read_capped(streaming, cap, streaming.request)
-                    finally:
-                        streaming.close()
+                    response = _read_capped_and_close(streaming, cap)
         except RuntimeError as exc:
             if self._httpx2_client.is_closed:
                 raise TransportError(str(exc)) from exc

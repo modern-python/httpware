@@ -1,5 +1,6 @@
 """max_response_body_bytes with a multi-step auth flow: intermediate auth responses stay under the cap."""
 
+import typing
 from collections.abc import AsyncIterator, Callable, Generator, Iterator
 from http import HTTPStatus
 
@@ -162,6 +163,10 @@ def _digest_behind_redirect(request: httpx2.Request) -> httpx2.Response:
     return httpx2.Response(HTTPStatus.UNAUTHORIZED, headers={"www-authenticate": _CHALLENGE})
 
 
+def _history_shape(response: httpx2.Response) -> list[tuple[int, str, list[typing.Any]]]:
+    return [(hop.status_code, hop.url.path, _history_shape(hop)) for hop in response.history]
+
+
 def _malformed_challenge(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
     return httpx2.Response(HTTPStatus.UNAUTHORIZED, headers={"www-authenticate": 'Digest realm="api"'})
 
@@ -176,9 +181,9 @@ async def test_async_digest_after_a_redirect_is_the_same_with_or_without_a_cap(c
     ) as client:
         response = await client.get("https://example.test/start")
     assert response.content == b"done"
-    assert [(hop.status_code, hop.url.path) for hop in response.history] == [
-        (HTTPStatus.UNAUTHORIZED, "/final"),
-        (HTTPStatus.FOUND, "/start"),
+    assert _history_shape(response) == [
+        (HTTPStatus.UNAUTHORIZED, "/final", []),
+        (HTTPStatus.FOUND, "/start", [(HTTPStatus.UNAUTHORIZED, "/final", [])]),
     ]
 
 
@@ -192,9 +197,9 @@ def test_sync_digest_after_a_redirect_is_the_same_with_or_without_a_cap(cap: int
     ) as client:
         response = client.get("https://example.test/start")
     assert response.content == b"done"
-    assert [(hop.status_code, hop.url.path) for hop in response.history] == [
-        (HTTPStatus.UNAUTHORIZED, "/final"),
-        (HTTPStatus.FOUND, "/start"),
+    assert _history_shape(response) == [
+        (HTTPStatus.UNAUTHORIZED, "/final", []),
+        (HTTPStatus.FOUND, "/start", [(HTTPStatus.UNAUTHORIZED, "/final", [])]),
     ]
 
 
@@ -222,3 +227,83 @@ def test_sync_auth_flow_error_is_the_same_with_or_without_a_cap(cap: int | None)
     ):
         client.get("https://example.test/")
     assert type(caught.value) is TransportError
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+async def test_async_auth_steps_count_toward_max_redirects_with_or_without_a_cap(cap: int | None) -> None:
+    async with AsyncClient(
+        transport=httpx2.MockTransport(_digest_behind_redirect),
+        auth=httpx2.DigestAuth("u", "p"),
+        max_redirects=0,
+        max_response_body_bytes=cap,
+    ) as client:
+        with pytest.raises(TransportError, match="Exceeded maximum allowed redirects"):
+            await client.get("https://example.test/final")
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+def test_sync_auth_steps_count_toward_max_redirects_with_or_without_a_cap(cap: int | None) -> None:
+    with (
+        Client(
+            transport=httpx2.MockTransport(_digest_behind_redirect),
+            auth=httpx2.DigestAuth("u", "p"),
+            max_redirects=0,
+            max_response_body_bytes=cap,
+        ) as client,
+        pytest.raises(TransportError, match="Exceeded maximum allowed redirects"),
+    ):
+        client.get("https://example.test/final")
+
+
+async def test_async_stream_never_reads_a_digest_challenge_body_under_a_cap() -> None:
+    pulled: list[bytes] = []
+    async with (
+        AsyncClient(
+            transport=_huge_challenge_body(pulled),
+            auth=httpx2.DigestAuth("u", "p"),
+            max_response_body_bytes=1024,
+        ) as client,
+        client.stream("GET", "https://example.test/") as response,
+    ):
+        body = await response.aread()
+    assert body == b"done"
+    assert pulled == []
+
+
+def test_sync_stream_never_reads_a_digest_challenge_body_under_a_cap() -> None:
+    pulled: list[bytes] = []
+    with (
+        Client(
+            transport=_huge_challenge_body_sync(pulled),
+            auth=httpx2.DigestAuth("u", "p"),
+            max_response_body_bytes=1024,
+        ) as client,
+        client.stream("GET", "https://example.test/") as response,
+    ):
+        body = response.read()
+    assert body == b"done"
+    assert pulled == []
+
+
+async def test_async_stream_rejects_an_auth_read_body_over_the_cap() -> None:
+    async with AsyncClient(
+        transport=_token_endpoint(token_padding=2048),
+        auth=_TokenRefreshAuth(),
+        max_response_body_bytes=1024,
+    ) as client:
+        with pytest.raises(ResponseTooLargeError):
+            async with client.stream("GET", "https://example.test/"):
+                pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
+
+
+def test_sync_stream_rejects_an_auth_read_body_over_the_cap() -> None:
+    with (
+        Client(
+            transport=_token_endpoint(token_padding=2048),
+            auth=_TokenRefreshAuth(),
+            max_response_body_bytes=1024,
+        ) as client,
+        pytest.raises(ResponseTooLargeError),
+        client.stream("GET", "https://example.test/"),
+    ):
+        pytest.fail("unreachable")  # pragma: no cover — stream() raises on enter
