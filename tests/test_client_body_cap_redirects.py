@@ -69,16 +69,20 @@ async def test_async_follows_redirects_under_a_body_cap() -> None:
     assert str(response.url) == "https://example.test/final"
 
 
-async def test_async_never_reads_an_intermediate_redirect_body() -> None:
+@pytest.mark.parametrize(("cap", "intermediate_read"), [(None, True), (1024, False)])
+async def test_async_reads_an_intermediate_redirect_body_only_without_a_cap(
+    cap: int | None,
+    intermediate_read: bool,
+) -> None:
     pulled: list[bytes] = []
     async with AsyncClient(
         transport=_huge_intermediate_body(pulled),
         follow_redirects=True,
-        max_response_body_bytes=1024,
+        max_response_body_bytes=cap,
     ) as client:
         response = await client.get("https://example.test/start")
     assert response.content == b"done"
-    assert pulled == []
+    assert bool(pulled) is intermediate_read
 
 
 async def test_async_stream_never_reads_an_intermediate_redirect_body() -> None:
@@ -172,16 +176,20 @@ async def test_async_caller_provided_client_follows_redirects_under_a_body_cap()
     assert response.content == b"done"
 
 
-def test_sync_never_reads_an_intermediate_redirect_body() -> None:
+@pytest.mark.parametrize(("cap", "intermediate_read"), [(None, True), (1024, False)])
+def test_sync_reads_an_intermediate_redirect_body_only_without_a_cap(
+    cap: int | None,
+    intermediate_read: bool,
+) -> None:
     pulled: list[bytes] = []
     with Client(
         transport=_huge_intermediate_body_sync(pulled),
         follow_redirects=True,
-        max_response_body_bytes=1024,
+        max_response_body_bytes=cap,
     ) as client:
         response = client.get("https://example.test/start")
     assert response.content == b"done"
-    assert pulled == []
+    assert bool(pulled) is intermediate_read
 
 
 def test_sync_stream_never_reads_an_intermediate_redirect_body() -> None:
