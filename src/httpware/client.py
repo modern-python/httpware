@@ -39,10 +39,7 @@ _UNSUPPORTED_OPTION_HINTS = {
     "cert": "cert=... is deprecated by httpx2; pass verify=<ssl.SSLContext> configured with .load_cert_chain().",
     "event_hooks": "event_hooks=... is not supported; use middleware=... instead.",
 }
-_FOLLOW_REDIRECTS_WITH_BODY_CAP_MESSAGE = (
-    "follow_redirects=True cannot be combined with max_response_body_bytes: httpx2 reads every "
-    "intermediate redirect body without the cap."
-)
+_TOO_MANY_REDIRECTS_MESSAGE = "Exceeded maximum allowed redirects."
 _BASE_URL_QUERY_MESSAGE = (
     "base_url must not contain a query string: httpx2 appends request paths after it, "
     "producing malformed URLs. Pass the query as params=... instead."
@@ -118,12 +115,10 @@ def _select_httpx2_options(
     supported: frozenset[str],
     *,
     httpx2_client: httpx2.Client | httpx2.AsyncClient | None,
-    max_response_body_bytes: int | None,
 ) -> dict[str, typing.Any]:
     """Return the options to forward to the owned httpx2 client, dropping unset ones.
 
-    Raise TypeError for unsupported options or options combined with `httpx2_client`, and
-    ValueError when the client would follow redirects under a body cap.
+    Raise TypeError for unsupported options or options combined with `httpx2_client`.
     """
     unsupported = sorted(options.keys() - supported)
     if unsupported:
@@ -135,10 +130,65 @@ def _select_httpx2_options(
     forwarded = {name: value for name, value in options.items() if not _is_unset(value)}
     if httpx2_client is not None and forwarded:
         raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE.format(names=sorted(forwarded)))
-    follows = httpx2_client.follow_redirects if httpx2_client is not None else forwarded.get("follow_redirects")
-    if follows and max_response_body_bytes is not None:
-        raise ValueError(_FOLLOW_REDIRECTS_WITH_BODY_CAP_MESSAGE)
     return forwarded
+
+
+async def _send_following_redirects_async(client: httpx2.AsyncClient, request: httpx2.Request) -> httpx2.Response:
+    """Send `request` streaming, following redirects hop by hop without reading intermediate bodies."""
+    history: list[httpx2.Response] = []
+    response = await client.send(request, stream=True, follow_redirects=False)
+    while client.follow_redirects and response.next_request is not None:
+        await response.aclose()
+        history.append(response)
+        if len(history) > client.max_redirects:
+            raise httpx2.TooManyRedirects(_TOO_MANY_REDIRECTS_MESSAGE, request=response.next_request)
+        response = await client.send(response.next_request, stream=True, follow_redirects=False, auth=None)
+    response.history = history
+    return response
+
+
+@contextlib.asynccontextmanager
+async def _stream_following_redirects_async(
+    client: httpx2.AsyncClient,
+    method: str,
+    url: httpx2.URL | str,
+    kwargs: dict[str, typing.Any],
+) -> AsyncIterator[httpx2.Response]:
+    """Async mirror of `httpx2.AsyncClient.stream` that follows redirects via `_send_following_redirects_async`."""
+    response = await _send_following_redirects_async(client, client.build_request(method, url, **kwargs))
+    try:
+        yield response
+    finally:
+        await response.aclose()
+
+
+def _send_following_redirects(client: httpx2.Client, request: httpx2.Request) -> httpx2.Response:
+    """Sync mirror of `_send_following_redirects_async`."""
+    history: list[httpx2.Response] = []
+    response = client.send(request, stream=True, follow_redirects=False)
+    while client.follow_redirects and response.next_request is not None:
+        response.close()
+        history.append(response)
+        if len(history) > client.max_redirects:
+            raise httpx2.TooManyRedirects(_TOO_MANY_REDIRECTS_MESSAGE, request=response.next_request)
+        response = client.send(response.next_request, stream=True, follow_redirects=False, auth=None)
+    response.history = history
+    return response
+
+
+@contextlib.contextmanager
+def _stream_following_redirects(
+    client: httpx2.Client,
+    method: str,
+    url: httpx2.URL | str,
+    kwargs: dict[str, typing.Any],
+) -> Iterator[httpx2.Response]:
+    """Sync mirror of `_stream_following_redirects_async`."""
+    response = _send_following_redirects(client, client.build_request(method, url, **kwargs))
+    try:
+        yield response
+    finally:
+        response.close()
 
 
 def _assemble_request_kwargs(  # noqa: PLR0913 — 9 per-request kwargs from httpx2 call signatures
@@ -211,7 +261,6 @@ class AsyncClient:
             httpx2_options,
             _AsyncClientOptions.__optional_keys__,
             httpx2_client=httpx2_client,
-            max_response_body_bytes=max_response_body_bytes,
         )
         if httpx2_client is not None:
             _reject_base_url_query(httpx2_client.base_url)
@@ -235,9 +284,9 @@ class AsyncClient:
                 if cap is None:
                     response = await self._httpx2_client.send(request)
                 else:
-                    streaming = await self._httpx2_client.send(request, stream=True)
+                    streaming = await _send_following_redirects_async(self._httpx2_client, request)
                     try:
-                        response = await _read_capped_async(streaming, cap, request)
+                        response = await _read_capped_async(streaming, cap, streaming.request)
                     finally:
                         await streaming.aclose()
         except RuntimeError as exc:
@@ -1087,9 +1136,14 @@ class AsyncClient:
             files=files,
         )
 
-        async with _httpx2_exception_mapper(), self._httpx2_client.stream(method, merged_url, **kwargs) as response:
+        cap = self._max_response_body_bytes
+        opened = (
+            self._httpx2_client.stream(method, merged_url, **kwargs)
+            if cap is None
+            else _stream_following_redirects_async(self._httpx2_client, method, merged_url, kwargs)
+        )
+        async with _httpx2_exception_mapper(), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                cap = self._max_response_body_bytes
                 if cap is None:
                     await response.aread()  # pre-read body so exc.response.content works
                     _raise_on_status_error(response)
@@ -1148,7 +1202,6 @@ class Client:
             httpx2_options,
             _ClientOptions.__optional_keys__,
             httpx2_client=httpx2_client,
-            max_response_body_bytes=max_response_body_bytes,
         )
         if httpx2_client is not None:
             _reject_base_url_query(httpx2_client.base_url)
@@ -1172,9 +1225,9 @@ class Client:
                 if cap is None:
                     response = self._httpx2_client.send(request)
                 else:
-                    streaming = self._httpx2_client.send(request, stream=True)
+                    streaming = _send_following_redirects(self._httpx2_client, request)
                     try:
-                        response = _read_capped(streaming, cap, request)
+                        response = _read_capped(streaming, cap, streaming.request)
                     finally:
                         streaming.close()
         except RuntimeError as exc:
@@ -2045,9 +2098,14 @@ class Client:
             files=files,
         )
 
-        with _httpx2_exception_mapper_sync(), self._httpx2_client.stream(method, merged_url, **kwargs) as response:
+        cap = self._max_response_body_bytes
+        opened = (
+            self._httpx2_client.stream(method, merged_url, **kwargs)
+            if cap is None
+            else _stream_following_redirects(self._httpx2_client, method, merged_url, kwargs)
+        )
+        with _httpx2_exception_mapper_sync(), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                cap = self._max_response_body_bytes
                 if cap is None:
                     response.read()  # pre-read body so exc.response.content works
                     _raise_on_status_error(response)

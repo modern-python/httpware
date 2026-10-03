@@ -186,7 +186,7 @@ Unlike `DecodeError`, this error is raised before the request is sent.
 
 ## `ResponseTooLargeError`
 
-Both clients accept `max_response_body_bytes: int | None = None`. By default there is no limit. When it is set, a response body larger than the cap raises `ResponseTooLargeError` instead of being returned, whatever the status: a `200` trips it as easily as a `500`. The cap counts decoded bytes, after decompression. It applies to `send()` and the verb methods, and to the error body that `stream()` reads before raising a `StatusError`. Bytes you read yourself while iterating a `stream()` are never capped. Setting the cap together with `follow_redirects=True`, on the client or on a passed `httpx2_client`, raises `ValueError`, because `httpx2` reads every intermediate redirect body without the cap.
+Both clients accept `max_response_body_bytes: int | None = None`. By default there is no limit. When it is set, a response body larger than the cap raises `ResponseTooLargeError` instead of being returned, whatever the status: a `200` trips it as easily as a `500`. The cap counts decoded bytes, after decompression. It applies to `send()` and the verb methods, and to the error body that `stream()` reads before raising a `StatusError`. Bytes you read yourself while iterating a `stream()` are never capped. With a cap set and `follow_redirects=True`, httpware follows the redirects itself and caps only the final response. It closes each intermediate redirect response without reading its body, so the responses in `response.history` have no content. Client `auth` is sent to the first URL and on redirects within the same origin, never to another origin.
 
 `ResponseTooLargeError` carries:
 
