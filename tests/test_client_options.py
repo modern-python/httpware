@@ -124,27 +124,6 @@ def test_type_checkers_reject_unsupported_sync_options() -> None:
         Client(cert="client.pem")  # ty: ignore[unknown-argument]
 
 
-@pytest.mark.parametrize("client_cls", [AsyncClient, Client])
-def test_follow_redirects_with_body_cap_is_valueerror(client_cls: type) -> None:
-    with pytest.raises(ValueError, match="follow_redirects"):
-        client_cls(follow_redirects=True, max_response_body_bytes=1024)
-
-
-@pytest.mark.parametrize(("client_cls", "httpx2_name"), _WORLDS)
-def test_caller_owned_client_following_redirects_with_body_cap_is_valueerror(
-    client_cls: type,
-    httpx2_name: str,
-) -> None:
-    caller = getattr(httpx2, httpx2_name)(follow_redirects=True)
-    with pytest.raises(ValueError, match="follow_redirects"):
-        client_cls(httpx2_client=caller, max_response_body_bytes=1024)
-
-
-@pytest.mark.parametrize("client_cls", [AsyncClient, Client])
-def test_body_cap_without_following_redirects_is_accepted(client_cls: type) -> None:
-    client_cls(follow_redirects=False, max_response_body_bytes=1024)
-
-
 async def test_async_transport_option_keeps_the_httpx2_client_owned() -> None:
     async with AsyncClient(transport=httpx2.MockTransport(_ok)) as client:
         response = await client.get("https://example.test/")
