@@ -203,6 +203,18 @@ async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request
 
 
 @contextlib.asynccontextmanager
+async def _stream_async(
+    client: httpx2.AsyncClient, method: str, url: httpx2.URL | str, kwargs: dict[str, typing.Any]
+) -> AsyncIterator[httpx2.Response]:
+    """Mirror of `httpx2.AsyncClient.stream` that builds via `_build_request`."""
+    response = await client.send(_build_request(client, method, url, kwargs), stream=True)
+    try:
+        yield response
+    finally:
+        await response.aclose()
+
+
+@contextlib.asynccontextmanager
 async def _stream_capped_async(
     client: httpx2.AsyncClient,
     method: str,
@@ -211,7 +223,7 @@ async def _stream_capped_async(
     cap: int,
 ) -> AsyncIterator[httpx2.Response]:
     """Async mirror of `httpx2.AsyncClient.stream` that sends via `_send_capped_async`."""
-    response = await _send_capped_async(client, client.build_request(method, url, **kwargs), cap)
+    response = await _send_capped_async(client, _build_request(client, method, url, kwargs), cap)
     try:
         yield response
     finally:
@@ -272,6 +284,18 @@ def _send_capped(client: httpx2.Client, request: httpx2.Request, cap: int) -> ht
 
 
 @contextlib.contextmanager
+def _stream(
+    client: httpx2.Client, method: str, url: httpx2.URL | str, kwargs: dict[str, typing.Any]
+) -> Iterator[httpx2.Response]:
+    """Sync mirror of `_stream_async`."""
+    response = client.send(_build_request(client, method, url, kwargs), stream=True)
+    try:
+        yield response
+    finally:
+        response.close()
+
+
+@contextlib.contextmanager
 def _stream_capped(
     client: httpx2.Client,
     method: str,
@@ -280,7 +304,7 @@ def _stream_capped(
     cap: int,
 ) -> Iterator[httpx2.Response]:
     """Sync mirror of `_stream_capped_async`."""
-    response = _send_capped(client, client.build_request(method, url, **kwargs), cap)
+    response = _send_capped(client, _build_request(client, method, url, kwargs), cap)
     try:
         yield response
     finally:
@@ -322,14 +346,17 @@ def _assemble_request_kwargs(  # noqa: PLR0913 — 9 per-request kwargs from htt
     return kwargs
 
 
-def _merge_url_query(
-    url: httpx2.URL | str, params: typing.Any | None, client_params: httpx2.QueryParams
-) -> tuple[httpx2.URL | str, typing.Any | None]:
-    """Fold the URL's own query into `params`; httpx2 would otherwise replace it."""
+def _build_request(
+    client: httpx2.Client | httpx2.AsyncClient, method: str, url: httpx2.URL | str, kwargs: dict[str, typing.Any]
+) -> httpx2.Request:
+    """Build via `client`, keeping the URL's own query bytes ahead of any params, which httpx2 would replace."""
     parsed = httpx2.URL(url)
-    if not parsed.query or (params is None and not client_params):
-        return url, params
-    return parsed.copy_with(query=None), parsed.params.merge(params)
+    if not parsed.query:
+        return client.build_request(method, url, **kwargs)
+    request = client.build_request(method, parsed.copy_with(query=None), **kwargs)
+    built_query = request.url.query
+    request.url = request.url.copy_with(query=parsed.query + b"&" + built_query if built_query else parsed.query)
+    return request
 
 
 class AsyncClient:
@@ -430,8 +457,7 @@ class AsyncClient:
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.AsyncClient, keeping the URL's own query."""
-        merged_url, params = _merge_url_query(url, kwargs.pop("params", None), self._httpx2_client.params)
-        return self._httpx2_client.build_request(method, merged_url, params=params, **kwargs)
+        return _build_request(self._httpx2_client, method, url, kwargs)
 
     def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
@@ -448,7 +474,6 @@ class AsyncClient:
         data: typing.Any | None = None,
         files: typing.Any | None = None,
     ) -> httpx2.Request:
-        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -460,7 +485,7 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        request = self._httpx2_client.build_request(method, merged_url, **kwargs)
+        request = _build_request(self._httpx2_client, method, url, kwargs)
         if _is_streaming_body_async(content) or _is_streaming_body_async(data) or _is_streaming_body_async(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
@@ -1216,7 +1241,6 @@ class AsyncClient:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions via _httpx2_exception_mapper.
         """
-        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -1231,9 +1255,9 @@ class AsyncClient:
 
         cap = self._max_response_body_bytes
         opened = (
-            self._httpx2_client.stream(method, merged_url, **kwargs)
+            _stream_async(self._httpx2_client, method, url, kwargs)
             if cap is None
-            else _stream_capped_async(self._httpx2_client, method, merged_url, kwargs, cap)
+            else _stream_capped_async(self._httpx2_client, method, url, kwargs, cap)
         )
         async with _httpx2_exception_mapper(), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
@@ -1392,8 +1416,7 @@ class Client:
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
         """Delegate request construction to the wrapped httpx2.Client, keeping the URL's own query."""
-        merged_url, params = _merge_url_query(url, kwargs.pop("params", None), self._httpx2_client.params)
-        return self._httpx2_client.build_request(method, merged_url, params=params, **kwargs)
+        return _build_request(self._httpx2_client, method, url, kwargs)
 
     def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
         self,
@@ -1410,7 +1433,6 @@ class Client:
         data: typing.Any | None = None,
         files: typing.Any | None = None,
     ) -> httpx2.Request:
-        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -1422,7 +1444,7 @@ class Client:
             data=data,
             files=files,
         )
-        request = self._httpx2_client.build_request(method, merged_url, **kwargs)
+        request = _build_request(self._httpx2_client, method, url, kwargs)
         if _is_streaming_body_sync(content) or _is_streaming_body_sync(data) or _is_streaming_body_sync(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
@@ -2175,7 +2197,6 @@ class Client:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions via _httpx2_exception_mapper_sync.
         """
-        merged_url, params = _merge_url_query(url, params, self._httpx2_client.params)
         kwargs = _assemble_request_kwargs(
             params=params,
             headers=headers,
@@ -2190,9 +2211,9 @@ class Client:
 
         cap = self._max_response_body_bytes
         opened = (
-            self._httpx2_client.stream(method, merged_url, **kwargs)
+            _stream(self._httpx2_client, method, url, kwargs)
             if cap is None
-            else _stream_capped(self._httpx2_client, method, merged_url, kwargs, cap)
+            else _stream_capped(self._httpx2_client, method, url, kwargs, cap)
         )
         with _httpx2_exception_mapper_sync(), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
