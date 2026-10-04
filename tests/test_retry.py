@@ -271,7 +271,8 @@ async def test_retry_after_seconds_overrides_backoff() -> None:
 
 async def test_retry_after_http_date_overrides_backoff() -> None:
     sleeper = _SleepRecorder()
-    future = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=3)
+    before = datetime.datetime.now(datetime.UTC)
+    future = before.replace(microsecond=0) + datetime.timedelta(seconds=3)
     http_date = email.utils.format_datetime(future, usegmt=True)
     handler = _ResponseSequenceWithHeaders(
         [
@@ -281,9 +282,10 @@ async def test_retry_after_http_date_overrides_backoff() -> None:
     )
     client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=10.0))
     response = await client.get("https://example.test/x")
+    after = datetime.datetime.now(datetime.UTC)
     assert response.status_code == HTTPStatus.OK
     assert len(sleeper.calls) == 1
-    assert 2.0 <= sleeper.calls[0] <= 4.0  # noqa: PLR2004 — ~3 seconds, with clock-skew tolerance
+    assert (future - after).total_seconds() <= sleeper.calls[0] <= (future - before).total_seconds()
 
 
 async def test_retry_after_exceeding_max_delay_raises_with_note() -> None:
