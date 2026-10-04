@@ -1,4 +1,4 @@
-"""The URL's own query string survives per-request and client-level `params`."""
+"""The URL's own query string survives per-request and client-level `params`, which are appended after it."""
 
 from http import HTTPStatus
 
@@ -30,14 +30,15 @@ def _sync_client(captured: list[httpx2.Request], params: dict[str, str] | None =
 
 _CASES = [
     pytest.param("https://example.test/x?a=1", {"b": "2"}, {}, "a=1&b=2", id="url-query-plus-params"),
-    pytest.param("https://example.test/x?a=1&b=1", {"b": "2"}, {}, "a=1&b=2", id="params-override-same-key"),
+    pytest.param("https://example.test/x?a=1&b=1", {"b": "2"}, {}, "a=1&b=1&b=2", id="same-key-appended"),
     pytest.param("https://example.test/x?a=1&a=2", {"b": "3"}, {}, "a=1&a=2&b=3", id="repeated-url-keys-kept"),
     pytest.param("https://example.test/x?a=1", {}, {}, "a=1", id="empty-params-keeps-url-query"),
-    pytest.param("https://example.test/x?a=1", None, {"c": "3"}, "c=3&a=1", id="client-params-keep-url-query"),
+    pytest.param("https://example.test/x?a=1", None, {"c": "3"}, "a=1&c=3", id="client-params-after-url-query"),
     pytest.param(
-        "https://example.test/x?a=1&c=1", {"b": "2"}, {"c": "3"}, "c=1&a=1&b=2", id="url-query-overrides-client"
+        "https://example.test/x?a=1&c=1", {"b": "2"}, {"c": "3"}, "a=1&c=1&c=3&b=2", id="url-and-client-same-key-kept"
     ),
     pytest.param("https://example.test/x", {"b": "2"}, {"c": "3"}, "c=3&b=2", id="no-url-query-unchanged"),
+    pytest.param("https://example.test/x?q=a%20b&flag", {"p": "1"}, {}, "q=a%20b&flag&p=1", id="url-query-bytes-kept"),
 ]
 
 
@@ -98,7 +99,7 @@ def test_sync_stream_merges_url_query(
 def test_owned_client_relative_url_merges_with_base_url() -> None:
     client = Client(base_url="https://example.test/api", params={"c": "3"})
     request = client.build_request("GET", "items?a=1", params={"b": "2"})
-    assert str(request.url) == "https://example.test/api/items?c=3&a=1&b=2"
+    assert str(request.url) == "https://example.test/api/items?a=1&c=3&b=2"
 
 
 def test_url_query_without_params_is_left_verbatim() -> None:
