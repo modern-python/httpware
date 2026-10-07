@@ -8,7 +8,7 @@ below wrap it for use as `with`/`async with` blocks around the httpx2 call.
 """
 
 import contextlib
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, Generator
 
 import httpx2
 
@@ -33,7 +33,7 @@ def map_httpx2_exception(exc: BaseException) -> NetworkError | TimeoutError | Tr
 
 
 @contextlib.asynccontextmanager
-async def _httpx2_exception_mapper() -> AsyncIterator[None]:
+async def _httpx2_exception_mapper() -> AsyncGenerator[None]:
     """Map httpx2 exceptions to httpware exceptions. Shared by AsyncClient._terminal and stream()."""
     try:
         yield
@@ -44,7 +44,7 @@ async def _httpx2_exception_mapper() -> AsyncIterator[None]:
 
 
 @contextlib.contextmanager
-def _httpx2_exception_mapper_sync() -> Iterator[None]:
+def _httpx2_exception_mapper_sync() -> Generator[None]:
     """Map httpx2 exceptions to httpware exceptions. Sync sibling of _httpx2_exception_mapper."""
     try:
         yield

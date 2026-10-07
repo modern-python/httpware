@@ -6,7 +6,7 @@ route to the first decoder in the list.
 
 import contextlib
 import dataclasses
-from collections.abc import Iterator
+from collections.abc import Generator
 from http import HTTPStatus
 from unittest.mock import MagicMock, patch
 
@@ -59,7 +59,7 @@ def _sync_client_with_body(payload: bytes, decoders: list) -> Client:
 
 
 @contextlib.contextmanager
-def _decode_spies(*decoders: ResponseDecoder) -> Iterator[list[MagicMock]]:
+def _decode_spies(*decoders: ResponseDecoder) -> Generator[list[MagicMock]]:
     """Wrap each decoder's `decode` so a test can assert WHICH one ran.
 
     Two real decoders that both claim a shared shape (e.g. `dict[str, int]` or a

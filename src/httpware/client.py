@@ -3,7 +3,7 @@
 import contextlib
 import ssl
 import typing
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
 from http import HTTPStatus
 
 import httpx2
@@ -205,7 +205,7 @@ async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request
 @contextlib.asynccontextmanager
 async def _stream_async(
     client: httpx2.AsyncClient, method: str, url: httpx2.URL | str, kwargs: dict[str, typing.Any]
-) -> AsyncIterator[httpx2.Response]:
+) -> AsyncGenerator[httpx2.Response]:
     """Mirror of `httpx2.AsyncClient.stream` that builds via `_build_request`."""
     response = await client.send(_build_request(client, method, url, kwargs), stream=True)
     try:
@@ -221,7 +221,7 @@ async def _stream_capped_async(
     url: httpx2.URL | str,
     kwargs: dict[str, typing.Any],
     cap: int,
-) -> AsyncIterator[httpx2.Response]:
+) -> AsyncGenerator[httpx2.Response]:
     """Async mirror of `httpx2.AsyncClient.stream` that sends via `_send_capped_async`."""
     response = await _send_capped_async(client, _build_request(client, method, url, kwargs), cap)
     try:
@@ -286,7 +286,7 @@ def _send_capped(client: httpx2.Client, request: httpx2.Request, cap: int) -> ht
 @contextlib.contextmanager
 def _stream(
     client: httpx2.Client, method: str, url: httpx2.URL | str, kwargs: dict[str, typing.Any]
-) -> Iterator[httpx2.Response]:
+) -> Generator[httpx2.Response]:
     """Sync mirror of `_stream_async`."""
     response = client.send(_build_request(client, method, url, kwargs), stream=True)
     try:
@@ -302,7 +302,7 @@ def _stream_capped(
     url: httpx2.URL | str,
     kwargs: dict[str, typing.Any],
     cap: int,
-) -> Iterator[httpx2.Response]:
+) -> Generator[httpx2.Response]:
     """Sync mirror of `_stream_capped_async`."""
     response = _send_capped(client, _build_request(client, method, url, kwargs), cap)
     try:
@@ -1221,7 +1221,7 @@ class AsyncClient:
         content: typing.Any | None = None,
         data: typing.Any | None = None,
         files: typing.Any | None = None,
-    ) -> AsyncIterator[httpx2.Response]:
+    ) -> AsyncGenerator[httpx2.Response]:
         """Stream an HTTP response. Bypasses the middleware chain.
 
         Yields an httpx2.Response; consume the body via response.aiter_bytes(),
@@ -2180,7 +2180,7 @@ class Client:
         content: typing.Any | None = None,
         data: typing.Any | None = None,
         files: typing.Any | None = None,
-    ) -> Iterator[httpx2.Response]:
+    ) -> Generator[httpx2.Response]:
         """Stream an HTTP response. Bypasses the middleware chain.
 
         Yields an httpx2.Response; consume the body via response.iter_bytes(),
