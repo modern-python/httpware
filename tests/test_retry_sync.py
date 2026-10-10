@@ -4,7 +4,7 @@ Mirror of test_retry.py. Mocks the transport via httpx2.MockTransport;
 injects a recording ``_sleep`` callable so the suite runs instantly.
 """
 
-import datetime
+import datetime as dt
 import email.utils
 import logging
 import typing
@@ -303,7 +303,7 @@ def test_retry_after_seconds_honored() -> None:
 
 def test_retry_after_http_date_overrides_backoff() -> None:
     sleeper = _SleepRecorder()
-    future = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=3)
+    future = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=3)
     http_date = email.utils.format_datetime(future, usegmt=True)
     handler = _ResponseSequenceWithHeaders(
         [

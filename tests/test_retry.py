@@ -4,7 +4,7 @@ Mocks the transport via httpx2.MockTransport; injects a recording `_sleep`
 callable so the suite runs instantly without freezegun.
 """
 
-import datetime
+import datetime as dt
 import email.utils
 import logging
 import typing
@@ -271,8 +271,8 @@ async def test_retry_after_seconds_overrides_backoff() -> None:
 
 async def test_retry_after_http_date_overrides_backoff() -> None:
     sleeper = _SleepRecorder()
-    before = datetime.datetime.now(datetime.UTC)
-    future = before.replace(microsecond=0) + datetime.timedelta(seconds=3)
+    before = dt.datetime.now(dt.UTC)
+    future = before.replace(microsecond=0) + dt.timedelta(seconds=3)
     http_date = email.utils.format_datetime(future, usegmt=True)
     handler = _ResponseSequenceWithHeaders(
         [
@@ -282,7 +282,7 @@ async def test_retry_after_http_date_overrides_backoff() -> None:
     )
     client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=10.0))
     response = await client.get("https://example.test/x")
-    after = datetime.datetime.now(datetime.UTC)
+    after = dt.datetime.now(dt.UTC)
     assert response.status_code == HTTPStatus.OK
     assert len(sleeper.calls) == 1
     assert (future - after).total_seconds() <= sleeper.calls[0] <= (future - before).total_seconds()

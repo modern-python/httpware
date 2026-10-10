@@ -14,7 +14,7 @@ locals, so a single instance is safe across the concurrent requests it serves.
 """
 
 import asyncio
-import datetime
+import datetime as dt
 import email.utils
 import logging
 import time
@@ -77,8 +77,8 @@ def _parse_retry_after(value: str) -> float | None:
     except (TypeError, ValueError, OverflowError):
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.UTC)
-    now = datetime.datetime.now(datetime.UTC)
+        parsed = parsed.replace(tzinfo=dt.UTC)
+    now = dt.datetime.now(dt.UTC)
     delta = (parsed - now).total_seconds()
     return max(0.0, delta)
 
