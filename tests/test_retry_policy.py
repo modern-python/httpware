@@ -6,7 +6,7 @@ handling, budget refusal, and the delay returned on a normal retry. The jitter
 path is random, so it is asserted by bounds; the Retry-After path by exact value.
 """
 
-import datetime
+import datetime as dt
 
 import httpx2
 import pytest
@@ -168,7 +168,7 @@ def test_respect_retry_after_false_ignores_header() -> None:
 
 @pytest.mark.parametrize("zone", ["-0000", "", "XYZ"])
 def test_retry_after_date_without_a_usable_zone_is_read_as_gmt(zone: str) -> None:
-    future = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=_DATE_AHEAD_SECONDS)
+    future = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=_DATE_AHEAD_SECONDS)
     header = f"{future:%a, %d %b %Y %H:%M:%S} {zone}".rstrip()
     request = _request("PUT")
     delay = _policy().decide(attempt=0, request=request, exc=_status_exc(503, request, retry_after=header))
