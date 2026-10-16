@@ -47,3 +47,13 @@ publish:
 # Build the docs site, failing on broken links / nav warnings; CI runs this on every PR.
 docs-build:
     uvx --with-requirements docs/requirements.txt mkdocs build --strict
+
+playwright := "playwright==1.64.0"
+
+# Install the Chromium that docs-demos drives; --with-deps adds its system libraries on Linux.
+docs-demos-browser:
+    uvx --from {{ playwright }} playwright install --with-deps chromium
+
+# Play every demo tour at phone and desktop width and fail on layout breakage or page errors.
+docs-demos: docs-build
+    uvx --with {{ playwright }} python -I scripts/check_demos.py site
