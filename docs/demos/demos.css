@@ -100,16 +100,17 @@
 .hw-demo .big { font-weight: 700; }
 .hw-demo .note { color: var(--hw-muted); font-size: .76rem; font-style: italic; margin-top: 6px; }
 
-/* spotlight overlay: 4 dim panels leave a bright hole around the target(s) */
-.hw-demo .dim { position: fixed; background: rgba(8, 8, 16, .6); z-index: 40; display: none; }
-.hw-demo .dim.show { display: block; }
+/* spotlight overlay: the ring's spread shadow dims everything around the target(s) */
+.hw-demo .shield { position: fixed; inset: 0; z-index: 40; display: none; }
+.hw-demo .shield.show { display: block; }
 .hw-demo .ring {
-  position: fixed; z-index: 45; border: 2px solid var(--hw-accent); border-radius: 8px;
-  box-shadow: 0 0 0 4px rgba(91, 75, 214, .28); pointer-events: none; display: none; transition: all .2s;
+  position: absolute; z-index: 45; border: 2px solid var(--hw-accent); border-radius: 8px;
+  box-shadow: 0 0 0 4px rgba(91, 75, 214, .28), 0 0 0 200vmax rgba(8, 8, 16, .6);
+  pointer-events: none; display: none; transition: left .2s, top .2s, width .2s, height .2s;
 }
 .hw-demo .ring.show { display: block; }
 .hw-demo .coach {
-  position: fixed; z-index: 70; width: 300px; background: var(--hw-bg); border: 1px solid var(--hw-line);
+  position: absolute; z-index: 70; width: 300px; background: var(--hw-bg); border: 1px solid var(--hw-line);
   border-radius: 12px; padding: 15px 17px; box-shadow: 0 16px 50px rgba(0, 0, 0, .35); display: none;
   color: var(--hw-fg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
