@@ -113,6 +113,10 @@ isort.no-lines-before = ["standard-library", "local-folder"]
 "src/httpware/client.py" = ["ASYNC109", "ANN401"]
 "tests/**" = ["S101"]
 
+[[tool.ty.overrides]]
+include = ["scripts/**"]
+rules = { unresolved-import = "ignore" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ""
@@ -125,6 +129,6 @@ markers = [
 
 [tool.coverage]
 run.concurrency = ["thread"]
-run.omit = ["benchmarks/*"]
+run.omit = ["benchmarks/*", "scripts/*"]
 report.exclude_also = ["if typing.TYPE_CHECKING:"]
 report.fail_under = 100

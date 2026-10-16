@@ -23,7 +23,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: extractions/setup-just@v4
       - uses: astral-sh/setup-uv@v8.2.0
-      - run: just docs-build
+      - run: just docs-demos-browser
+      - run: just docs-demos
 
   pytest:
     runs-on: ubuntu-latest
