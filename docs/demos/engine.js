@@ -204,68 +204,39 @@ window.HttpwareDemo = (function () {
 
   // ---- shared guided-tour driver: spotlight cutout + side-placed coach ----
   // Extracted from mount() so a second mount mode (herd) reuses one implementation.
-  // `els` supplies the tour DOM (dimT/dimB/dimL/dimR/ring/coach/cArrow/cStep/
-  // cTitle/cBody/cGo). Behavior is identical to the previous inline closures.
+  // `els` supplies the tour DOM (shield/ring/coach/cArrow/cStep/cTitle/cBody/cGo).
   function makeTour(els) {
-    // 4 dim panels leave a bright hole over the union of target rects.
+    const host = els.ring.parentElement;
     function spotlight(nodes) {
+      const base = host.getBoundingClientRect();
       const rs = nodes.map((n) => n.getBoundingClientRect());
       const pad = 6;
-      const x0 = Math.min(...rs.map((r) => r.left)) - pad, y0 = Math.min(...rs.map((r) => r.top)) - pad;
-      const x1 = Math.max(...rs.map((r) => r.right)) + pad, y1 = Math.max(...rs.map((r) => r.bottom)) + pad;
-      const W = window.innerWidth, H = window.innerHeight;
-      const set = (node, l, t, w, h) => {
-        node.style.left = l + 'px'; node.style.top = t + 'px';
-        node.style.width = Math.max(0, w) + 'px'; node.style.height = Math.max(0, h) + 'px';
-        node.classList.add('show');
-      };
-      set(els.dimT, 0, 0, W, y0);
-      set(els.dimB, 0, y1, W, H - y1);
-      set(els.dimL, 0, y0, x0, y1 - y0);
-      set(els.dimR, x1, y0, W - x1, y1 - y0);
+      const x0 = Math.min(...rs.map((r) => r.left)) - base.left - pad, y0 = Math.min(...rs.map((r) => r.top)) - base.top - pad;
+      const x1 = Math.max(...rs.map((r) => r.right)) - base.left + pad, y1 = Math.max(...rs.map((r) => r.bottom)) - base.top + pad;
       els.ring.style.left = x0 + 'px'; els.ring.style.top = y0 + 'px';
       els.ring.style.width = (x1 - x0) + 'px'; els.ring.style.height = (y1 - y0) + 'px';
       els.ring.classList.add('show');
-      return { x0, y0, x1, y1 };
-    }
-    let spotNodes = null, frame = 0;
-    function reposition() {
-      frame = 0;
-      if (spotNodes) placeCoach(spotlight(spotNodes));
-    }
-    function scheduleReposition() {
-      if (!frame) frame = requestAnimationFrame(reposition);
-    }
-    function follow(nodes) {
-      if (!spotNodes) {
-        window.addEventListener('scroll', scheduleReposition, { capture: true, passive: true });
-        window.addEventListener('resize', scheduleReposition, { passive: true });
-      }
-      spotNodes = nodes;
-    }
-    function unfollow() {
-      window.removeEventListener('scroll', scheduleReposition, { capture: true });
-      window.removeEventListener('resize', scheduleReposition);
-      cancelAnimationFrame(frame);
-      spotNodes = null; frame = 0;
+      els.shield.classList.add('show');
+      return { x0, y0, x1, y1, baseLeft: base.left, baseTop: base.top };
     }
     function hideSpot() {
       unfollow();
-      [els.dimT, els.dimB, els.dimL, els.dimR, els.ring].forEach((n) => n.classList.remove('show'));
+      [els.shield, els.ring].forEach((n) => n.classList.remove('show'));
     }
     function placeCoach(hole) {
       const c = els.coach;
+      c.classList.remove('show');
+      const docH = document.documentElement.scrollHeight;
       c.classList.add('show');
       const cw = c.offsetWidth, ch = c.offsetHeight, gap = 16;
-      const W = window.innerWidth, H = window.innerHeight, cy = (hole.y0 + hole.y1) / 2, cx = (hole.x0 + hole.x1) / 2;
-      const room = { right: W - hole.x1, left: hole.x0, bottom: H - hole.y1, top: hole.y0 };
+      const minLeft = 10 - hole.baseLeft, maxLeft = document.documentElement.clientWidth - cw - 10 - hole.baseLeft;
+      const cy = (hole.y0 + hole.y1) / 2, cx = (hole.x0 + hole.x1) / 2;
       let side, left, top;
-      if (room.right >= cw + gap) { side = 'right'; left = hole.x1 + gap; top = cy - ch / 2; }
-      else if (room.left >= cw + gap) { side = 'left'; left = hole.x0 - gap - cw; top = cy - ch / 2; }
-      else if (room.bottom >= ch + gap) { side = 'bottom'; top = hole.y1 + gap; left = cx - cw / 2; }
+      if (hole.x1 + gap <= maxLeft) { side = 'right'; left = hole.x1 + gap; top = cy - ch / 2; }
+      else if (hole.x0 - gap - cw >= minLeft) { side = 'left'; left = hole.x0 - gap - cw; top = cy - ch / 2; }
+      else if (window.scrollY + hole.baseTop + hole.y1 + gap + ch + 16 <= docH) { side = 'bottom'; top = hole.y1 + gap; left = cx - cw / 2; }
       else { side = 'top'; top = hole.y0 - gap - ch; left = cx - cw / 2; }
-      left = Math.min(Math.max(10, left), W - cw - 10);
-      top = Math.min(Math.max(10, top), H - ch - 10);
+      left = Math.min(Math.max(minLeft, left), maxLeft);
       c.style.left = left + 'px'; c.style.top = top + 'px';
       const a = els.cArrow;
       a.style.borderTop = a.style.borderRight = a.style.borderBottom = a.style.borderLeft = '';
@@ -273,7 +244,31 @@ window.HttpwareDemo = (function () {
       if (side === 'right') { a.style.left = '-7px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderRight = 'none'; a.style.borderLeft = '1px solid var(--hw-line)'; a.style.borderBottom = '1px solid var(--hw-line)'; }
       else if (side === 'left') { a.style.left = (cw - 7) + 'px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderBottom = 'none'; a.style.borderLeft = 'none'; a.style.borderTop = '1px solid var(--hw-line)'; a.style.borderRight = '1px solid var(--hw-line)'; }
       else if (side === 'bottom') { a.style.top = '-7px'; a.style.left = (cx - left - 6) + 'px'; a.style.borderBottom = 'none'; a.style.borderRight = 'none'; }
-      else { a.style.top = (ch - 7) + 'px'; a.style.left = (cx - left - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderLeft = 'none'; }
+      else { a.style.top = (ch - 7) + 'px'; a.style.left = (cx - left - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderLeft = 'none'; a.style.borderRight = '1px solid var(--hw-line)'; a.style.borderBottom = '1px solid var(--hw-line)'; }
+      return { side, top: Math.min(hole.y0, top), bottom: Math.max(hole.y1, top + ch), coachTop: top, coachBottom: top + ch };
+    }
+    function reveal(span) {
+      const base = host.getBoundingClientRect(), H = window.innerHeight, margin = 64;
+      const top = base.top + span.top, bottom = base.top + span.bottom;
+      if (top >= margin && bottom <= H - margin) return;
+      let shift = (top + bottom - H) / 2;
+      if (bottom - top > H - 2 * margin) {
+        shift = span.side === 'bottom' ? base.top + span.coachBottom - (H - 16)
+          : span.side === 'top' ? base.top + span.coachTop - margin : top - margin;
+      }
+      const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollBy({ top: shift, behavior: reduce ? 'auto' : 'smooth' });
+    }
+    let spotNodes = null;
+    const watcher = new ResizeObserver(() => { if (spotNodes) placeCoach(spotlight(spotNodes)); });
+    function follow(nodes) {
+      unfollow();
+      spotNodes = nodes;
+      [host, ...nodes].forEach((n) => watcher.observe(n));
+    }
+    function unfollow() {
+      watcher.disconnect();
+      spotNodes = null;
     }
     let onContinue = null;
     els.cGo.addEventListener('click', () => {
@@ -283,11 +278,10 @@ window.HttpwareDemo = (function () {
     return {
       show(stop, stepIdx, total, spotLookup) {
         const nodes = stop.spot.map((key) => spotLookup[key]).filter(Boolean);
-        const hole = spotlight(nodes);
         els.cStep.textContent = `Step ${stepIdx + 1} of ${total}`;
         els.cTitle.textContent = stop.title;
         els.cBody.textContent = stop.body;
-        placeCoach(hole);
+        reveal(placeCoach(spotlight(nodes)));
         follow(nodes);
       },
       hideAll() { els.coach.classList.remove('show'); hideSpot(); },
@@ -426,8 +420,7 @@ window.HttpwareDemo = (function () {
   <p class="note">Faithful model: each httpware client owns its RetryBudget (never shared). Jitter flattens the visible spikes; the budget + max_attempts cap what a longer storm could do.</p>
 </div>
 
-<div class="dim" data-el="dimT"></div><div class="dim" data-el="dimB"></div>
-<div class="dim" data-el="dimL"></div><div class="dim" data-el="dimR"></div>
+<div class="shield" data-el="shield"></div>
 <div class="ring" data-el="ring"></div>
 <div class="coach" data-el="coach">
   <div class="c-arrow" data-el="cArrow"></div>
@@ -448,7 +441,7 @@ window.HttpwareDemo = (function () {
       naiveStrip: $('naiveStrip'), hwStrip: $('hwStrip'),
       naiveMult: $('naiveMult'), naiveMultN: $('naiveMultN'), naiveTotal: $('naiveTotal'), naiveTotalN: $('naiveTotalN'),
       hwMult: $('hwMult'), hwMultN: $('hwMultN'), hwTotal: $('hwTotal'), hwTotalN: $('hwTotalN'),
-      dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
+      shield: $('shield'), ring: $('ring'),
       coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
     };
     const SPOT = { naiveMult: els.naiveMult, hwMult: els.hwMult, naiveTotal: els.naiveTotal,
@@ -576,8 +569,7 @@ window.HttpwareDemo = (function () {
   </div>
 </div>
 
-<div class="dim" data-el="dimT"></div><div class="dim" data-el="dimB"></div>
-<div class="dim" data-el="dimL"></div><div class="dim" data-el="dimR"></div>
+<div class="shield" data-el="shield"></div>
 <div class="ring" data-el="ring"></div>
 <div class="coach" data-el="coach">
   <div class="c-arrow" data-el="cArrow"></div>
@@ -605,7 +597,7 @@ window.HttpwareDemo = (function () {
       elapsedWrap: $('elapsedWrap'), elapsedB: $('elapsedB'),
       note: $('note'),
       macroWrap: $('macroWrap'), macroStrip: $('macroStrip'), macroStage: $('macroStage'),
-      dimT: $('dimT'), dimB: $('dimB'), dimL: $('dimL'), dimR: $('dimR'), ring: $('ring'),
+      shield: $('shield'), ring: $('ring'),
       coach: $('coach'), cArrow: $('cArrow'), cStep: $('cStep'), cTitle: $('cTitle'), cBody: $('cBody'), cGo: $('cGo'),
     };
     const ELS = { ifA: els.ifA, latA: els.latA, badWrapA: els.badWrapA, ifB: els.ifB, latB: els.latB, badWrapB: els.badWrapB, brkB: els.brkB, poolB: els.poolB, elapsedB: els.elapsedB };
