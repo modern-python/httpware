@@ -81,12 +81,16 @@
 .hw-demo .laneflow { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .hw-demo .box {
   font-family: var(--hw-mono); font-size: .75rem; border: 1.5px solid var(--hw-line); border-radius: 8px;
-  padding: 8px 10px; background: var(--hw-bg); white-space: nowrap; transition: all .25s;
+  padding: 8px 10px; background: var(--hw-bg); transition: all .25s;
 }
 .hw-demo .box.down { border-color: var(--hw-bad); background: rgba(229, 72, 77, .12); color: var(--hw-bad); }
 .hw-demo .box.open { border-color: var(--hw-bad); background: rgba(229, 72, 77, .12); color: var(--hw-bad); }
 .hw-demo .box.half { border-color: var(--hw-warn); background: rgba(245, 166, 35, .12); color: var(--hw-warn); }
 .hw-demo .arrow { flex: 1; height: 2px; background: var(--hw-line); }
+@media (max-width: 480px) {
+  .hw-demo .laneflow { gap: 4px; }
+  .hw-demo .box { font-size: .7rem; padding: 7px 6px; }
+}
 .hw-demo .track { position: relative; height: 20px; margin: 6px 0 4px; }
 .hw-demo .dot { position: absolute; top: 6px; width: 8px; height: 8px; border-radius: 50%; left: 0; transition: left .17s linear; }
 .hw-demo .dot.ok { background: var(--hw-ok); }
