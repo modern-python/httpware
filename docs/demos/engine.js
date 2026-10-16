@@ -228,7 +228,29 @@ window.HttpwareDemo = (function () {
       els.ring.classList.add('show');
       return { x0, y0, x1, y1 };
     }
+    let spotNodes = null, frame = 0;
+    function reposition() {
+      frame = 0;
+      if (spotNodes) placeCoach(spotlight(spotNodes));
+    }
+    function scheduleReposition() {
+      if (!frame) frame = requestAnimationFrame(reposition);
+    }
+    function follow(nodes) {
+      if (!spotNodes) {
+        window.addEventListener('scroll', scheduleReposition, { capture: true, passive: true });
+        window.addEventListener('resize', scheduleReposition, { passive: true });
+      }
+      spotNodes = nodes;
+    }
+    function unfollow() {
+      window.removeEventListener('scroll', scheduleReposition, { capture: true });
+      window.removeEventListener('resize', scheduleReposition);
+      cancelAnimationFrame(frame);
+      spotNodes = null; frame = 0;
+    }
     function hideSpot() {
+      unfollow();
       [els.dimT, els.dimB, els.dimL, els.dimR, els.ring].forEach((n) => n.classList.remove('show'));
     }
     function placeCoach(hole) {
@@ -246,6 +268,7 @@ window.HttpwareDemo = (function () {
       top = Math.min(Math.max(10, top), H - ch - 10);
       c.style.left = left + 'px'; c.style.top = top + 'px';
       const a = els.cArrow;
+      a.style.borderTop = a.style.borderRight = a.style.borderBottom = a.style.borderLeft = '';
       a.style.transform = 'rotate(45deg)';
       if (side === 'right') { a.style.left = '-7px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderTop = 'none'; a.style.borderRight = 'none'; a.style.borderLeft = '1px solid var(--hw-line)'; a.style.borderBottom = '1px solid var(--hw-line)'; }
       else if (side === 'left') { a.style.left = (cw - 7) + 'px'; a.style.top = (cy - top - 6) + 'px'; a.style.borderBottom = 'none'; a.style.borderLeft = 'none'; a.style.borderTop = '1px solid var(--hw-line)'; a.style.borderRight = '1px solid var(--hw-line)'; }
@@ -265,6 +288,7 @@ window.HttpwareDemo = (function () {
         els.cTitle.textContent = stop.title;
         els.cBody.textContent = stop.body;
         placeCoach(hole);
+        follow(nodes);
       },
       hideAll() { els.coach.classList.remove('show'); hideSpot(); },
       setContinue(fn) { onContinue = fn; },
