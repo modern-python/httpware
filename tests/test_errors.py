@@ -99,6 +99,29 @@ def test_status_error_summary_message_includes_status_method_url() -> None:
     assert str(exc) == "404 GET https://example.test/missing"
 
 
+def test_status_error_args_hold_the_summary_message() -> None:
+    exc = NotFoundError(_make_response(404, url="https://user:pass@example.test/x?token=s", method="GET"))
+    assert exc.args == ("404 GET https://example.test/x?token=REDACTED",)
+
+
+def test_status_error_builds_its_message_on_first_use(monkeypatch: pytest.MonkeyPatch) -> None:
+    redacted: list[str] = []
+    monkeypatch.setattr(httpware.errors, "redact_url", redacted.append)
+    NotFoundError(_make_response(404))
+    assert redacted == []
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [(("custom",), "custom"), (("a", "b"), "('a', 'b')"), ((), "")],
+)
+def test_status_error_assigned_args_replace_the_message(args: tuple[str, ...], message: str) -> None:
+    exc = NotFoundError(_make_response(404))
+    exc.args = args
+    assert exc.args == args
+    assert str(exc) == message
+
+
 def test_status_error_strips_userinfo_in_summary_message() -> None:
     exc = NotFoundError(_make_response(404, url="https://user:pass@example.test/x"))
     assert "user" not in str(exc)

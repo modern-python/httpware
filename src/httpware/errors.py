@@ -23,6 +23,9 @@ import httpx2
 from httpware._internal.redaction import redact_url
 
 
+_EXCEPTION_ARGS: types.GetSetDescriptorType = BaseException.__dict__["args"]
+
+
 def _restore_client_error(cls: "type[ClientError]", args: tuple[Any, ...]) -> "ClientError":
     return cls.__new__(cls, *args)
 
@@ -71,7 +74,24 @@ class StatusError(ClientError):
 
     def __init__(self, response: httpx2.Response) -> None:
         self.response = response
-        super().__init__(self._summary())
+
+    @property
+    def args(self) -> tuple[Any, ...]:
+        """The one-element ``(message,)`` tuple, the message built on first access."""
+        args = _EXCEPTION_ARGS.__get__(self)
+        # BaseException.__new__ stored the constructor's (response,) here.
+        if len(args) == 1 and args[0] is vars(self).get("response"):
+            args = (self._summary(),)
+            _EXCEPTION_ARGS.__set__(self, args)
+        return args
+
+    @args.setter
+    def args(self, value: tuple[Any, ...]) -> None:
+        _EXCEPTION_ARGS.__set__(self, value)
+
+    def __str__(self) -> str:
+        args = self.args
+        return str(args[0]) if len(args) == 1 else super().__str__()
 
     def _summary(self) -> str:
         method = self.response.request.method
