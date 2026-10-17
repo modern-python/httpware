@@ -156,14 +156,14 @@ async def test_async_stream_on_closed_client_raises_transport_error() -> None:
     await client.aclose()
     with pytest.raises(TransportError, match="closed"):
         async with client.stream("GET", "https://example.test/x"):
-            pass
+            pass  # pragma: no cover — never reached; opening the stream raises
 
 
 def test_sync_stream_on_closed_client_raises_transport_error() -> None:
     client = Client(transport=httpx2.MockTransport(_ok))
     client.close()
     with pytest.raises(TransportError, match="closed"), client.stream("GET", "https://example.test/x"):
-        pass
+        pass  # pragma: no cover — never reached; opening the stream raises
 
 
 async def test_async_stream_runtime_error_on_open_client_propagates() -> None:
@@ -334,12 +334,34 @@ def test_sync_client_rejects_async_middleware(middleware: typing.Any) -> None:  
         Client(middleware=[middleware])
 
 
+async def test_async_client_runs_the_middleware_sync_client_rejects() -> None:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        status = HTTPStatus.SERVICE_UNAVAILABLE if request.url.path == "/down" else HTTPStatus.OK
+        return httpx2.Response(status, request=request)
+
+    client = AsyncClient(
+        transport=httpx2.MockTransport(handler),
+        middleware=[
+            AsyncRetry(_sleep=_no_sleep),
+            _AsyncPassThrough(),
+            _async_function_middleware,
+            async_before_request(_async_identity),
+            async_on_error(_async_swallow),
+            async_after_response(_async_response_identity),
+        ],
+    )
+    assert (await client.get("https://example.test/up")).status_code == HTTPStatus.OK
+    with pytest.raises(ServiceUnavailableError):
+        await client.get("https://example.test/down")
+
+
 def _sync_function_middleware(request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
     return next(request)
 
 
 def test_sync_client_accepts_sync_middleware() -> None:
-    Client(
+    client = Client(
+        transport=httpx2.MockTransport(_ok),
         middleware=[
             Retry(),
             _sync_function_middleware,
@@ -347,6 +369,7 @@ def test_sync_client_accepts_sync_middleware() -> None:
             after_response(lambda _, response: response),
         ],
     )
+    assert client.get("https://example.test/x").status_code == HTTPStatus.OK
 
 
 async def _async_json_chunks() -> AsyncIterator[bytes]:
