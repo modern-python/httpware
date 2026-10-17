@@ -162,10 +162,13 @@ async def test_invalid_url_maps_to_bare_transport_error() -> None:
 
 
 async def test_cancellation_propagates_cleanly() -> None:
+    first_chunk_consumed = asyncio.Event()
+
     async def slow_body() -> typing.AsyncIterator[bytes]:
         yield b"first"
-        await asyncio.sleep(1.0)
-        yield b"second"  # pragma: no cover — the task is cancelled during the sleep before this yield
+        first_chunk_consumed.set()
+        await asyncio.Event().wait()
+        yield b"second"  # pragma: no cover — the task is cancelled while the body waits before this yield
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         return httpx2.Response(HTTPStatus.OK, request=request, content=slow_body())
@@ -178,7 +181,8 @@ async def test_cancellation_propagates_cleanly() -> None:
                 pass
 
     task = asyncio.create_task(consume())
-    await asyncio.sleep(0.01)  # let body consumption begin
+    async with asyncio.timeout(5.0):
+        await first_chunk_consumed.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
