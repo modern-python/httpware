@@ -6,7 +6,8 @@ the request URL's origin), so one failing upstream does not open the circuit for
 A counted failure is a NetworkError, an httpware TimeoutError, or a StatusError whose
 status_code is in the effective failure set (default: all 5xx). 4xx — including 429 —
 count as successes: 429 means healthy-but-throttling, and tripping on it amplifies
-incidents. Any other exception propagates without affecting circuit state. In
+incidents. A RetryBudgetExhaustedError is classified by its last_exception. Any other
+exception propagates without affecting circuit state. In
 particular, non-NetworkError transport problems — e.g. httpx2.InvalidURL from a
 malformed URL — are foreign: they propagate unchanged and do not increment the
 failure counter, so programming errors cannot trip the breaker.
@@ -17,6 +18,14 @@ State machine (classic / consecutive-failure):
                 becomes the half-open probe.
     HALF_OPEN — admit exactly one probe at a time; success_threshold consecutive probe
                 successes close the circuit; one probe failure re-opens it.
+
+An outcome applies only to the state its request was admitted under: a request still in
+flight when the circuit changes state finishes without touching the circuit.
+
+An outage episode runs from CLOSED to OPEN until the circuit is CLOSED again. Within one,
+circuit.rejected is emitted at most once per second; its `suppressed` attribute counts the
+rejections not emitted since the previous one, and the first rejection of an episode is
+always emitted. circuit.closed carries `rejected`, the episode's total rejection count.
 
 Trip modes:
     Classic (default) — opens when consecutive counted-failures reach failure_threshold.
@@ -30,14 +39,16 @@ Trip modes:
 The lock-free _CircuitBreakerState holds the transition logic, shared by both wrappers.
 AsyncCircuitBreaker relies on asyncio atomicity (no await inside a transition) plus a
 single-event-loop guard; CircuitBreaker (sync) serializes transitions with a
-threading.Lock. Both are sharable across clients (one shared circuit); a sync instance
-cannot be shared with an async one.
+threading.Lock and emits events only after releasing it, so a logging handler may send
+requests through the same breaker. Both are sharable across clients (one shared circuit);
+a sync instance cannot be shared with an async one.
 """
 
 import asyncio
 import enum
 import functools
 import logging
+import math
 import threading
 import time
 import typing
@@ -46,7 +57,13 @@ from collections.abc import Callable, Collection, Hashable
 import httpx2
 
 from httpware._internal.observability import _emit_event
-from httpware.errors import CircuitOpenError, NetworkError, StatusError, TimeoutError  # noqa: A004
+from httpware.errors import (
+    CircuitOpenError,
+    NetworkError,
+    RetryBudgetExhaustedError,
+    StatusError,
+    TimeoutError,  # noqa: A004
+)
 from httpware.middleware import AsyncNext, Next
 from httpware.middleware.resilience._event_loop_guard import check_event_loop
 
@@ -72,8 +89,14 @@ _DEFAULT_FAILURE_STATUS_CODES = frozenset(range(500, 600))
 
 _BUCKET_COUNT = 10
 
-_ROLE_CLOSED = "closed"
-_ROLE_PROBE = "probe"
+_SUCCESS = 0
+_FAILURE = 1
+_FOREIGN = 2
+
+_PROBE = 1
+_EPOCH_STEP = 2
+
+_REJECTED_EVENT_INTERVAL = 1.0
 
 _LOGGER = logging.getLogger("httpware.circuit_breaker")
 
@@ -136,12 +159,34 @@ class _RollingWindow:
         self._failure = [0] * _BUCKET_COUNT
 
 
+_Event = tuple[str, int, str, dict[str, typing.Any]]
+
+
+class _HalfOpened(Exception):  # noqa: N818
+    """Raised by `admit` when it moved the circuit to HALF_OPEN; carries the probe's ticket and events."""
+
+    def __init__(self, ticket: int, events: list[_Event] | None) -> None:
+        self.ticket = ticket
+        self.events = events
+
+
+class _RejectionError(Exception):
+    """Raised by `admit` to refuse a request, carrying the events to emit once the lock is released."""
+
+    def __init__(self, retry_after: float | None, events: list[_Event] | None) -> None:
+        self.retry_after = retry_after
+        self.events = events
+
+
 class _CircuitBreakerState:
     """Lock-free circuit-breaker state machine shared by the sync + async wrappers.
 
-    Every method is synchronous and performs no I/O beyond logging. The async wrapper
-    calls these directly (atomic under a single event loop because no await occurs
-    inside a transition); the sync wrapper wraps each call in a threading.Lock.
+    Every method is synchronous and performs no I/O. The async wrapper calls these directly
+    (atomic under a single event loop because no await occurs inside a transition); the sync
+    wrapper wraps `admit` and `record` in a threading.Lock. Transitions queue their events;
+    the caller takes them with the outcome and emits them outside any lock.
+    `admit` hands out a ticket: the epoch, which every transition advances by two, plus one
+    for the probe. `record` ignores a ticket from an earlier epoch.
     """
 
     def __init__(  # noqa: PLR0913 — breaker state has many orthogonal knobs; a dataclass would be worse
@@ -189,90 +234,115 @@ class _CircuitBreakerState:
         self._consecutive_successes = 0
         self._opened_at = 0.0
         self._probe_in_flight = False
-
-    def is_failure_status(self, status_code: int) -> bool:
-        return status_code in self._failure_status_codes
+        self._epoch = 0
+        self._rejected_emitted_at = -math.inf
+        self._rejections_suppressed = 0
+        self._episode_rejections = 0
+        self._events: list[_Event] | None = None
 
     @property
     def state(self) -> CircuitState:
         """The circuit's current stored state (raw read; no lazy OPEN→HALF_OPEN transition)."""
         return self._state
 
-    def admit(self, request: httpx2.Request) -> str:
-        """Decide the request's role, or raise CircuitOpenError. No await inside."""
+    def admit(self, request: httpx2.Request) -> int:
+        """Return the request's ticket, or raise _RejectionError or _HalfOpened. No await inside."""
         if self._state is CircuitState.CLOSED:
-            return _ROLE_CLOSED
+            return self._epoch
+        now = self._now()
         if self._state is CircuitState.OPEN:
-            elapsed = self._now() - self._opened_at
-            if elapsed >= self._reset_timeout:
-                self._state = CircuitState.HALF_OPEN
-                self._probe_in_flight = True
-                self._emit(request, "circuit.half_open", logging.INFO, "circuit half-open — admitting probe", {})
-                return _ROLE_PROBE
-            retry_after = max(0.0, self._reset_timeout - elapsed)
-            self._emit(
-                request,
-                "circuit.rejected",
-                logging.WARNING,
-                "circuit open — rejecting request",
-                {"retry_after": retry_after},
-            )
-            raise CircuitOpenError(retry_after=retry_after)
-        # HALF_OPEN
+            elapsed = now - self._opened_at
+            if elapsed < self._reset_timeout:
+                self._reject(request, now, max(0.0, self._reset_timeout - elapsed), "circuit open — rejecting request")
+            self._move_to(CircuitState.HALF_OPEN)
+            self._probe_in_flight = True
+            self._queue(request, "circuit.half_open", logging.INFO, "circuit half-open — admitting probe", {})
+            raise _HalfOpened(self._epoch + _PROBE, self.take_events())
         if self._probe_in_flight:
-            self._emit(
-                request,
-                "circuit.rejected",
-                logging.WARNING,
-                "circuit half-open — rejecting request (probe in flight)",
-                {"retry_after": None},
-            )
-            raise CircuitOpenError(retry_after=None)
+            self._reject(request, now, None, "circuit half-open — rejecting request (probe in flight)")
         self._probe_in_flight = True
-        return _ROLE_PROBE
+        return self._epoch + _PROBE
 
-    def on_success(self, role: str, request: httpx2.Request) -> None:
-        if role == _ROLE_PROBE:
-            self._probe_in_flight = False
-        if self._state is CircuitState.CLOSED:
-            if self._rate_mode:
-                self._record_outcome(request, failed=False)
-            else:
+    def classify(self, exc: BaseException | None) -> int:
+        """Map an exception raised past the breaker to _SUCCESS, _FAILURE or _FOREIGN."""
+        if isinstance(exc, RetryBudgetExhaustedError):
+            exc = exc.last_exception
+        if isinstance(exc, StatusError):
+            return _FAILURE if exc.response.status_code in self._failure_status_codes else _SUCCESS
+        if isinstance(exc, (NetworkError, TimeoutError)):
+            return _FAILURE
+        return _FOREIGN
+
+    def record(self, ticket: int, outcome: int, request: httpx2.Request) -> list[_Event] | None:
+        """Apply an admitted request's outcome and return the events it queued.
+
+        A no-op if the circuit has transitioned since the ticket was issued.
+        """
+        if ticket == self._epoch:
+            if outcome == _SUCCESS and not self._rate_mode:
                 self._consecutive_failures = 0
-        elif self._state is CircuitState.HALF_OPEN:
-            self._consecutive_successes += 1
-            if self._consecutive_successes >= self._success_threshold:
-                self._state = CircuitState.CLOSED
-                self._consecutive_failures = 0
-                self._consecutive_successes = 0
-                if self._rate_mode:
-                    self._window.clear()  # ty: ignore[unresolved-attribute]
-                self._emit(request, "circuit.closed", logging.INFO, "circuit closed — service recovered", {})
-
-    def on_failure(self, role: str, request: httpx2.Request) -> None:
-        if role == _ROLE_PROBE:
+            elif outcome != _FOREIGN:
+                self._record_closed(request, failed=outcome == _FAILURE)
+        elif ticket == self._epoch + _PROBE:
             self._probe_in_flight = False
-        if self._state is CircuitState.CLOSED:
+            if outcome == _SUCCESS:
+                self._record_probe_success(request)
+            elif outcome == _FAILURE:
+                self._open(request, failures=1)  # 1 = the single probe failure that re-opened the circuit
+        events = self._events
+        if events is not None:
+            self._events = None
+        return events
+
+    def take_events(self) -> list[_Event] | None:
+        """Return and clear the queued events."""
+        events, self._events = self._events, None
+        return events
+
+    def _reject(self, request: httpx2.Request, now: float, retry_after: float | None, message: str) -> typing.NoReturn:
+        self._episode_rejections += 1
+        if now - self._rejected_emitted_at < _REJECTED_EVENT_INTERVAL:
+            self._rejections_suppressed += 1
+            raise _RejectionError(retry_after, None)
+        self._rejected_emitted_at = now
+        suppressed, self._rejections_suppressed = self._rejections_suppressed, 0
+        attributes = {"retry_after": retry_after, "suppressed": suppressed}
+        self._queue(request, "circuit.rejected", logging.WARNING, message, attributes)
+        raise _RejectionError(retry_after, self.take_events())
+
+    def _record_closed(self, request: httpx2.Request, *, failed: bool) -> None:
+        if self._rate_mode:
+            self._record_outcome(request, failed=failed)
+        elif failed:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._failure_threshold:
+                self._open(request, failures=self._consecutive_failures)
+
+    def _record_probe_success(self, request: httpx2.Request) -> None:
+        self._consecutive_successes += 1
+        if self._consecutive_successes >= self._success_threshold:
+            self._move_to(CircuitState.CLOSED)
+            self._consecutive_failures = 0
+            self._consecutive_successes = 0
             if self._rate_mode:
-                self._record_outcome(request, failed=True)
-            else:
-                self._consecutive_failures += 1
-                if self._consecutive_failures >= self._failure_threshold:
-                    self._open(request, failures=self._consecutive_failures)
-        elif self._state is CircuitState.HALF_OPEN:
-            self._open(request, failures=1)  # 1 = the single probe failure that re-opened the circuit
+                self._window.clear()  # ty: ignore[unresolved-attribute]
+            attributes = {"rejected": self._episode_rejections}
+            self._queue(request, "circuit.closed", logging.INFO, "circuit closed — service recovered", attributes)
 
-    def release_probe(self, role: str) -> None:
-        """Release the probe slot without recording success or failure (non-counted exc)."""
-        if role == _ROLE_PROBE:
-            self._probe_in_flight = False
+    def _move_to(self, state: CircuitState) -> None:
+        self._state = state
+        self._epoch += _EPOCH_STEP
 
     def _enter_open(self, request: httpx2.Request, message: str, attributes: dict[str, typing.Any]) -> None:
-        self._state = CircuitState.OPEN
+        if self._state is CircuitState.CLOSED:
+            self._rejected_emitted_at = -math.inf
+            self._rejections_suppressed = 0
+            self._episode_rejections = 0
+        self._move_to(CircuitState.OPEN)
         self._opened_at = self._now()
         self._consecutive_failures = 0
         self._consecutive_successes = 0
-        self._emit(request, "circuit.opened", logging.WARNING, message, attributes)
+        self._queue(request, "circuit.opened", logging.WARNING, message, attributes)
 
     def _open(self, request: httpx2.Request, *, failures: int) -> None:
         self._enter_open(
@@ -302,7 +372,7 @@ class _CircuitBreakerState:
         if threshold is not None and total >= self._minimum_calls and failures / total >= threshold:
             self._open_rate(request, total=total, failures=failures)
 
-    def _emit(
+    def _queue(
         self,
         request: httpx2.Request,
         event_name: str,
@@ -313,26 +383,45 @@ class _CircuitBreakerState:
         attributes = {**attributes, "method": request.method, "url": str(request.url)}
         if self._key is not None:
             attributes["circuit_key"] = self._key
+        if self._events is None:
+            self._events = []
+        self._events.append((event_name, level, message, attributes))
+
+
+def _emit_events(events: list[_Event]) -> None:
+    for event_name, level, message, attributes in events:
         _emit_event(_LOGGER, event_name, level=level, message=message, attributes=attributes)
 
 
+def _half_opened(half_opened: _HalfOpened) -> int:
+    if half_opened.events is not None:
+        _emit_events(half_opened.events)
+    return half_opened.ticket
+
+
+def _rejected(rejection: _RejectionError) -> CircuitOpenError:
+    if rejection.events is not None:
+        _emit_events(rejection.events)
+    return CircuitOpenError(retry_after=rejection.retry_after)
+
+
 async def _call_async(state: _CircuitBreakerState, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
-    role = state.admit(request)
+    try:
+        ticket = state.admit(request)
+    except _RejectionError as rejection:
+        raise _rejected(rejection) from None
+    except _HalfOpened as half_opened:
+        ticket = _half_opened(half_opened)
     try:
         response = await next(request)
-    except StatusError as exc:
-        if state.is_failure_status(exc.response.status_code):
-            state.on_failure(role, request)
-        else:
-            state.on_success(role, request)
+    except BaseException as exc:
+        events = state.record(ticket, state.classify(exc), request)
+        if events is not None:
+            _emit_events(events)
         raise
-    except (NetworkError, TimeoutError):
-        state.on_failure(role, request)
-        raise
-    except BaseException:
-        state.release_probe(role)
-        raise
-    state.on_success(role, request)
+    events = state.record(ticket, _SUCCESS, request)
+    if events is not None:
+        _emit_events(events)
     return response
 
 
@@ -342,27 +431,26 @@ def _call_sync(
     request: httpx2.Request,
     next: Next,  # noqa: A002
 ) -> httpx2.Response:
-    with lock:
-        role = state.admit(request)
+    try:
+        with lock:
+            ticket = state.admit(request)
+    except _RejectionError as rejection:
+        raise _rejected(rejection) from None
+    except _HalfOpened as half_opened:
+        ticket = _half_opened(half_opened)
     try:
         response = next(request)
-    except StatusError as exc:
+    except BaseException as exc:
+        outcome = state.classify(exc)
         with lock:
-            if state.is_failure_status(exc.response.status_code):
-                state.on_failure(role, request)
-            else:
-                state.on_success(role, request)
-        raise
-    except (NetworkError, TimeoutError):
-        with lock:
-            state.on_failure(role, request)
-        raise
-    except BaseException:
-        with lock:
-            state.release_probe(role)
+            events = state.record(ticket, outcome, request)
+        if events is not None:
+            _emit_events(events)
         raise
     with lock:
-        state.on_success(role, request)
+        events = state.record(ticket, _SUCCESS, request)
+    if events is not None:
+        _emit_events(events)
     return response
 
 

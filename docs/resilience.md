@@ -160,6 +160,8 @@ A circuit breaker counts consecutive failures and, past a threshold, stops sendi
 - OPEN: until `reset_timeout` has passed, every request fails at once with `CircuitOpenError`, whose `retry_after` says how many seconds remain. The first request after that moves the circuit to HALF_OPEN and becomes the probe.
 - HALF_OPEN: one probe at a time is let through. After `success_threshold` successful probes in a row the circuit closes; one failed probe opens it again.
 
+An outcome only counts against the state its request was admitted under. A request that is still in flight when the circuit changes state, such as a slow call sent before the circuit opened, finishes without touching the circuit. It cannot reopen a HALF_OPEN circuit, count toward `success_threshold`, or free the probe slot.
+
 ### Constructor
 
 | Parameter | Default | Effect |
@@ -176,6 +178,8 @@ A circuit breaker counts consecutive failures and, past a threshold, stops sendi
 
 A counted failure is a `NetworkError`, an httpware `TimeoutError`, or a `StatusError` whose status is in `failure_status_codes`. Other exceptions pass through without changing the circuit.
 
+A `RetryBudgetExhaustedError` from a retry placed after the breaker is classified by its `last_exception`. If the last attempt failed with a counted failure, the breaker counts one; if it failed with a 4xx, that is a success.
+
 4xx responses, 429 included, count as successes. A 429 means the service is up and throttling you; opening the circuit on it would add circuit-open rejections on top of the throttling.
 
 ### `CircuitOpenError`
@@ -189,9 +193,13 @@ Emitted on logger `httpware.circuit_breaker`:
 | Event | When |
 |---|---|
 | `circuit.opened` | The failure threshold was reached and the circuit went from CLOSED to OPEN. |
-| `circuit.rejected` | A request failed fast because the circuit was OPEN or a HALF_OPEN probe was already running. |
+| `circuit.rejected` | A request failed fast because the circuit was OPEN or a HALF_OPEN probe was already running. Emitted at most once per second per circuit, and always for the first rejection of an outage. Its `suppressed` attribute counts the rejections in the same outage that were not emitted since the previous `circuit.rejected`. |
 | `circuit.half_open` | The reset timeout passed and the circuit went from OPEN to HALF_OPEN. |
-| `circuit.closed` | The success threshold was reached and the circuit went from HALF_OPEN to CLOSED. |
+| `circuit.closed` | The success threshold was reached and the circuit went from HALF_OPEN to CLOSED. Its `rejected` attribute is the number of requests rejected during the outage, emitted or not. |
+
+An outage runs from the moment the circuit opens until it closes again; a probe failure that reopens it stays in the same outage.
+
+The breaker emits its events after releasing its internal lock, so a logging handler may send requests through a client that uses the same breaker.
 
 ### Time-based failure-rate mode
 

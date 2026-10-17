@@ -1,5 +1,6 @@
 """Tests for the sync KeyedCircuitBreaker middleware. Mirror of test_keyed_circuit_breaker.py."""
 
+import contextlib
 import logging
 import threading
 from collections.abc import Callable
@@ -11,6 +12,7 @@ import pytest
 from httpware import (
     CircuitOpenError,
     Client,
+    ClientError,
     InternalServerError,
     KeyedCircuitBreaker,
     NetworkError,
@@ -202,3 +204,122 @@ def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pytest.Lo
         _fail_n(client, "http://a.test:8080/x", 1)
     keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
     assert keys == ["https://a.test", "http://a.test:8080"]
+
+
+class _Held:
+    """A `next` that blocks until released, then answers `status`."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.entered.set()
+        self.release.wait(timeout=5.0)
+        if self.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise InternalServerError(httpx2.Response(self.status, request=request))
+        return httpx2.Response(self.status, request=request)
+
+
+def _in_thread(breaker: KeyedCircuitBreaker, request: httpx2.Request, held: _Held) -> threading.Thread:
+    def _run() -> None:
+        with contextlib.suppress(InternalServerError):
+            breaker(request, held)
+
+    thread = threading.Thread(target=_run)
+    thread.start()
+    assert held.entered.wait(timeout=5.0)
+    return thread
+
+
+def test_stale_closed_era_failure_does_not_reopen_a_half_open_circuit() -> None:
+    clock = _Clock()
+    breaker = KeyedCircuitBreaker(failure_threshold=1, reset_timeout=1.0, _now=clock)
+    request = httpx2.Request("GET", "https://a.test/x")
+    straggler_next = _Held(HTTPStatus.INTERNAL_SERVER_ERROR)
+    straggler = _in_thread(breaker, request, straggler_next)
+    opener = _Held(HTTPStatus.INTERNAL_SERVER_ERROR)
+    opener.release.set()
+    with pytest.raises(InternalServerError):
+        breaker(request, opener)
+    clock.t = 1.0
+    probe_next = _Held(HTTPStatus.OK)
+    probe = _in_thread(breaker, request, probe_next)
+    straggler_next.release.set()
+    straggler.join(timeout=5.0)
+    probe_next.release.set()
+    probe.join(timeout=5.0)
+    after = _Held(HTTPStatus.OK)
+    after.release.set()
+    response = breaker(request, after)
+    assert response.status_code == HTTPStatus.OK
+
+
+class _LockProbe(logging.Handler):
+    def __init__(self, lock: threading.Lock) -> None:
+        super().__init__()
+        self._lock = lock
+        self.held_during: list[bool] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if getattr(record, "event", None) == "circuit.rejected":
+            self.held_during.append(self._lock.locked())
+
+
+def test_rejected_event_is_emitted_outside_the_lock() -> None:
+    breaker = KeyedCircuitBreaker(failure_threshold=1, reset_timeout=30.0, _now=_Clock())
+    request = httpx2.Request("GET", "https://a.test/x")
+    opener = _Held(HTTPStatus.INTERNAL_SERVER_ERROR)
+    opener.release.set()
+    with pytest.raises(InternalServerError):
+        breaker(request, opener)
+    probe = _LockProbe(breaker._lock)  # noqa: SLF001 — the lock is the thing under test
+    logger = logging.getLogger("httpware.circuit_breaker")
+    logger.addHandler(probe)
+    try:
+        with pytest.raises(CircuitOpenError):
+            breaker(request, _Held(HTTPStatus.OK))
+    finally:
+        logger.removeHandler(probe)
+    assert probe.held_during == [False]
+
+
+class _CallOnEvent(logging.Handler):
+    """Sends a request through `call` from inside every breaker event, like a log shipper."""
+
+    def __init__(self, call: Callable[[], object]) -> None:
+        super().__init__()
+        self._call = call
+
+    def handle(self, record: logging.LogRecord) -> bool:
+        """Emit without taking the handler lock, so a deadlocked call cannot hang logging.shutdown."""
+        self.emit(record)
+        return True
+
+    def emit(self, record: logging.LogRecord) -> None:  # noqa: ARG002
+        with contextlib.suppress(ClientError):
+            self._call()
+
+
+def test_event_handler_may_send_to_another_host_through_the_same_breaker() -> None:
+    handler = _PerHost(failing={"a.test"})
+    breaker = KeyedCircuitBreaker(failure_threshold=1, _now=_Clock())
+    client = _client(handler, breaker=breaker)
+    shipper = _CallOnEvent(lambda: client.get("https://logs.test/ingest"))
+    logger = logging.getLogger("httpware.circuit_breaker")
+    logger.addHandler(shipper)
+
+    def _fail_once() -> None:
+        with contextlib.suppress(InternalServerError):
+            client.get("https://a.test/x")
+
+    thread = threading.Thread(target=_fail_once, daemon=True)
+    try:
+        with client:
+            thread.start()
+            thread.join(timeout=5.0)
+    finally:
+        logger.removeHandler(shipper)
+    assert not thread.is_alive()
+    assert handler.calls == ["a.test", "logs.test"]
