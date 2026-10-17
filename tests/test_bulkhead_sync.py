@@ -49,6 +49,27 @@ class _SlowHandler:
                 self.in_flight -= 1
 
 
+class _GatedHandler:
+    """Holds the first `capacity` requests until `release` is set; later requests return at once."""
+
+    def __init__(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.lock = threading.Lock()
+        self.entered = 0
+        self.full = threading.Event()
+        self.release = threading.Event()
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        with self.lock:
+            self.entered += 1
+            entered = self.entered
+        if entered == self.capacity:
+            self.full.set()
+        if entered <= self.capacity:
+            self.release.wait()
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+
 def _client(
     handler: Callable[[httpx2.Request], httpx2.Response],
     *,
@@ -110,7 +131,7 @@ def test_serializes_at_capacity() -> None:
 
 
 def test_acquire_timeout_rejects_when_no_slot_available() -> None:
-    handler = _SlowHandler(delay=0.1)
+    handler = _GatedHandler(capacity=_MAX_CONCURRENT_1)
     client = _client(
         handler,
         bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_FAST),
@@ -118,20 +139,20 @@ def test_acquire_timeout_rejects_when_no_slot_available() -> None:
 
     holder = threading.Thread(target=client.get, args=("https://example.test/hold",))
     holder.start()
-    # Give the holder time to acquire the only slot
-    time.sleep(0.01)
     try:
+        assert handler.full.wait(timeout=5.0)
         with pytest.raises(BulkheadFullError) as info:
             client.get("https://example.test/blocked")
         assert info.value.max_concurrent == _MAX_CONCURRENT_1
         assert info.value.acquire_timeout == _ACQUIRE_TIMEOUT_FAST
     finally:
+        handler.release.set()
         holder.join()
 
 
 def test_bulkhead_full_error_no_chaining() -> None:
     """BulkheadFullError raised on the sync timeout path has no __cause__ (no active exception)."""
-    handler = _SlowHandler(delay=0.1)
+    handler = _GatedHandler(capacity=_MAX_CONCURRENT_1)
     client = _client(
         handler,
         bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_FAST),
@@ -139,13 +160,13 @@ def test_bulkhead_full_error_no_chaining() -> None:
 
     holder = threading.Thread(target=client.get, args=("https://example.test/hold",))
     holder.start()
-    # Give the holder time to acquire the only slot
-    time.sleep(0.01)
     try:
+        assert handler.full.wait(timeout=5.0)
         with pytest.raises(BulkheadFullError) as exc_info:
             client.get("https://example.test/blocked")
         assert exc_info.value.__cause__ is None
     finally:
+        handler.release.set()
         holder.join()
 
 
@@ -171,19 +192,20 @@ def test_releases_slot_on_exception() -> None:
 
 
 def test_emits_rejected_event(caplog: pytest.LogCaptureFixture) -> None:
-    handler = _SlowHandler(delay=0.1)
+    handler = _GatedHandler(capacity=_MAX_CONCURRENT_1)
     client = _client(
         handler,
         bulkhead=Bulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_FAST),
     )
     holder = threading.Thread(target=client.get, args=("https://example.test/hold",))
     holder.start()
-    time.sleep(0.01)
     try:
+        assert handler.full.wait(timeout=5.0)
         with caplog.at_level(logging.WARNING, logger="httpware.bulkhead"), pytest.raises(BulkheadFullError):
             client.get("https://example.test/blocked")
         assert any("bulkhead rejected" in r.getMessage() for r in caplog.records)
     finally:
+        handler.release.set()
         holder.join()
 
 

@@ -40,6 +40,29 @@ class _InFlightHandler:
             self.in_flight -= 1
 
 
+class _GatedHandler:
+    """Holds the first `capacity` requests until `release` is set; later requests return at once."""
+
+    def __init__(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.entered = 0
+        self.full = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.entered += 1
+        if self.entered == self.capacity:
+            self.full.set()
+        if self.entered <= self.capacity:
+            await self.release.wait()
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    async def wait_full(self) -> None:
+        """Wait until `capacity` requests are inside the handler."""
+        async with asyncio.timeout(5.0):
+            await self.full.wait()
+
+
 @given(
     max_concurrent=st.integers(min_value=1, max_value=8),
     n_requests=st.integers(min_value=1, max_value=32),
@@ -71,24 +94,22 @@ async def test_fail_fast_rejects_when_at_capacity(
     max_concurrent: int,
     extra_requests: int,
 ) -> None:
-    handler = _InFlightHandler(delay=0.05)  # hold slots long enough for fail-fast to fire
+    handler = _GatedHandler(capacity=max_concurrent)
     transport = httpx2.MockTransport(handler)
     client = AsyncClient(
         httpx2_client=httpx2.AsyncClient(transport=transport),
         middleware=[AsyncBulkhead(max_concurrent=max_concurrent, acquire_timeout=0)],
     )
 
-    # Fill the bulkhead with max_concurrent long-running tasks.
     holders = [asyncio.create_task(client.get(f"https://example.test/hold-{i}")) for i in range(max_concurrent)]
-    await asyncio.sleep(0.005)  # let the holders acquire their slots
-
-    # Any extra requests should fail fast with BulkheadFullError.
-    for i in range(extra_requests):
-        with pytest.raises(BulkheadFullError):
-            await client.get(f"https://example.test/extra-{i}")
-
-    # Cleanup the holders.
-    await asyncio.gather(*holders)
+    try:
+        await handler.wait_full()
+        for i in range(extra_requests):
+            with pytest.raises(BulkheadFullError):
+                await client.get(f"https://example.test/extra-{i}")
+    finally:
+        handler.release.set()
+        await asyncio.gather(*holders)
 
 
 @given(
