@@ -106,7 +106,9 @@ class _ClientOptions(_ClientOptionsBase, total=False, closed=True):
     mounts: Mapping[str, httpx2.BaseTransport | None] | None
 
 
-def _is_unset(value: object) -> bool:
+def _is_unset(name: str, value: object) -> bool:
+    if name == "timeout":
+        return False
     return value is None or (isinstance(value, str) and not value)
 
 
@@ -119,6 +121,8 @@ def _select_httpx2_options(
 ) -> dict[str, typing.Any]:
     """Return the options to forward to the owned httpx2 client, dropping unset ones.
 
+    `None` and `""` mean unset, except for `timeout`, where an explicit `None` means no timeout.
+
     Raise TypeError for unsupported options or options combined with `httpx2_client`.
     """
     unsupported = sorted(options.keys() - supported)
@@ -128,7 +132,7 @@ def _select_httpx2_options(
         )
         msg = f"{owner}() got unexpected keyword arguments {unsupported}.{hints}"
         raise TypeError(msg)
-    forwarded = {name: value for name, value in options.items() if not _is_unset(value)}
+    forwarded = {name: value for name, value in options.items() if not _is_unset(name, value)}
     if httpx2_client is not None and forwarded:
         raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE.format(names=sorted(forwarded)))
     return forwarded

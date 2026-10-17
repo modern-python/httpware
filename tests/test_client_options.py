@@ -86,9 +86,35 @@ def test_unset_options_are_not_forwarded(
     httpx2_name: str,
 ) -> None:
     with patch.object(httpx2, httpx2_name) as httpx2_cls:
-        client_cls(base_url="", headers=None, timeout=None, proxy=None, transport=None)
+        client_cls(base_url="", headers=None, proxy=None, transport=None)
 
     httpx2_cls.assert_called_once_with()
+
+
+@pytest.mark.parametrize(("client_cls", "httpx2_name"), _WORLDS)
+def test_explicit_timeout_none_is_forwarded_as_no_timeout(client_cls: type, httpx2_name: str) -> None:
+    with patch.object(httpx2, httpx2_name) as httpx2_cls:
+        client_cls(timeout=None)
+
+    httpx2_cls.assert_called_once_with(timeout=None)
+
+
+@pytest.mark.parametrize(("client_cls", "httpx2_name"), _WORLDS)
+def test_explicit_timeout_none_disables_the_owned_client_timeout(client_cls: type, httpx2_name: str) -> None:
+    client = client_cls(timeout=None)
+
+    assert client._httpx2_client.timeout == httpx2.Timeout(None)  # noqa: SLF001
+    assert isinstance(client._httpx2_client, getattr(httpx2, httpx2_name))  # noqa: SLF001
+
+
+@pytest.mark.parametrize(("client_cls", "httpx2_name"), _WORLDS)
+def test_explicit_timeout_none_with_caller_owned_httpx2_client_is_typeerror(
+    client_cls: type,
+    httpx2_name: str,
+) -> None:
+    caller = getattr(httpx2, httpx2_name)(transport=httpx2.MockTransport(_ok))
+    with pytest.raises(TypeError, match=r"httpx2_client.*timeout"):
+        client_cls(httpx2_client=caller, timeout=None)
 
 
 @pytest.mark.parametrize("key", _KEYS)
