@@ -18,11 +18,7 @@ from httpware._internal.body_cap import (
     _read_capped_async,
     _validate_max_response_body_bytes,
 )
-from httpware._internal.exception_mapping import (
-    _httpx2_exception_mapper,
-    _httpx2_exception_mapper_sync,
-    map_httpx2_exception,
-)
+from httpware._internal.exception_mapping import MAPPED_HTTPX2_ERRORS, map_httpx2_exception
 from httpware._internal.status import (
     STREAMING_BODY_MARKER,
     _is_streaming_body_async,
@@ -32,6 +28,7 @@ from httpware._internal.status import (
 )
 from httpware.decoders import ResponseDecoder
 from httpware.decoders._resolver import _DecoderResolver
+from httpware.errors import TransportError
 from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
 from httpware.middleware.chain import compose, compose_async
 
@@ -444,12 +441,18 @@ class AsyncClient:
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         cap = self._max_response_body_bytes
-        async with _httpx2_exception_mapper(self._httpx2_client):
+        try:
             if cap is None:
                 response = await self._httpx2_client.send(request)
             else:
                 streaming = await _send_capped_async(self._httpx2_client, request, cap)
                 response = await _read_capped_and_close_async(streaming, cap)
+        except MAPPED_HTTPX2_ERRORS as exc:
+            raise map_httpx2_exception(exc) from exc
+        except RuntimeError as exc:
+            if self._httpx2_client.is_closed:
+                raise TransportError(str(exc)) from exc
+            raise
         _raise_on_status_error(response)
         return response
 
@@ -1294,7 +1297,7 @@ class AsyncClient:
         accessible. You lose the streaming property on errors; rare in practice.
 
         Maps httpx2 exceptions raised during the request OR body consumption to
-        httpware exceptions via _httpx2_exception_mapper.
+        httpware exceptions.
         """
         kwargs = _assemble_request_kwargs(
             params=params,
@@ -1314,15 +1317,22 @@ class AsyncClient:
             if cap is None
             else _stream_capped_async(self._httpx2_client, method, url, kwargs, cap)
         )
-        async with _httpx2_exception_mapper(self._httpx2_client), opened as response:
-            if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if cap is None:
-                    await response.aread()  # pre-read body so exc.response.content works
-                    _raise_on_status_error(response)
-                else:
-                    # Bound the error pre-read; raises ResponseTooLargeError when over cap.
-                    _raise_on_status_error(await _read_capped_async(response, cap, response.request))
-            yield response
+        try:
+            async with opened as response:
+                if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
+                    if cap is None:
+                        await response.aread()  # pre-read body so exc.response.content works
+                        _raise_on_status_error(response)
+                    else:
+                        # Bound the error pre-read; raises ResponseTooLargeError when over cap.
+                        _raise_on_status_error(await _read_capped_async(response, cap, response.request))
+                yield response
+        except MAPPED_HTTPX2_ERRORS as exc:
+            raise map_httpx2_exception(exc) from exc
+        except RuntimeError as exc:
+            if self._httpx2_client.is_closed:
+                raise TransportError(str(exc)) from exc
+            raise
 
     async def __aenter__(self) -> typing.Self:
         """Enter the async context manager; return self."""
@@ -1393,12 +1403,18 @@ class Client:
 
     def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         cap = self._max_response_body_bytes
-        with _httpx2_exception_mapper_sync(self._httpx2_client):
+        try:
             if cap is None:
                 response = self._httpx2_client.send(request)
             else:
                 streaming = _send_capped(self._httpx2_client, request, cap)
                 response = _read_capped_and_close(streaming, cap)
+        except MAPPED_HTTPX2_ERRORS as exc:
+            raise map_httpx2_exception(exc) from exc
+        except RuntimeError as exc:
+            if self._httpx2_client.is_closed:
+                raise TransportError(str(exc)) from exc
+            raise
         _raise_on_status_error(response)
         return response
 
@@ -2260,7 +2276,7 @@ class Client:
         body is pre-read so exc.response.content is accessible.
 
         Maps httpx2 exceptions raised during the request OR body consumption to
-        httpware exceptions via _httpx2_exception_mapper_sync.
+        httpware exceptions.
         """
         kwargs = _assemble_request_kwargs(
             params=params,
@@ -2280,12 +2296,19 @@ class Client:
             if cap is None
             else _stream_capped(self._httpx2_client, method, url, kwargs, cap)
         )
-        with _httpx2_exception_mapper_sync(self._httpx2_client), opened as response:
-            if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
-                if cap is None:
-                    response.read()  # pre-read body so exc.response.content works
-                    _raise_on_status_error(response)
-                else:
-                    # Bound the error pre-read; raises ResponseTooLargeError when over cap.
-                    _raise_on_status_error(_read_capped(response, cap, response.request))
-            yield response
+        try:
+            with opened as response:
+                if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
+                    if cap is None:
+                        response.read()  # pre-read body so exc.response.content works
+                        _raise_on_status_error(response)
+                    else:
+                        # Bound the error pre-read; raises ResponseTooLargeError when over cap.
+                        _raise_on_status_error(_read_capped(response, cap, response.request))
+                yield response
+        except MAPPED_HTTPX2_ERRORS as exc:
+            raise map_httpx2_exception(exc) from exc
+        except RuntimeError as exc:
+            if self._httpx2_client.is_closed:
+                raise TransportError(str(exc)) from exc
+            raise
