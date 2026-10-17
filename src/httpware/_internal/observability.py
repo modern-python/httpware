@@ -33,7 +33,9 @@ def _emit_event(
     1. Always emits a structured log record at ``level`` with ``extra=attributes``
        (so log aggregators that index ``extra`` see structured fields).
     2. If ``opentelemetry-api`` is installed, calls
-       ``trace.get_current_span().add_event(event_name, attributes=attributes)``.
+       ``trace.get_current_span().add_event(event_name, attributes=attributes)``,
+       leaving out attributes whose value is ``None``: OTel SDKs before 1.45 reject
+       them with a warning. The log record keeps them.
        When no tracer is active, ``get_current_span()`` returns a ``NonRecordingSpan``
        whose ``add_event`` is a documented no-op — so the call is unconditional
        behind the install gate. If the install gate is wrong (the namespace exists
@@ -58,5 +60,6 @@ def _emit_event(
         # add_event (e.g. a recording span with a broken exporter or attribute validation).
         # The structured log record above has already fired; CancelledError/KeyboardInterrupt
         # are not Exception subclasses and will still propagate.
+        span_attributes = {key: value for key, value in safe_attributes.items() if value is not None}
         with contextlib.suppress(Exception):
-            trace.get_current_span().add_event(event_name, attributes=safe_attributes)
+            trace.get_current_span().add_event(event_name, attributes=span_attributes)

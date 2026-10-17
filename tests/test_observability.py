@@ -158,3 +158,26 @@ def test_emit_event_swallows_add_event_failure() -> None:
             attributes={"k": "v"},
         )
     mock_span.add_event.assert_called_once()
+
+
+def test_emit_event_drops_none_attributes_from_otel_event_only(caplog: pytest.LogCaptureFixture) -> None:
+    """OTel SDKs before 1.45 reject None attribute values, so the span event omits them; the log record keeps them."""
+    mock_span = MagicMock(name="MockSpan")
+    with (
+        caplog.at_level(logging.WARNING, logger="httpware.test.observability"),
+        patch("httpware._internal.import_checker.is_otel_installed", True),
+        patch("opentelemetry.trace.get_current_span", return_value=mock_span),
+    ):
+        _emit_event(
+            _TEST_LOGGER,
+            "test.event",
+            level=logging.WARNING,
+            message="partial",
+            attributes={"last_status": None, "url": "https://example.test/x?token=s", "attempts": 3},
+        )
+
+    mock_span.add_event.assert_called_once_with(
+        "test.event",
+        attributes={"url": "https://example.test/x?token=REDACTED", "attempts": 3},
+    )
+    assert caplog.records[0].last_status is None  # ty: ignore[unresolved-attribute]
