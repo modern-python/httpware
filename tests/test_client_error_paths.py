@@ -17,6 +17,11 @@ from httpware import (
     Retry,
     ServiceUnavailableError,
     TransportError,
+    after_response,
+    async_after_response,
+    async_before_request,
+    async_on_error,
+    before_request,
 )
 from httpware._internal.status import STREAMING_BODY_MARKER
 
@@ -313,5 +318,32 @@ async def _async_swallow(request: httpx2.Request, exc: Exception) -> httpx2.Resp
     return None
 
 
+@pytest.mark.parametrize(
+    "middleware",
+    [
+        pytest.param(AsyncRetry(), id="AsyncRetry"),
+        pytest.param(_AsyncPassThrough(), id="class"),
+        pytest.param(_async_function_middleware, id="function"),
+        pytest.param(async_before_request(_async_identity), id="async_before_request"),
+        pytest.param(async_after_response(_async_response_identity), id="async_after_response"),
+        pytest.param(async_on_error(_async_swallow), id="async_on_error"),
+    ],
+)
+def test_sync_client_rejects_async_middleware(middleware: typing.Any) -> None:  # noqa: ANN401
+    with pytest.raises(TypeError, match="AsyncClient"):
+        Client(middleware=[middleware])
+
+
 def _sync_function_middleware(request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
     return next(request)
+
+
+def test_sync_client_accepts_sync_middleware() -> None:
+    Client(
+        middleware=[
+            Retry(),
+            _sync_function_middleware,
+            before_request(lambda request: request),
+            after_response(lambda _, response: response),
+        ],
+    )

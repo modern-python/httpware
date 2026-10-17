@@ -1,6 +1,7 @@
 """Client + AsyncClient — thin httpx2 wrappers with typed decoding and middleware."""
 
 import contextlib
+import inspect
 import ssl
 import typing
 from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
@@ -41,6 +42,7 @@ _UNSUPPORTED_OPTION_HINTS = {
     "event_hooks": "event_hooks=... is not supported; use middleware=... instead.",
 }
 _TOO_MANY_REDIRECTS_MESSAGE = "Exceeded maximum allowed redirects."
+_ASYNC_MIDDLEWARE_MESSAGE = "Client() got async middleware {middleware!r}; pass AsyncMiddleware to AsyncClient instead."
 _NO_AUTH = httpx2.Auth()
 _BASE_URL_QUERY_MESSAGE = (
     "base_url must not contain a query string: httpx2 appends request paths after it, "
@@ -67,6 +69,13 @@ def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
 
         decoders.append(MsgspecDecoder())
     return tuple(decoders)
+
+
+def _reject_async_middleware(middleware: Sequence[Middleware]) -> None:
+    """Raise TypeError if any middleware, or its `__call__`, is a coroutine function."""
+    for item in middleware:
+        if inspect.iscoroutinefunction(item) or inspect.iscoroutinefunction(type(item).__call__):
+            raise TypeError(_ASYNC_MIDDLEWARE_MESSAGE.format(middleware=item))
 
 
 def _reject_base_url_query(base_url: httpx2.URL | str) -> None:
@@ -1328,6 +1337,7 @@ class Client:
         **httpx2_options: typing.Unpack[_ClientOptions],
     ) -> None:
         _validate_max_response_body_bytes(max_response_body_bytes)
+        _reject_async_middleware(middleware)
         forwarded = _select_httpx2_options(
             type(self).__name__,
             httpx2_options,
