@@ -1,5 +1,6 @@
 """Response-body cap enforcement: validate, read-capped (sync + async)."""
 
+import contextlib
 import typing
 from collections.abc import Mapping
 from http import HTTPStatus
@@ -98,15 +99,20 @@ def _reject_if_declared_length_exceeds_cap(response: httpx2.Response, cap: int) 
 
 
 def _build_buffered_response(response: httpx2.Response, content: bytes, request: httpx2.Request) -> httpx2.Response:
-    """Rebuild a buffered Response from the original streaming `response` and the final decoded `content`."""
-    return httpx2.Response(
+    """Rebuild a buffered Response from the closed streaming `response` and its final decoded `content`."""
+    buffered = httpx2.Response(
         status_code=response.status_code,
         headers=_buffered_headers(response.headers),
         content=content,
         request=request,
         extensions=_safe_extensions(response.extensions),
         history=response.history,
+        default_encoding=response.default_encoding,
     )
+    buffered.next_request = response.next_request
+    with contextlib.suppress(RuntimeError):  # httpx2 has no elapsed for a stream it never closed
+        buffered.elapsed = response.elapsed
+    return buffered
 
 
 def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -> httpx2.Response:
@@ -114,8 +120,8 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
 
     Raises `ResponseTooLargeError` (reason="declared") if the declared
     Content-Length already exceeds `cap` — before any byte is read — and
-    (reason="streamed") if the decoded body crosses `cap` mid-read. Does not
-    close `response`; the caller owns the stream lifecycle.
+    (reason="streamed") if the decoded body crosses `cap` mid-read. Closes
+    `response` once its whole body is read; on any other path the caller closes it.
     """
     if not _response_has_body(request.method, response.status_code):
         response.read()  # empty body; preserve the original response (and its headers)
@@ -127,6 +133,7 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
         raise ResponseTooLargeError(
             status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
         ) from None
+    response.close()
     return _build_buffered_response(response, content, request)
 
 
@@ -143,4 +150,36 @@ async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx
             raise ResponseTooLargeError(
                 status_code=response.status_code, limit=cap, content_length=content_length, reason="streamed"
             )
+    await response.aclose()
     return _build_buffered_response(response, bytes(buf), request)
+
+
+def _fits_declared_length(response: httpx2.Response, cap: int) -> bool:
+    """Whether `response` may carry a body within `cap`: no body, or no Content-Length above it."""
+    if not _response_has_body(response.request.method, response.status_code):
+        return True
+    content_length = _parse_content_length(response.headers.get("content-length"))
+    return content_length is None or content_length <= cap
+
+
+def _discard_within_cap(response: httpx2.Response, cap: int) -> None:
+    """Read and discard `response`'s body, stopping once it is declared or read past `cap` decoded bytes."""
+    if not _fits_declared_length(response, cap):
+        return
+    read = 0
+    for chunk in response.iter_bytes():
+        read += len(chunk)
+        if read > cap:
+            return
+
+
+async def _discard_within_cap_async(response: httpx2.Response, cap: int) -> None:
+    """Async mirror of `_discard_within_cap`."""
+    if not _fits_declared_length(response, cap):
+        return
+    read = 0
+    async with contextlib.aclosing(response.aiter_bytes()) as chunks:
+        async for chunk in chunks:
+            read += len(chunk)
+            if read > cap:
+                return

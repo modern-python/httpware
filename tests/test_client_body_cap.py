@@ -5,8 +5,10 @@ ResponseTooLargeError when a response body (any status) exceeds it. stream()
 coverage lives in tests/test_client_stream*.py.
 """
 
+import datetime as dt
 import gzip
 from collections.abc import AsyncIterator
+from http import HTTPStatus
 
 import httpx2
 import pytest
@@ -204,3 +206,74 @@ async def test_async_send_none_cap_unbounded() -> None:
     request = client.build_request("GET", "https://example.test/x")
     assert (await client.send(request)).content == body
     await client.aclose()
+
+
+# ---- response attributes kept with or without a cap ----
+
+
+def _latin1_body(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+    return httpx2.Response(HTTPStatus.OK, headers={"content-type": "text/plain"}, content="café".encode("latin-1"))
+
+
+def _streamed_body(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+    return httpx2.Response(HTTPStatus.OK, content=iter([b"hello"]))
+
+
+async def _hello() -> AsyncIterator[bytes]:
+    yield b"hello"
+
+
+def _streamed_body_async(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+    return httpx2.Response(HTTPStatus.OK, content=_hello())
+
+
+def _redirect(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+    return httpx2.Response(HTTPStatus.FOUND, headers={"location": "/next"})
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+def test_sync_response_keeps_elapsed_with_or_without_a_cap(cap: int | None) -> None:
+    with Client(transport=httpx2.MockTransport(_streamed_body), max_response_body_bytes=cap) as client:
+        response = client.get("https://example.test/x")
+    assert response.elapsed >= dt.timedelta(0)
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+def test_sync_response_keeps_next_request_with_or_without_a_cap(cap: int | None) -> None:
+    with Client(transport=httpx2.MockTransport(_redirect), max_response_body_bytes=cap) as client:
+        response = client.get("https://example.test/x")
+    assert response.next_request is not None
+    assert str(response.next_request.url) == "https://example.test/next"
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+def test_sync_response_keeps_default_encoding_with_or_without_a_cap(cap: int | None) -> None:
+    with Client(
+        transport=httpx2.MockTransport(_latin1_body), default_encoding="latin-1", max_response_body_bytes=cap
+    ) as client:
+        response = client.get("https://example.test/x")
+    assert response.text == "café"
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+async def test_async_response_keeps_elapsed_with_or_without_a_cap(cap: int | None) -> None:
+    async with AsyncClient(transport=httpx2.MockTransport(_streamed_body_async), max_response_body_bytes=cap) as client:
+        response = await client.get("https://example.test/x")
+    assert response.elapsed >= dt.timedelta(0)
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+async def test_async_response_keeps_next_request_with_or_without_a_cap(cap: int | None) -> None:
+    async with AsyncClient(transport=httpx2.MockTransport(_redirect), max_response_body_bytes=cap) as client:
+        response = await client.get("https://example.test/x")
+    assert response.next_request is not None
+    assert str(response.next_request.url) == "https://example.test/next"
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+async def test_async_response_keeps_default_encoding_with_or_without_a_cap(cap: int | None) -> None:
+    async with AsyncClient(
+        transport=httpx2.MockTransport(_latin1_body), default_encoding="latin-1", max_response_body_bytes=cap
+    ) as client:
+        response = await client.get("https://example.test/x")
+    assert response.text == "café"

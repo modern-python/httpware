@@ -63,10 +63,10 @@ def _huge_challenge_body_sync(pulled: list[bytes]) -> httpx2.MockTransport:
     return _digest_challenge(huge_body)
 
 
-@pytest.mark.parametrize(("cap", "challenge_read"), [(None, True), (1024, False)])
-async def test_async_reads_a_digest_challenge_body_only_without_a_cap(
+@pytest.mark.parametrize(("cap", "chunks_pulled"), [(None, 100), (1024, 2)])
+async def test_async_reads_a_digest_challenge_body_only_up_to_the_cap(
     cap: int | None,
-    challenge_read: bool,
+    chunks_pulled: int,
 ) -> None:
     pulled: list[bytes] = []
     async with AsyncClient(
@@ -76,13 +76,31 @@ async def test_async_reads_a_digest_challenge_body_only_without_a_cap(
     ) as client:
         response = await client.get("https://example.test/")
     assert response.content == b"done"
-    assert bool(pulled) is challenge_read
+    assert len(pulled) == chunks_pulled
 
 
-@pytest.mark.parametrize(("cap", "challenge_read"), [(None, True), (1024, False)])
-def test_sync_reads_a_digest_challenge_body_only_without_a_cap(
+@pytest.mark.parametrize("cap", [None, 1024])
+async def test_async_reads_a_digest_challenge_body_to_the_end_with_or_without_a_cap(cap: int | None) -> None:
+    read_to_end: list[bool] = []
+
+    async def body() -> AsyncIterator[bytes]:
+        yield b"unauthorized"
+        read_to_end.append(True)
+
+    async with AsyncClient(
+        transport=_digest_challenge(body),
+        auth=httpx2.DigestAuth("u", "p"),
+        max_response_body_bytes=cap,
+    ) as client:
+        response = await client.get("https://example.test/")
+    assert response.content == b"done"
+    assert read_to_end == [True]
+
+
+@pytest.mark.parametrize(("cap", "chunks_pulled"), [(None, 100), (1024, 2)])
+def test_sync_reads_a_digest_challenge_body_only_up_to_the_cap(
     cap: int | None,
-    challenge_read: bool,
+    chunks_pulled: int,
 ) -> None:
     pulled: list[bytes] = []
     with Client(
@@ -92,7 +110,25 @@ def test_sync_reads_a_digest_challenge_body_only_without_a_cap(
     ) as client:
         response = client.get("https://example.test/")
     assert response.content == b"done"
-    assert bool(pulled) is challenge_read
+    assert len(pulled) == chunks_pulled
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+def test_sync_reads_a_digest_challenge_body_to_the_end_with_or_without_a_cap(cap: int | None) -> None:
+    read_to_end: list[bool] = []
+
+    def body() -> Iterator[bytes]:
+        yield b"unauthorized"
+        read_to_end.append(True)
+
+    with Client(
+        transport=_digest_challenge(body),
+        auth=httpx2.DigestAuth("u", "p"),
+        max_response_body_bytes=cap,
+    ) as client:
+        response = client.get("https://example.test/")
+    assert response.content == b"done"
+    assert read_to_end == [True]
 
 
 async def test_async_auth_flow_reading_bodies_gets_them_under_the_cap() -> None:
@@ -255,7 +291,7 @@ def test_sync_auth_steps_count_toward_max_redirects_with_or_without_a_cap(cap: i
         client.get("https://example.test/final")
 
 
-async def test_async_stream_never_reads_a_digest_challenge_body_under_a_cap() -> None:
+async def test_async_stream_reads_a_digest_challenge_body_only_up_to_the_cap() -> None:
     pulled: list[bytes] = []
     async with (
         AsyncClient(
@@ -267,10 +303,10 @@ async def test_async_stream_never_reads_a_digest_challenge_body_under_a_cap() ->
     ):
         body = await response.aread()
     assert body == b"done"
-    assert pulled == []
+    assert len(pulled) == 2  # noqa: PLR2004 (the chunk crossing the cap is the last one pulled)
 
 
-def test_sync_stream_never_reads_a_digest_challenge_body_under_a_cap() -> None:
+def test_sync_stream_reads_a_digest_challenge_body_only_up_to_the_cap() -> None:
     pulled: list[bytes] = []
     with (
         Client(
@@ -282,7 +318,7 @@ def test_sync_stream_never_reads_a_digest_challenge_body_under_a_cap() -> None:
     ):
         body = response.read()
     assert body == b"done"
-    assert pulled == []
+    assert len(pulled) == 2  # noqa: PLR2004 (the chunk crossing the cap is the last one pulled)
 
 
 async def test_async_stream_rejects_an_auth_read_body_over_the_cap() -> None:
