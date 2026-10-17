@@ -180,6 +180,8 @@ An outcome only counts against the state its request was admitted under. A reque
 
 A counted failure is a `NetworkError`, an httpware `TimeoutError`, or a `StatusError` whose status is in `failure_status_codes`. Other exceptions pass through without changing the circuit.
 
+An expired `AsyncTimeout` deadline counts only when the breaker comes before `AsyncTimeout`, as in the [composition order](#composition). With the breaker after it, the deadline cancels the breaker's call, and a cancellation is not a counted failure.
+
 A `RetryBudgetExhaustedError` from a retry placed after the breaker is classified by its `last_exception`. If the last attempt failed with a counted failure, the breaker counts one; if it failed with a 4xx, that is a success.
 
 4xx responses, 429 included, count as successes. A 429 means the service is up and throttling you; opening the circuit on it would add circuit-open rejections on top of the throttling.
@@ -309,7 +311,7 @@ In the [composition order](#composition), the keyed breaker takes the circuit br
 from httpware.middleware.resilience import AsyncTimeout
 ```
 
-Bounds the total time of everything after it in the chain. Put it first so a call, with all its retries and backoff, finishes within `timeout` seconds. When time runs out it raises `httpware.TimeoutError`.
+Bounds the total time of everything after it in the chain. Put it right after the circuit breaker and before `AsyncBulkhead` and `AsyncRetry`, so a call, with all its retries and backoff, finishes within `timeout` seconds and the breaker counts an expired deadline as a failure. When time runs out it raises `httpware.TimeoutError`.
 
 | Parameter | Default | Effect |
 |---|---|---|
@@ -319,17 +321,18 @@ Bounds the total time of everything after it in the chain. Put it first so a cal
 
 There is no sync `Timeout`, because sync Python cannot interrupt a blocking httpx2 call midway. In sync code, set `httpx2.Timeout` on the client or pass `timeout=` per request.
 
-On expiry it emits `timeout.exceeded` on `httpware.timeout`. [Composition](#composition) has an example with `AsyncTimeout` first in the chain.
+On expiry it emits `timeout.exceeded` on `httpware.timeout`. [Composition](#composition) has an example with `AsyncTimeout` in the recommended place.
 
 ## Composition
 
 httpware doesn't enforce an order, but this one is recommended:
 
 ```
-AsyncTimeout → AsyncCircuitBreaker → AsyncBulkhead → AsyncRetry → terminal
+AsyncCircuitBreaker → AsyncTimeout → AsyncBulkhead → AsyncRetry → terminal
 ```
 
-- `AsyncTimeout` comes first, so the deadline covers every retry and backoff.
+- `AsyncCircuitBreaker` comes before `AsyncTimeout`, so an expired deadline reaches the breaker as an httpware `TimeoutError`, which it counts as a failure, and an upstream that hangs opens the circuit. In the reverse order the deadline fires while the breaker is still waiting on its inner call: the breaker sees a `CancelledError`, which it doesn't count, and the circuit stays closed however long the upstream hangs. The breaker itself never waits, so the deadline loses nothing by starting after it. An open circuit still rejects at once, and the half-open probe runs under the deadline like any other call.
+- `AsyncTimeout` comes before `AsyncBulkhead` and `AsyncRetry`, so the deadline covers the wait for a slot, every retry and every backoff.
 - `AsyncCircuitBreaker` comes before `AsyncRetry`, so an open circuit rejects the call without starting the retry loop, and the breaker counts one outcome per retry sequence instead of one per attempt. Putting it before `AsyncBulkhead` too means a rejected call never takes a slot.
 - `AsyncBulkhead` comes before `AsyncRetry`, so one slot covers every attempt of a call. In the reverse order each retry takes a new slot, and under load the bulkhead admits more work than its cap intends.
 
@@ -347,8 +350,8 @@ async def main() -> None:
     async with AsyncClient(
         base_url="https://api.example.com",
         middleware=[
-            AsyncTimeout(timeout=30.0),
             AsyncCircuitBreaker(),
+            AsyncTimeout(timeout=30.0),
             AsyncBulkhead(max_concurrent=10),
             AsyncRetry(),
         ],
