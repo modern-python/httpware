@@ -12,7 +12,7 @@ under the `modern-python` org.
 ## Commands
 
 `just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth:
-run `just --list`, or read it. The one thing it does not say: `just docs-build` runs `mkdocs --strict`
+`just --list`, or read it. The one thing it does not say: `just docs-build` runs `mkdocs --strict`
 over the site only, and `docs/adr/` and `docs/agents/` are excluded from it (`exclude_docs` in
 `mkdocs.yml`) because they are read on GitHub rather than published. Their links are covered
 instead by the `links` job in `.github/workflows/_checks.yml`, which runs lychee `--offline` over
