@@ -628,8 +628,7 @@ def test_retry_after_exceeds_max_delay_does_not_consume_budget_token_sync() -> N
     assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
 
 
-def test_retry_after_huge_digit_string_does_not_crash_sync() -> None:
-    """A very large Retry-After integer string must fall back to jitter, not crash (sync)."""
+def test_retry_after_huge_digit_string_gives_up_sync() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequenceWithHeaders(
         [
@@ -638,10 +637,11 @@ def test_retry_after_huge_digit_string_does_not_crash_sync() -> None:
         ]
     )
     client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_delay=0.05))
-    response = client.get("https://example.test/x")
-    assert response.status_code == HTTPStatus.OK
-    assert len(sleeper.calls) == 1
-    assert 0.0 <= sleeper.calls[0] <= 0.05  # noqa: PLR2004 — 0.05 matches max_delay literal above
+    with pytest.raises(ServiceUnavailableError) as exc_info:
+        client.get("https://example.test/x")
+    assert any("exceeded max_delay" in n for n in getattr(exc_info.value, "__notes__", []))
+    assert sleeper.calls == []
+    assert handler.calls == 1
 
 
 def test_method_ineligible_with_streaming_body_does_not_attach_streaming_note() -> None:

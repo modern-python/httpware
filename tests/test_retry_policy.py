@@ -167,6 +167,25 @@ def test_respect_retry_after_false_ignores_header() -> None:
     assert delay <= _BASE_DELAY  # jitter, not the 2.0 header value
 
 
+@pytest.mark.parametrize(
+    "header",
+    ["9" * 309, "9" * 400, "9" * 5000, " " + "9" * 5000 + " "],
+    ids=["309-digits", "400-digits", "5000-digits", "5000-digits-padded"],
+)
+def test_retry_after_too_large_for_a_float_gives_up(header: str) -> None:
+    request = _request("PUT")
+    exc = _status_exc(503, request, retry_after=header)
+    with pytest.raises(ServiceUnavailableError) as ei:
+        _policy().decide(attempt=0, request=request, exc=exc)
+    assert any("Retry-After (infs) exceeded max_delay" in note for note in _notes(ei.value))
+
+
+def test_retry_after_hugely_negative_counts_as_zero() -> None:
+    request = _request("PUT")
+    exc = _status_exc(503, request, retry_after="-" + "9" * 400)
+    assert _policy().decide(attempt=0, request=request, exc=exc) == 0.0
+
+
 @pytest.mark.parametrize("zone", ["-0000", "", "XYZ"])
 def test_retry_after_date_without_a_usable_zone_is_read_as_gmt(zone: str) -> None:
     future = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=_DATE_AHEAD_SECONDS)

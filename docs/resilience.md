@@ -40,7 +40,7 @@ To bound the total time across all attempts, put [`AsyncTimeout`](#asynctimeout)
 - integer seconds: `Retry-After: 30` waits 30 seconds.
 - an HTTP date (RFC 5322): `Retry-After: Wed, 21 Oct 2026 07:28:00 GMT` waits until that time, or not at all if it has passed.
 
-Either form over `max_delay` makes `AsyncRetry` give up as described above. Negative integers count as 0. Malformed values are ignored and the jittered backoff is used instead.
+Either form over `max_delay` makes `AsyncRetry` give up as described above. An integer too large to fit in a float counts as an infinite wait, so it always exceeds `max_delay`. Negative integers count as 0. Malformed values are ignored and the jittered backoff is used instead.
 
 ### Streaming-body refusal
 

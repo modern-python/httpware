@@ -79,11 +79,17 @@ def _validate_retry_config(*, max_attempts: int, base_delay: float, max_delay: f
 
 
 def _parse_retry_after(value: str) -> float | None:
-    """Parse a Retry-After header value. Returns None on malformed input."""
+    """Parse a Retry-After header value. Returns None on malformed input, inf for integers too large for a float."""
     try:
-        return max(0.0, float(int(value)))  # clamp: negative integers are malformed servers
-    except (ValueError, OverflowError):
-        pass
+        seconds = int(value)
+    except ValueError:
+        if value.strip().isdigit() and value.isascii():
+            return math.inf  # past int()'s digit limit
+    else:
+        try:
+            return max(0.0, float(seconds))  # clamp: negative integers are malformed servers
+        except OverflowError:
+            return math.inf if seconds > 0 else 0.0
     try:
         parsed = email.utils.parsedate_to_datetime(value)
     except (TypeError, ValueError, OverflowError):
