@@ -400,16 +400,39 @@ def _request_kwargs(
 def _build_request(
     client: httpx2.Client | httpx2.AsyncClient, method: str, url: httpx2.URL | str, kwargs: dict[str, typing.Any]
 ) -> httpx2.Request:
-    """Build via `client`, keeping the URL's own query bytes ahead of any params, which httpx2 would replace."""
-    if (isinstance(url, str) and "?" not in url) or (kwargs.get("params") is None and not client.params):
-        return client.build_request(method, url, **kwargs)
-    parsed = httpx2.URL(url)
-    if not parsed.query:
-        return client.build_request(method, url, **kwargs)
-    request = client.build_request(method, parsed.copy_with(query=None), **kwargs)
+    """Build via `client`, keeping the URL's own query bytes ahead of any params; map InvalidURL to TransportError."""
+    try:
+        if (isinstance(url, str) and "?" not in url) or (kwargs.get("params") is None and not client.params):
+            return client.build_request(method, url, **kwargs)
+        parsed = httpx2.URL(url)
+        if not parsed.query:
+            return client.build_request(method, url, **kwargs)
+        request = client.build_request(method, parsed.copy_with(query=None), **kwargs)
+    except httpx2.InvalidURL as exc:
+        raise map_httpx2_exception(exc) from exc
     built_query = request.url.query
     request.url = request.url.copy_with(query=parsed.query + b"&" + built_query if built_query else parsed.query)
     return request
+
+
+def _reject_sync_stream(response: httpx2.Response) -> None:
+    """Raise TypeError unless an unread response from AsyncClient middleware has an async stream."""
+    if not isinstance(response.stream, httpx2.AsyncByteStream):
+        msg = (
+            "AsyncClient middleware returned a response with a sync stream;"
+            " AsyncClient middleware must return async-streamed responses"
+        )
+        raise TypeError(msg)
+
+
+def _reject_async_stream(response: httpx2.Response) -> None:
+    """Raise TypeError unless an unread response from Client middleware has a sync stream."""
+    if not isinstance(response.stream, httpx2.SyncByteStream):
+        msg = (
+            "Client middleware returned a response with an async stream;"
+            " Client middleware must return sync-streamed responses"
+        )
+        raise TypeError(msg)
 
 
 class AsyncClient:
@@ -496,6 +519,7 @@ class AsyncClient:
         bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
         if not response.is_closed:
+            _reject_sync_stream(response)
             await response.aread()
         return bound.decode(response)
 
@@ -521,11 +545,15 @@ class AsyncClient:
         bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
         if not response.is_closed:
+            _reject_sync_stream(response)
             await response.aread()
         return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
-        """Delegate request construction to the wrapped httpx2.AsyncClient, keeping the URL's own query."""
+        """Delegate request construction to the wrapped httpx2.AsyncClient, keeping the URL's own query.
+
+        An invalid URL raises TransportError, with the httpx2.InvalidURL as `__cause__`.
+        """
         return _build_request(self._httpx2_client, method, url, kwargs)
 
     def _prepare_request(
@@ -537,10 +565,7 @@ class AsyncClient:
         defaults: Mapping[str, object],
     ) -> httpx2.Request:
         kwargs = _request_kwargs(self, caller, options, defaults)
-        try:
-            request = _build_request(self._httpx2_client, method, url, kwargs)
-        except httpx2.InvalidURL as exc:
-            raise map_httpx2_exception(exc) from exc
+        request = _build_request(self._httpx2_client, method, url, kwargs)
         if ("content" in kwargs or "data" in kwargs or "files" in kwargs) and (
             _is_streaming_body_async(kwargs.get("content"))
             or _is_streaming_body_async(kwargs.get("data"))
@@ -1035,6 +1060,8 @@ class Client:
 
         bound = self._decoder_resolver.resolve(response_model)
         response = self._dispatch(request)
+        if not response.is_closed:
+            _reject_async_stream(response)
         return bound.decode(response)
 
     def send_with_response(
@@ -1058,10 +1085,15 @@ class Client:
     def _send_with_response(self, request: httpx2.Request, response_model: type[T]) -> tuple[httpx2.Response, T]:
         bound = self._decoder_resolver.resolve(response_model)
         response = self._dispatch(request)
+        if not response.is_closed:
+            _reject_async_stream(response)
         return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
-        """Delegate request construction to the wrapped httpx2.Client, keeping the URL's own query."""
+        """Delegate request construction to the wrapped httpx2.Client, keeping the URL's own query.
+
+        An invalid URL raises TransportError, with the httpx2.InvalidURL as `__cause__`.
+        """
         return _build_request(self._httpx2_client, method, url, kwargs)
 
     def _prepare_request(
@@ -1073,10 +1105,7 @@ class Client:
         defaults: Mapping[str, object],
     ) -> httpx2.Request:
         kwargs = _request_kwargs(self, caller, options, defaults)
-        try:
-            request = _build_request(self._httpx2_client, method, url, kwargs)
-        except httpx2.InvalidURL as exc:
-            raise map_httpx2_exception(exc) from exc
+        request = _build_request(self._httpx2_client, method, url, kwargs)
         if ("content" in kwargs or "data" in kwargs or "files" in kwargs) and (
             _is_streaming_body_sync(kwargs.get("content"))
             or _is_streaming_body_sync(kwargs.get("data"))

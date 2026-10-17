@@ -191,6 +191,8 @@ with Client(base_url="https://api.example.com", middleware=[add_request_id]) as 
 
 Sync and async middleware don't mix: pass `Middleware` to `Client` and `AsyncMiddleware` to `AsyncClient`. `Client` raises `TypeError` when you build it with async middleware, such as `AsyncRetry` or a function wrapped by `@async_before_request`.
 
+The same split applies to a response your middleware builds itself. If its body comes from an iterator, use an async iterator on `AsyncClient` and a sync one on `Client`. With the wrong kind, a call with `response_model` raises `TypeError`.
+
 ## See also
 
 - [Resilience](resilience.md): the built-in middleware and the order to compose them in.

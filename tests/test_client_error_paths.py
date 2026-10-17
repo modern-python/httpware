@@ -402,3 +402,60 @@ async def test_async_verb_decodes_unread_async_stream_from_middleware() -> None:
     assert await client.get("https://example.test/x", response_model=dict) == {"id": 1}
     _, decoded = await client.get_with_response("https://example.test/x", response_model=dict)
     assert decoded == {"id": 1}
+
+
+async def test_async_build_request_invalid_url_maps_to_transport_error() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok))
+    with pytest.raises(TransportError, match="non-printable") as info:
+        client.build_request("GET", _INVALID_URL)
+    assert not isinstance(info.value, NetworkError)
+    assert isinstance(info.value.__cause__, httpx2.InvalidURL)
+
+
+def test_sync_build_request_invalid_url_maps_to_transport_error() -> None:
+    client = Client(transport=httpx2.MockTransport(_ok))
+    with pytest.raises(TransportError, match="non-printable") as info:
+        client.build_request("GET", _INVALID_URL)
+    assert not isinstance(info.value, NetworkError)
+    assert isinstance(info.value.__cause__, httpx2.InvalidURL)
+
+
+def _sync_json_chunks() -> Iterator[bytes]:
+    yield b'{"id": 1}'
+
+
+class _UnreadSyncStreamResponse:
+    async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002, ARG002
+        return httpx2.Response(HTTPStatus.OK, content=_sync_json_chunks(), request=request)
+
+
+class _SyncMiddlewareAsyncStreamResponse:
+    def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, ARG002
+        return httpx2.Response(HTTPStatus.OK, content=_async_json_chunks(), request=request)
+
+
+async def test_async_send_rejects_sync_stream_from_middleware() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok), middleware=[_UnreadSyncStreamResponse()])
+    with pytest.raises(TypeError, match="sync stream"):
+        await client.get("https://example.test/x", response_model=dict)
+    with pytest.raises(TypeError, match="AsyncClient middleware must return"):
+        await client.get_with_response("https://example.test/x", response_model=dict)
+
+
+def test_sync_send_rejects_async_stream_from_middleware() -> None:
+    client = Client(transport=httpx2.MockTransport(_ok), middleware=[_SyncMiddlewareAsyncStreamResponse()])
+    with pytest.raises(TypeError, match="async stream"):
+        client.get("https://example.test/x", response_model=dict)
+    with pytest.raises(TypeError, match="Client middleware must return"):
+        client.get_with_response("https://example.test/x", response_model=dict)
+
+
+def test_sync_send_decodes_unread_sync_stream_from_middleware() -> None:
+    class _UnreadSync:
+        def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002, ARG002
+            return httpx2.Response(HTTPStatus.OK, content=_sync_json_chunks(), request=request)
+
+    client = Client(transport=httpx2.MockTransport(_ok), middleware=[_UnreadSync()])
+    assert client.get("https://example.test/x", response_model=dict) == {"id": 1}
+    _, decoded = client.get_with_response("https://example.test/x", response_model=dict)
+    assert decoded == {"id": 1}
