@@ -49,7 +49,7 @@ ClientError                          (catch-all for anything httpware raises)
 
 Only statuses from 400 to 599 raise. Any other status returns the response unchanged.
 
-The numbered rows are exported as `STATUS_TO_EXCEPTION`, a `Mapping[int, type[StatusError]]`, so you can look up a class in code with `STATUS_TO_EXCEPTION.get(404)`. The two fallback rows are not in the mapping.
+The numbered rows are exported as `STATUS_TO_EXCEPTION`, a `Mapping[int, type[StatusError]]`, so you can look up a class in code with `STATUS_TO_EXCEPTION.get(404)`. The two fallback rows are not in the mapping. The mapping is read-only, and assigning to it raises `TypeError`. To raise your own class for a status, catch the httpware error in a middleware and raise yours from it.
 
 ## Catching strategies
 

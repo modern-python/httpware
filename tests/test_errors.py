@@ -83,6 +83,11 @@ def test_status_to_exception_table() -> None:
     } == STATUS_TO_EXCEPTION
 
 
+def test_status_to_exception_cannot_be_mutated() -> None:
+    with pytest.raises(TypeError):
+        STATUS_TO_EXCEPTION[418] = BadRequestError  # ty: ignore[invalid-assignment]
+
+
 def test_status_error_stores_response() -> None:
     response = _make_response(404)
     exc = NotFoundError(response)

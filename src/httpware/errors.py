@@ -14,6 +14,7 @@ authors must redact those before logging.
 """
 
 import builtins
+import types
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -128,17 +129,19 @@ class ServiceUnavailableError(ServerStatusError):
     """HTTP 503."""
 
 
-STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {
-    400: BadRequestError,
-    401: UnauthorizedError,
-    403: ForbiddenError,
-    404: NotFoundError,
-    409: ConflictError,
-    422: UnprocessableEntityError,
-    429: RateLimitedError,
-    500: InternalServerError,
-    503: ServiceUnavailableError,
-}
+STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = types.MappingProxyType(
+    {
+        400: BadRequestError,
+        401: UnauthorizedError,
+        403: ForbiddenError,
+        404: NotFoundError,
+        409: ConflictError,
+        422: UnprocessableEntityError,
+        429: RateLimitedError,
+        500: InternalServerError,
+        503: ServiceUnavailableError,
+    }
+)
 
 
 class RetryBudgetExhaustedError(ClientError):
