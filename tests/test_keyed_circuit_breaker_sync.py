@@ -206,6 +206,18 @@ def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pytest.Lo
     assert keys == ["https://a.test", "http://a.test:8080"]
 
 
+def test_circuit_key_of_a_custom_key_is_its_str(caplog: pytest.LogCaptureFixture) -> None:
+    handler = _PerHost(failing={"a.test"})
+    breaker = KeyedCircuitBreaker(failure_threshold=1, key=lambda request: (request.url.host, 1))
+    with (
+        _client(handler, breaker=breaker) as client,
+        caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"),
+    ):
+        _fail_n(client, "https://a.test/x", 1)
+    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
+    assert keys == ["('a.test', 1)"]
+
+
 class _Held:
     """A `next` that blocks until released, then answers `status`."""
 

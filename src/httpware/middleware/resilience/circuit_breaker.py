@@ -480,7 +480,12 @@ def _call_sync(
     return response
 
 
-def _origin(request: httpx2.Request) -> str:
+def _origin(request: httpx2.Request) -> tuple[str, bytes, int | None]:
+    url = request.url
+    return url.scheme, url.raw_host, url.port
+
+
+def _origin_label(request: httpx2.Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc.decode('ascii')}"
 
 
@@ -501,14 +506,15 @@ class _KeyedStates:
         circuit_key = self._key(request)
         state = self._states.get(circuit_key)
         if state is None:
-            state = self._create(circuit_key)
+            state = self._create(circuit_key, request)
         return state
 
-    def _create(self, circuit_key: Hashable) -> _CircuitBreakerState:
+    def _create(self, circuit_key: Hashable, request: httpx2.Request) -> _CircuitBreakerState:
+        label = _origin_label(request) if self._key is _origin else str(circuit_key)
         with self._create_lock:
             state = self._states.get(circuit_key)
             if state is None:
-                state = self._states[circuit_key] = self._new_state(key=str(circuit_key))
+                state = self._states[circuit_key] = self._new_state(key=label)
             return state
 
 
@@ -609,8 +615,8 @@ class CircuitBreaker:
 class AsyncKeyedCircuitBreaker:
     """Async circuit breaker with one independent circuit per circuit key.
 
-    `key` maps a request to its circuit key; the default is the request URL's origin as a string
-    such as "https://api.example" (scheme, host and non-default port; never userinfo). Every
+    `key` maps a request to its circuit key; the default is the request URL's origin (scheme, host
+    and non-default port; never userinfo), shown in events as "https://api.example". Every
     circuit behaves exactly like an AsyncCircuitBreaker built with the same arguments. Circuits
     are created on first use and kept for the breaker's lifetime, so the key must take a small,
     bounded set of values.
