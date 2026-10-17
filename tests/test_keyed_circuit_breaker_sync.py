@@ -12,6 +12,7 @@ import pytest
 from httpware import (
     CircuitOpenError,
     Client,
+    ClientError,
     InternalServerError,
     KeyedCircuitBreaker,
     NetworkError,
@@ -282,3 +283,43 @@ def test_rejected_event_is_emitted_outside_the_lock() -> None:
     finally:
         logger.removeHandler(probe)
     assert probe.held_during == [False]
+
+
+class _CallOnEvent(logging.Handler):
+    """Sends a request through `call` from inside every breaker event, like a log shipper."""
+
+    def __init__(self, call: Callable[[], object]) -> None:
+        super().__init__()
+        self._call = call
+
+    def handle(self, record: logging.LogRecord) -> bool:
+        """Emit without taking the handler lock, so a deadlocked call cannot hang logging.shutdown."""
+        self.emit(record)
+        return True
+
+    def emit(self, record: logging.LogRecord) -> None:  # noqa: ARG002
+        with contextlib.suppress(ClientError):
+            self._call()
+
+
+def test_event_handler_may_send_to_another_host_through_the_same_breaker() -> None:
+    handler = _PerHost(failing={"a.test"})
+    breaker = KeyedCircuitBreaker(failure_threshold=1, _now=_Clock())
+    client = _client(handler, breaker=breaker)
+    shipper = _CallOnEvent(lambda: client.get("https://logs.test/ingest"))
+    logger = logging.getLogger("httpware.circuit_breaker")
+    logger.addHandler(shipper)
+
+    def _fail_once() -> None:
+        with contextlib.suppress(InternalServerError):
+            client.get("https://a.test/x")
+
+    thread = threading.Thread(target=_fail_once, daemon=True)
+    try:
+        with client:
+            thread.start()
+            thread.join(timeout=5.0)
+    finally:
+        logger.removeHandler(shipper)
+    assert not thread.is_alive()
+    assert handler.calls == ["a.test", "logs.test"]

@@ -744,8 +744,7 @@ class _HeldCalls:
     async def start(self) -> int:
         """Start a call; return its index once it is blocked in `next` (or already rejected).
 
-        The task swallows the breaker's error itself: on 3.11, awaiting a task that failed loses
-        coverage line events in the awaiting test.
+        The task swallows the breaker's error itself; on 3.11 awaiting a failed task loses coverage.
         """
         self._tasks.append(asyncio.create_task(self._call()))
         await asyncio.sleep(0)
@@ -897,3 +896,82 @@ async def test_rejected_event_is_emitted_at_most_once_per_second(caplog: pytest.
                 await breaker(httpx2.Request("GET", "https://example.test/x"), _unreachable)
     rejected = [r for r in caplog.records if r.event == "circuit.rejected"]  # ty: ignore[unresolved-attribute]
     assert [r.suppressed for r in rejected] == [0, 4]  # ty: ignore[unresolved-attribute]
+
+
+# ── rejection accounting runs per outage episode ──
+
+
+async def _ok(request: httpx2.Request) -> httpx2.Response:
+    return httpx2.Response(HTTPStatus.OK, request=request)
+
+
+async def _reject(breaker: AsyncCircuitBreaker) -> None:
+    async def _unreachable(request: httpx2.Request) -> httpx2.Response:  # pragma: no cover — OPEN never forwards
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    with pytest.raises(CircuitOpenError):
+        await breaker(httpx2.Request("GET", "https://example.test/x"), _unreachable)
+
+
+def _events(caplog: pytest.LogCaptureFixture, name: str) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if getattr(r, "event", None) == name]
+
+
+async def test_first_rejection_of_a_new_outage_is_emitted(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=0.1, _now=clock)
+    with caplog.at_level(logging.INFO, logger="httpware.circuit_breaker"):
+        await _open_now(breaker)
+        await _reject(breaker)
+        clock.advance(0.1)
+        await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+        await _open_now(breaker)
+        await _reject(breaker)
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+
+
+async def test_closed_event_reports_every_rejection_of_the_outage(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=5.0, _now=clock)
+    with caplog.at_level(logging.INFO, logger="httpware.circuit_breaker"):
+        await _open_now(breaker)
+        await _reject(breaker)
+        await _reject(breaker)
+        clock.advance(5.0)
+        await _open_now(breaker)
+        await _reject(breaker)
+        await _reject(breaker)
+        clock.advance(5.0)
+        await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 1]  # ty: ignore[unresolved-attribute]
+    assert [r.rejected for r in _events(caplog, "circuit.closed")] == [4]  # ty: ignore[unresolved-attribute]
+
+
+async def test_suppressed_never_counts_a_previous_outage(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=5.0, _now=clock)
+    with caplog.at_level(logging.INFO, logger="httpware.circuit_breaker"):
+        await _open_now(breaker)
+        for _ in range(3):
+            await _reject(breaker)
+        clock.advance(5.0)
+        await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+        await _open_now(breaker)
+        await _reject(breaker)
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+
+
+async def test_events_of_one_call_arrive_in_transition_order(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=1.0, _now=clock)
+    with caplog.at_level(logging.INFO, logger="httpware.circuit_breaker"):
+        await _open_now(breaker)
+        await _reject(breaker)
+        clock.advance(1.0)
+        await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+    assert [r.event for r in caplog.records] == [  # ty: ignore[unresolved-attribute]
+        "circuit.opened",
+        "circuit.rejected",
+        "circuit.half_open",
+        "circuit.closed",
+    ]

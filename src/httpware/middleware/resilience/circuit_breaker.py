@@ -22,8 +22,10 @@ State machine (classic / consecutive-failure):
 An outcome applies only to the state its request was admitted under: a request still in
 flight when the circuit changes state finishes without touching the circuit.
 
-circuit.rejected is emitted at most once per second per circuit; its `suppressed`
-attribute counts the rejections not emitted since the previous one.
+An outage episode runs from CLOSED to OPEN until the circuit is CLOSED again. Within one,
+circuit.rejected is emitted at most once per second; its `suppressed` attribute counts the
+rejections not emitted since the previous one, and the first rejection of an episode is
+always emitted. circuit.closed carries `rejected`, the episode's total rejection count.
 
 Trip modes:
     Classic (default) — opens when consecutive counted-failures reach failure_threshold.
@@ -37,8 +39,9 @@ Trip modes:
 The lock-free _CircuitBreakerState holds the transition logic, shared by both wrappers.
 AsyncCircuitBreaker relies on asyncio atomicity (no await inside a transition) plus a
 single-event-loop guard; CircuitBreaker (sync) serializes transitions with a
-threading.Lock. Both are sharable across clients (one shared circuit); a sync instance
-cannot be shared with an async one.
+threading.Lock and emits events only after releasing it, so a logging handler may send
+requests through the same breaker. Both are sharable across clients (one shared circuit);
+a sync instance cannot be shared with an async one.
 """
 
 import asyncio
@@ -156,21 +159,32 @@ class _RollingWindow:
         self._failure = [0] * _BUCKET_COUNT
 
 
-class _RejectionError(Exception):
-    """Raised by `admit` to refuse a request; `message` is None when the event is suppressed."""
+_Event = tuple[str, int, str, dict[str, typing.Any]]
 
-    def __init__(self, retry_after: float | None, message: str | None, suppressed: int) -> None:
+
+class _HalfOpened(Exception):  # noqa: N818
+    """Raised by `admit` when it moved the circuit to HALF_OPEN; carries the probe's ticket and events."""
+
+    def __init__(self, ticket: int, events: list[_Event] | None) -> None:
+        self.ticket = ticket
+        self.events = events
+
+
+class _RejectionError(Exception):
+    """Raised by `admit` to refuse a request, carrying the events to emit once the lock is released."""
+
+    def __init__(self, retry_after: float | None, events: list[_Event] | None) -> None:
         self.retry_after = retry_after
-        self.message = message
-        self.suppressed = suppressed
+        self.events = events
 
 
 class _CircuitBreakerState:
     """Lock-free circuit-breaker state machine shared by the sync + async wrappers.
 
-    Every method is synchronous and performs no I/O beyond logging. The async wrapper
-    calls these directly (atomic under a single event loop because no await occurs
-    inside a transition); the sync wrapper wraps `admit` and `record` in a threading.Lock.
+    Every method is synchronous and performs no I/O. The async wrapper calls these directly
+    (atomic under a single event loop because no await occurs inside a transition); the sync
+    wrapper wraps `admit` and `record` in a threading.Lock. Transitions queue their events;
+    the caller takes them with the outcome and emits them outside any lock.
     `admit` hands out a ticket: the epoch, which every transition advances by two, plus one
     for the probe. `record` ignores a ticket from an earlier epoch.
     """
@@ -223,6 +237,8 @@ class _CircuitBreakerState:
         self._epoch = 0
         self._rejected_emitted_at = -math.inf
         self._rejections_suppressed = 0
+        self._episode_rejections = 0
+        self._events: list[_Event] | None = None
 
     @property
     def state(self) -> CircuitState:
@@ -230,18 +246,20 @@ class _CircuitBreakerState:
         return self._state
 
     def admit(self, request: httpx2.Request) -> int:
-        """Return the request's ticket, or raise _RejectionError. No await inside."""
+        """Return the request's ticket, or raise _RejectionError or _HalfOpened. No await inside."""
         if self._state is CircuitState.CLOSED:
             return self._epoch
         now = self._now()
         if self._state is CircuitState.OPEN:
             elapsed = now - self._opened_at
             if elapsed < self._reset_timeout:
-                self._reject(now, max(0.0, self._reset_timeout - elapsed), "circuit open — rejecting request")
+                self._reject(request, now, max(0.0, self._reset_timeout - elapsed), "circuit open — rejecting request")
             self._move_to(CircuitState.HALF_OPEN)
-            self._emit(request, "circuit.half_open", logging.INFO, "circuit half-open — admitting probe", {})
-        elif self._probe_in_flight:
-            self._reject(now, None, "circuit half-open — rejecting request (probe in flight)")
+            self._probe_in_flight = True
+            self._queue(request, "circuit.half_open", logging.INFO, "circuit half-open — admitting probe", {})
+            raise _HalfOpened(self._epoch + _PROBE, self.take_events())
+        if self._probe_in_flight:
+            self._reject(request, now, None, "circuit half-open — rejecting request (probe in flight)")
         self._probe_in_flight = True
         return self._epoch + _PROBE
 
@@ -255,8 +273,11 @@ class _CircuitBreakerState:
             return _FAILURE
         return _FOREIGN
 
-    def record(self, ticket: int, outcome: int, request: httpx2.Request) -> None:
-        """Apply an admitted request's outcome; a no-op if the circuit has transitioned since."""
+    def record(self, ticket: int, outcome: int, request: httpx2.Request) -> list[_Event] | None:
+        """Apply an admitted request's outcome and return the events it queued.
+
+        A no-op if the circuit has transitioned since the ticket was issued.
+        """
         if ticket == self._epoch:
             if outcome == _SUCCESS and not self._rate_mode:
                 self._consecutive_failures = 0
@@ -268,26 +289,26 @@ class _CircuitBreakerState:
                 self._record_probe_success(request)
             elif outcome == _FAILURE:
                 self._open(request, failures=1)  # 1 = the single probe failure that re-opened the circuit
+        events = self._events
+        if events is not None:
+            self._events = None
+        return events
 
-    def rejected(self, request: httpx2.Request, rejection: _RejectionError) -> CircuitOpenError:
-        """Emit the rejection's event unless `admit` suppressed it; return the error to raise."""
-        if rejection.message is not None:
-            self._emit(
-                request,
-                "circuit.rejected",
-                logging.WARNING,
-                rejection.message,
-                {"retry_after": rejection.retry_after, "suppressed": rejection.suppressed},
-            )
-        return CircuitOpenError(retry_after=rejection.retry_after)
+    def take_events(self) -> list[_Event] | None:
+        """Return and clear the queued events."""
+        events, self._events = self._events, None
+        return events
 
-    def _reject(self, now: float, retry_after: float | None, message: str) -> typing.NoReturn:
+    def _reject(self, request: httpx2.Request, now: float, retry_after: float | None, message: str) -> typing.NoReturn:
+        self._episode_rejections += 1
         if now - self._rejected_emitted_at < _REJECTED_EVENT_INTERVAL:
             self._rejections_suppressed += 1
-            raise _RejectionError(retry_after, None, 0)
+            raise _RejectionError(retry_after, None)
         self._rejected_emitted_at = now
         suppressed, self._rejections_suppressed = self._rejections_suppressed, 0
-        raise _RejectionError(retry_after, message, suppressed)
+        attributes = {"retry_after": retry_after, "suppressed": suppressed}
+        self._queue(request, "circuit.rejected", logging.WARNING, message, attributes)
+        raise _RejectionError(retry_after, self.take_events())
 
     def _record_closed(self, request: httpx2.Request, *, failed: bool) -> None:
         if self._rate_mode:
@@ -305,18 +326,23 @@ class _CircuitBreakerState:
             self._consecutive_successes = 0
             if self._rate_mode:
                 self._window.clear()  # ty: ignore[unresolved-attribute]
-            self._emit(request, "circuit.closed", logging.INFO, "circuit closed — service recovered", {})
+            attributes = {"rejected": self._episode_rejections}
+            self._queue(request, "circuit.closed", logging.INFO, "circuit closed — service recovered", attributes)
 
     def _move_to(self, state: CircuitState) -> None:
         self._state = state
         self._epoch += _EPOCH_STEP
 
     def _enter_open(self, request: httpx2.Request, message: str, attributes: dict[str, typing.Any]) -> None:
+        if self._state is CircuitState.CLOSED:
+            self._rejected_emitted_at = -math.inf
+            self._rejections_suppressed = 0
+            self._episode_rejections = 0
         self._move_to(CircuitState.OPEN)
         self._opened_at = self._now()
         self._consecutive_failures = 0
         self._consecutive_successes = 0
-        self._emit(request, "circuit.opened", logging.WARNING, message, attributes)
+        self._queue(request, "circuit.opened", logging.WARNING, message, attributes)
 
     def _open(self, request: httpx2.Request, *, failures: int) -> None:
         self._enter_open(
@@ -346,7 +372,7 @@ class _CircuitBreakerState:
         if threshold is not None and total >= self._minimum_calls and failures / total >= threshold:
             self._open_rate(request, total=total, failures=failures)
 
-    def _emit(
+    def _queue(
         self,
         request: httpx2.Request,
         event_name: str,
@@ -357,20 +383,45 @@ class _CircuitBreakerState:
         attributes = {**attributes, "method": request.method, "url": str(request.url)}
         if self._key is not None:
             attributes["circuit_key"] = self._key
+        if self._events is None:
+            self._events = []
+        self._events.append((event_name, level, message, attributes))
+
+
+def _emit_events(events: list[_Event]) -> None:
+    for event_name, level, message, attributes in events:
         _emit_event(_LOGGER, event_name, level=level, message=message, attributes=attributes)
+
+
+def _half_opened(half_opened: _HalfOpened) -> int:
+    if half_opened.events is not None:
+        _emit_events(half_opened.events)
+    return half_opened.ticket
+
+
+def _rejected(rejection: _RejectionError) -> CircuitOpenError:
+    if rejection.events is not None:
+        _emit_events(rejection.events)
+    return CircuitOpenError(retry_after=rejection.retry_after)
 
 
 async def _call_async(state: _CircuitBreakerState, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
     try:
         ticket = state.admit(request)
     except _RejectionError as rejection:
-        raise state.rejected(request, rejection) from None
+        raise _rejected(rejection) from None
+    except _HalfOpened as half_opened:
+        ticket = _half_opened(half_opened)
     try:
         response = await next(request)
     except BaseException as exc:
-        state.record(ticket, state.classify(exc), request)
+        events = state.record(ticket, state.classify(exc), request)
+        if events is not None:
+            _emit_events(events)
         raise
-    state.record(ticket, _SUCCESS, request)
+    events = state.record(ticket, _SUCCESS, request)
+    if events is not None:
+        _emit_events(events)
     return response
 
 
@@ -384,16 +435,22 @@ def _call_sync(
         with lock:
             ticket = state.admit(request)
     except _RejectionError as rejection:
-        raise state.rejected(request, rejection) from None
+        raise _rejected(rejection) from None
+    except _HalfOpened as half_opened:
+        ticket = _half_opened(half_opened)
     try:
         response = next(request)
     except BaseException as exc:
         outcome = state.classify(exc)
         with lock:
-            state.record(ticket, outcome, request)
+            events = state.record(ticket, outcome, request)
+        if events is not None:
+            _emit_events(events)
         raise
     with lock:
-        state.record(ticket, _SUCCESS, request)
+        events = state.record(ticket, _SUCCESS, request)
+    if events is not None:
+        _emit_events(events)
     return response
 
 

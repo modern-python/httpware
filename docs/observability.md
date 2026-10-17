@@ -11,7 +11,7 @@ The logger and event names below are a stable public contract:
 | `httpware.circuit_breaker` | `circuit.opened` (WARNING), `circuit.rejected` (WARNING), `circuit.half_open` (INFO), `circuit.closed` (INFO) |
 | `httpware.timeout` | `timeout.exceeded` (WARNING) |
 
-Each log record has an `event` field holding the event name, such as `event="circuit.opened"`, which you can filter on in your log aggregator. `circuit.rejected` is emitted at most once per second per circuit, so an open circuit under heavy traffic does not flood your logs; its `suppressed` attribute counts the rejections that were left out since the previous one. Events from `AsyncKeyedCircuitBreaker` and `KeyedCircuitBreaker` also carry `circuit_key`, the circuit they belong to. [Resilience](resilience.md) describes when each event fires.
+Each log record has an `event` field holding the event name, such as `event="circuit.opened"`, which you can filter on in your log aggregator. `circuit.rejected` is emitted at most once per second per circuit, so an open circuit under heavy traffic does not flood your logs. The first rejection of each outage is always emitted, `suppressed` counts the rejections left out since the previous one, and `circuit.closed` reports the outage's total in `rejected`. Events from `AsyncKeyedCircuitBreaker` and `KeyedCircuitBreaker` also carry `circuit_key`, the circuit they belong to. [Resilience](resilience.md) describes when each event fires.
 
 ```python
 import logging

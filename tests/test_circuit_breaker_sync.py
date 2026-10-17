@@ -13,6 +13,7 @@ from httpware import (
     CircuitOpenError,
     CircuitState,
     Client,
+    ClientError,
     InternalServerError,
     NetworkError,
     NotFoundError,
@@ -801,13 +802,17 @@ def test_rejected_event_is_emitted_at_most_once_per_second(caplog: pytest.LogCap
 
 
 class _LockProbe(logging.Handler):
-    def __init__(self, lock: threading.Lock) -> None:
+    """Records whether `lock` was held when each breaker event in `events` (None: all) arrived."""
+
+    def __init__(self, lock: threading.Lock, events: frozenset[str] | None = frozenset({"circuit.rejected"})) -> None:
         super().__init__()
         self._lock = lock
+        self._events = events
         self.held_during: list[bool] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        if getattr(record, "event", None) == "circuit.rejected":
+        event = getattr(record, "event", None)
+        if event is not None and (self._events is None or event in self._events):
             self.held_during.append(self._lock.locked())
 
 
@@ -823,3 +828,153 @@ def test_rejected_event_is_emitted_outside_the_lock() -> None:
     finally:
         logger.removeHandler(probe)
     assert probe.held_during == [False]
+
+
+class _CallOnEvent(logging.Handler):
+    """Sends one request through `call` from inside every breaker event, like a log shipper."""
+
+    def __init__(self, call: Callable[[], object]) -> None:
+        super().__init__()
+        self._call = call
+        self._active = threading.local()
+        self.events: list[str] = []
+
+    def handle(self, record: logging.LogRecord) -> bool:
+        """Emit without taking the handler lock, so a deadlocked call cannot hang logging.shutdown."""
+        self.emit(record)
+        return True
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.events.append(getattr(record, "event", ""))
+        if getattr(self._active, "on", False):
+            return
+        self._active.on = True
+        try:
+            with contextlib.suppress(ClientError):
+                self._call()
+        finally:
+            self._active.on = False
+
+
+def _in_thread_with_handler(handler: logging.Handler, target: Callable[[], object]) -> bool:
+    """Run `target` on a daemon thread with `handler` attached; return whether it finished in time."""
+    logger = logging.getLogger("httpware.circuit_breaker")
+    logger.addHandler(handler)
+    previous = logger.level
+    logger.setLevel(logging.INFO)
+
+    def _run() -> None:
+        with contextlib.suppress(ClientError):
+            target()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    try:
+        thread.start()
+        thread.join(timeout=5.0)
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+    return not thread.is_alive()
+
+
+def test_event_handler_may_send_through_the_same_breaker() -> None:
+    clock = _Clock()
+    handler = _StatusSequence([500])
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout=1.0, _now=clock)
+    client = _client(handler, breaker=breaker)
+    shipper = _CallOnEvent(lambda: client.get("https://logs.example.test/ingest"))
+
+    def _outage_and_recovery() -> None:
+        with contextlib.suppress(InternalServerError):
+            client.get("https://example.test/x")
+        clock.advance(1.0)
+        client.get("https://example.test/x")
+
+    with client:
+        assert _in_thread_with_handler(shipper, _outage_and_recovery)
+    assert shipper.events == [
+        "circuit.opened",
+        "circuit.rejected",
+        "circuit.half_open",
+        "circuit.rejected",
+        "circuit.closed",
+    ]
+
+
+def test_every_event_is_emitted_outside_the_lock() -> None:
+    clock = _Clock()
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout=1.0, _now=clock)
+    probe = _LockProbe(breaker._lock, events=None)  # noqa: SLF001 — the lock is the thing under test
+    logger = logging.getLogger("httpware.circuit_breaker")
+    logger.addHandler(probe)
+    previous = logger.level
+    logger.setLevel(logging.INFO)
+    try:
+        _open_now(breaker)
+        _reject(breaker)
+        clock.advance(1.0)
+        breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+    finally:
+        logger.removeHandler(probe)
+        logger.setLevel(previous)
+    assert probe.held_during == [False, False, False, False]
+
+
+# ── rejection accounting runs per outage episode ──
+
+
+def _ok(request: httpx2.Request) -> httpx2.Response:
+    return httpx2.Response(HTTPStatus.OK, request=request)
+
+
+def _reject(breaker: CircuitBreaker) -> None:
+    with pytest.raises(CircuitOpenError):
+        breaker(httpx2.Request("GET", "https://example.test/x"), _unreachable)
+
+
+def _events(caplog: pytest.LogCaptureFixture, name: str) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if getattr(r, "event", None) == name]
+
+
+def test_first_rejection_of_a_new_outage_is_emitted(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout=0.1, _now=clock)
+    with caplog.at_level(logging.INFO, logger="httpware.circuit_breaker"):
+        _open_now(breaker)
+        _reject(breaker)
+        clock.advance(0.1)
+        breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+        _open_now(breaker)
+        _reject(breaker)
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+
+
+def test_closed_event_reports_every_rejection_of_the_outage(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout=5.0, _now=clock)
+    with caplog.at_level(logging.INFO, logger="httpware.circuit_breaker"):
+        _open_now(breaker)
+        _reject(breaker)
+        _reject(breaker)
+        clock.advance(5.0)
+        _open_now(breaker)
+        _reject(breaker)
+        _reject(breaker)
+        clock.advance(5.0)
+        breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 1]  # ty: ignore[unresolved-attribute]
+    assert [r.rejected for r in _events(caplog, "circuit.closed")] == [4]  # ty: ignore[unresolved-attribute]
+
+
+def test_suppressed_never_counts_a_previous_outage(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout=5.0, _now=clock)
+    with caplog.at_level(logging.INFO, logger="httpware.circuit_breaker"):
+        _open_now(breaker)
+        for _ in range(3):
+            _reject(breaker)
+        clock.advance(5.0)
+        breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
+        _open_now(breaker)
+        _reject(breaker)
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]

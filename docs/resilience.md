@@ -193,9 +193,13 @@ Emitted on logger `httpware.circuit_breaker`:
 | Event | When |
 |---|---|
 | `circuit.opened` | The failure threshold was reached and the circuit went from CLOSED to OPEN. |
-| `circuit.rejected` | A request failed fast because the circuit was OPEN or a HALF_OPEN probe was already running. Emitted at most once per second per circuit; its `suppressed` attribute counts the rejections since the previous `circuit.rejected` that were not emitted. |
+| `circuit.rejected` | A request failed fast because the circuit was OPEN or a HALF_OPEN probe was already running. Emitted at most once per second per circuit, and always for the first rejection of an outage. Its `suppressed` attribute counts the rejections in the same outage that were not emitted since the previous `circuit.rejected`. |
 | `circuit.half_open` | The reset timeout passed and the circuit went from OPEN to HALF_OPEN. |
-| `circuit.closed` | The success threshold was reached and the circuit went from HALF_OPEN to CLOSED. |
+| `circuit.closed` | The success threshold was reached and the circuit went from HALF_OPEN to CLOSED. Its `rejected` attribute is the number of requests rejected during the outage, emitted or not. |
+
+An outage runs from the moment the circuit opens until it closes again; a probe failure that reopens it stays in the same outage.
+
+The breaker emits its events after releasing its internal lock, so a logging handler may send requests through a client that uses the same breaker.
 
 ### Time-based failure-rate mode
 
