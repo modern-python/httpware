@@ -1,7 +1,7 @@
 # httpware
 
 A thin, opinionated wrapper around `httpx2`: it re-exports `httpx2.Request` and
-`httpx2.Response` as the public request/response surface and adds three things —
+`httpx2.Response` as the public request/response surface and adds three things:
 a middleware chain composed at client construction, typed response decoding, and
 a status-keyed exception tree raised automatically on 4xx and 5xx. `Client` and
 `AsyncClient` carry the same features.
@@ -10,14 +10,14 @@ a status-keyed exception tree raised automatically on 4xx and 5xx. `Client` and
 
 A term is listed only when there is a synonym to reject, or a meaning subtle enough that code and
 docs must agree on it. General HTTP and programming vocabulary does not belong here, however
-heavily this project uses it. `httpx2`'s own names — `Request`, `Response`, `Timeout`, `Limits`,
-`Auth`, `MockTransport` — keep `httpx2`'s meanings; nothing here redefines one.
+heavily this project uses it. `httpx2`'s own names (`Request`, `Response`, `Timeout`, `Limits`,
+`Auth`, `MockTransport`) keep `httpx2`'s meanings; nothing here redefines one.
 
 **Middleware**:
 An object satisfying `Middleware` / `AsyncMiddleware`: it takes a request and a continuation
 (`Next` / `AsyncNext`) and returns a response. The chain is composed once at client construction
 and frozen for the client's lifetime.
-_Avoid_: hook — reserved for `httpx2.event_hooks`, a genuinely different mechanism that runs
+_Avoid_: hook, which is reserved for `httpx2.event_hooks`, a different mechanism that runs
 *below* the chain, once per transport attempt rather than once per logical call.
 
 **Terminal**:
@@ -37,7 +37,7 @@ optional extras. A seam is not an extension point: an extension point is what a 
 across. The letters are cited from module docstrings, so they must not be renumbered casually.
 
 **Decoder**:
-An object satisfying `ResponseDecoder` — `can_decode(model)` to claim a model, `decode(content,
+An object satisfying `ResponseDecoder`: `can_decode(model)` to claim a model, `decode(content,
 model)` to turn raw bytes into it in a single parse pass.
 _Avoid_: adapter, which names the third-party object a decoder builds and memoizes per model
 (`pydantic.TypeAdapter`, `msgspec.json.Decoder`). Calling the decoder an adapter too leaves
@@ -45,20 +45,20 @@ _Avoid_: adapter, which names the third-party object a decoder builds and memoiz
 
 **Counted failure**:
 The circuit breaker's unit of account: a `NetworkError`, an httpware `TimeoutError`, or a
-`StatusError` whose status is in the effective failure set (default: all 5xx). Every other 4xx —
-429 included — counts as a *success*. A `RetryBudgetExhaustedError` is classified by its
+`StatusError` whose status is in the effective failure set (default: all 5xx). Every other 4xx,
+429 included, counts as a *success*. A `RetryBudgetExhaustedError` is classified by its
 `last_exception`, and any other exception type propagates without touching circuit state. "Failure"
 alone is ambiguous here: a failed request is very often not a counted failure.
 
 **Circuit key**:
 The value a keyed circuit breaker computes from a request to pick its circuit; requests with equal
 keys share one circuit. The default is the URL's origin: scheme, host and port.
-_Avoid_: host — the host alone merges upstreams that differ only in scheme or port.
+_Avoid_: host. The host alone merges upstreams that differ only in scheme or port.
 
 **Cap**:
-`max_response_body_bytes` — the bound on how many bytes httpware buffers on the caller's behalf.
+`max_response_body_bytes`: the bound on how many bytes httpware buffers on the caller's behalf.
 Counted *decoded*, status-agnostic, and never applied to user-driven `stream()` iteration.
-_Avoid_: limit — `limits=` on a client is `httpx2.Limits`, the connection-pool configuration, and
+_Avoid_: limit. `limits=` on a client is `httpx2.Limits`, the connection-pool configuration, and
 has nothing to do with body size. The one sanctioned exception is public and cannot be renamed
 without a breaking change: `ResponseTooLargeError.limit` carries the cap that was exceeded. Prose
 says cap; that field says `limit`.
