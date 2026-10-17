@@ -87,7 +87,12 @@ Full guides live at [httpware.modern-python.org](https://httpware.modern-python.
 - [Testing](https://httpware.modern-python.org/testing/): injecting `httpx2.MockTransport`.
 - [Recipes](https://httpware.modern-python.org/recipes/modern-di/): DI wiring, phase decorators, Link header pagination.
 
-## 🗒️ [Release notes](https://github.com/modern-python/httpware/releases) · 📦 [PyPI](https://pypi.org/project/httpware) · 📝 [License](https://github.com/modern-python/httpware/blob/main/LICENSE)
+## Links
+
+- [Documentation](https://httpware.modern-python.org)
+- [PyPI](https://pypi.org/project/httpware)
+- [License](https://github.com/modern-python/httpware/blob/main/LICENSE)
+- [Release notes](https://github.com/modern-python/httpware/releases)
 
 ## Part of `modern-python`
 
