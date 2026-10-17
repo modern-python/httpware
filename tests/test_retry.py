@@ -569,8 +569,8 @@ async def test_retry_refuses_streamed_body_does_not_consume_budget() -> None:
         await client.put("https://example.test/upload", content=streamed_body())
 
     # Budget should be untouched: deposits OK (every attempt deposits), but no withdrawals.
-    # Check via _withdrawn deque emptiness.
-    assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
+    # Check via the withdrawn counter.
+    assert budget._withdrawn == 0  # noqa: SLF001 — implementation-detail access for invariant
 
 
 async def test_retry_refuses_streamed_body_network_error_idempotent() -> None:
@@ -776,7 +776,7 @@ async def test_retry_after_exceeds_max_delay_does_not_consume_budget_token() -> 
     with pytest.raises(ServiceUnavailableError):
         await client.get("https://example.test/x")
     # Retry-After > max_delay: give up without spending a budget token.
-    assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
+    assert budget._withdrawn == 0  # noqa: SLF001 — implementation-detail access for invariant
 
 
 async def test_retry_after_huge_digit_string_gives_up() -> None:

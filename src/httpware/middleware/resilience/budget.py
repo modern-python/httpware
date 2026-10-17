@@ -1,21 +1,19 @@
 """Finagle-style token-bucket retry budget.
 
-Thread-safe and asyncio-safe: all mutations go through a threading.Lock,
-which ensures no torn state across concurrent accesses. When a RetryBudget
-is shared between a sync Client (pool thread) and an AsyncClient (event-loop
-thread), a sync thread holding the lock can briefly block the loop thread's
-acquisition; the critical section (purge + append/compare) is intentionally
-tiny to bound this latency. Safe to share across threads, across coroutines
-on one event loop, and across (sync Client, AsyncClient) pairs in the same
+Thread-safe and asyncio-safe: all mutations go through a threading.Lock held for a
+constant-time update of per-bucket counters, so a sync thread holding it delays an
+event loop sharing the budget only briefly. Safe to share across threads, across
+coroutines on one event loop, and across (sync Client, AsyncClient) pairs in the same
 process.
 """
 
 import math
 import threading
 import time
-from collections import deque
 from collections.abc import Callable
 
+
+_BUCKET_COUNT = 10
 
 _TTL_INVALID = "ttl must be a finite number > 0"
 _MIN_RETRIES_PER_SEC_INVALID = "min_retries_per_sec must be a finite number >= 0"
@@ -36,7 +34,9 @@ class RetryBudget:
 
     Each request deposits a token; each retry attempts to withdraw one.
     Available retries are bounded by `percent_can_retry` of recent deposits,
-    plus a `min_retries_per_sec * ttl` floor.
+    plus a `min_retries_per_sec * ttl` floor. Deposits and withdrawals are counted in
+    ten buckets of `ttl / 10` each, so one stops counting between 0.9 * ttl and ttl
+    after it was recorded.
     """
 
     def __init__(
@@ -53,24 +53,41 @@ class RetryBudget:
         self._percent_can_retry = percent_can_retry
         self._now = _now
         self._lock = threading.Lock()
-        self._deposits: deque[float] = deque()
-        self._withdrawn: deque[float] = deque()
+        self._bucket_width = ttl / _BUCKET_COUNT
+        self._floor = int(min_retries_per_sec * ttl)
+        self._slot: float = -math.inf
+        self._index = 0
+        self._bucket_deposits = [0] * _BUCKET_COUNT
+        self._bucket_withdrawn = [0] * _BUCKET_COUNT
+        self._deposits = 0
+        self._withdrawn = 0
 
-    def _purge(self, now: float) -> None:
-        # Caller must hold self._lock.
-        # Strict `< cutoff` keeps entries at exactly `now - ttl`: window is [now - ttl, now].
-        cutoff = now - self._ttl
-        while self._deposits and self._deposits[0] < cutoff:
-            self._deposits.popleft()
-        while self._withdrawn and self._withdrawn[0] < cutoff:
-            self._withdrawn.popleft()
+    def _rotate(self, slot: float) -> None:
+        """Make `slot` the current bucket, dropping buckets that fell out of the window. The caller holds self._lock."""
+        current = int(slot)
+        if current - self._slot >= _BUCKET_COUNT:
+            self._bucket_deposits = [0] * _BUCKET_COUNT
+            self._bucket_withdrawn = [0] * _BUCKET_COUNT
+            self._deposits = 0
+            self._withdrawn = 0
+        else:
+            for stale in range(int(self._slot) + 1, current + 1):
+                index = stale % _BUCKET_COUNT
+                self._deposits -= self._bucket_deposits[index]
+                self._withdrawn -= self._bucket_withdrawn[index]
+                self._bucket_deposits[index] = 0
+                self._bucket_withdrawn[index] = 0
+        self._slot = current
+        self._index = current % _BUCKET_COUNT
 
     def deposit(self) -> None:
         """Record a request (success or failure attempt). Adds one token."""
-        now = self._now()
+        slot = self._now() // self._bucket_width
         with self._lock:
-            self._purge(now)
-            self._deposits.append(now)
+            if slot > self._slot:
+                self._rotate(slot)
+            self._bucket_deposits[self._index] += 1
+            self._deposits += 1
 
     def try_withdraw(self) -> bool:
         """Atomically attempt to spend one retry token.
@@ -78,12 +95,12 @@ class RetryBudget:
         Returns True if a retry is permitted, False if the budget is exhausted.
         Never blocks.
         """
-        now = self._now()
+        slot = self._now() // self._bucket_width
         with self._lock:
-            self._purge(now)
-            floor = int(self._min_retries_per_sec * self._ttl)
-            ceiling = math.ceil(len(self._deposits) * self._percent_can_retry) + floor
-            if len(self._withdrawn) >= ceiling:
+            if slot > self._slot:
+                self._rotate(slot)
+            if self._withdrawn >= math.ceil(self._deposits * self._percent_can_retry) + self._floor:
                 return False
-            self._withdrawn.append(now)
+            self._bucket_withdrawn[self._index] += 1
+            self._withdrawn += 1
             return True

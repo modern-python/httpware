@@ -84,6 +84,8 @@ ceiling = ceil(len(deposits_in_window) * percent_can_retry) + int(min_retries_pe
 
 The percent term rounds up (`math.ceil`); the floor term truncates (`int`). A withdrawal fails when `len(withdrawn_in_window) >= ceiling`.
 
+The window moves in steps of `ttl / 10`, so a deposit or withdrawal stops counting between `0.9 * ttl` and `ttl` after it was made.
+
 ### Why a floor matters
 
 With no traffic yet, the percent term is zero, and without the floor the first retry would be refused. The floor lets low-traffic clients retry occasional failures. For high-traffic clients the percent term is much larger and the floor stops mattering.
@@ -225,6 +227,8 @@ breaker = AsyncCircuitBreaker(
 ```
 
 Once the window holds at least `minimum_calls` outcomes, the rate is checked after every outcome, successes included. A success can therefore be the call that opens the circuit. With `minimum_calls=4` and a threshold of `0.5`, three failures leave the circuit closed because the window holds only three outcomes; a fourth call that succeeds brings it to four, the rate is 3/4, and the circuit opens. That call still returns its response to the caller, and the next request is rejected with `CircuitOpenError`.
+
+The window moves in steps of `window_seconds / 10`, so an outcome stops counting between `0.9 * window_seconds` and `window_seconds` after it was recorded.
 
 In rate mode `failure_threshold` is ignored. Recovery through HALF_OPEN works the same in both modes, and the sync `CircuitBreaker` takes the same parameters.
 
