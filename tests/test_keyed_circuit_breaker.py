@@ -205,6 +205,16 @@ async def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pyt
     assert keys == ["https://a.test", "http://a.test:8080"]
 
 
+async def test_circuit_key_of_a_custom_key_is_its_str(caplog: pytest.LogCaptureFixture) -> None:
+    handler = _PerHost(failing={"a.test"})
+    breaker = AsyncKeyedCircuitBreaker(failure_threshold=1, key=lambda request: (request.url.host, 1))
+    async with _client(handler, breaker=breaker) as client:
+        with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
+            await _fail_n(client, "https://a.test/x", 1)
+    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
+    assert keys == ["('a.test', 1)"]
+
+
 def test_cross_loop_use_raises_runtimeerror() -> None:
     breaker = AsyncKeyedCircuitBreaker()
     handler = _PerHost(failing=set())

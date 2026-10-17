@@ -110,6 +110,31 @@ async def test_serializes_at_capacity() -> None:
     assert handler.max_in_flight == 1  # cap honored
 
 
+async def test_a_freed_slot_goes_to_the_queued_waiter_before_a_new_call() -> None:
+    bulkhead = AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_1, acquire_timeout=_ACQUIRE_TIMEOUT_LONG)
+    request = httpx2.Request("GET", "https://example.test/x")
+    release = asyncio.Event()
+    order: list[str] = []
+
+    def _next(name: str) -> Callable[[httpx2.Request], Coroutine[Any, Any, httpx2.Response]]:
+        async def _send(request: httpx2.Request) -> httpx2.Response:
+            order.append(name)
+            if name == "holder":
+                await release.wait()
+            return httpx2.Response(HTTPStatus.OK, request=request)
+
+        return _send
+
+    holder = asyncio.create_task(bulkhead(request, _next("holder")))
+    await asyncio.sleep(0)
+    queued = asyncio.create_task(bulkhead(request, _next("queued")))
+    await asyncio.sleep(0)
+    release.set()
+    late = asyncio.create_task(bulkhead(request, _next("late")))
+    await asyncio.gather(holder, queued, late)
+    assert order == ["holder", "queued", "late"]
+
+
 async def test_max_concurrent_2_observes_at_most_2_in_flight() -> None:
     handler = _SlowHandler(delay=0.02)
     client = _client(handler, bulkhead=AsyncBulkhead(max_concurrent=_MAX_CONCURRENT_2, acquire_timeout=None))

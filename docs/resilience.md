@@ -287,7 +287,7 @@ Every `AsyncCircuitBreaker` parameter, with the same defaults, plus:
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `key` | the request's origin | Maps a request to its circuit key. Any hashable value works. The default is the origin as a string built from scheme, host and port, such as `https://a.example` or `http://a.example:8080`. Hosts are lowercased and default ports dropped, so `https://A.example/x` and `https://a.example:443/y` share a circuit, while `http://a.example` and `https://a.example:8443` each get their own. Userinfo is never part of it. |
+| `key` | the request's origin | Maps a request to its circuit key. Any hashable value works. The default is the origin, built from scheme, host and port, which events show as `https://a.example` or `http://a.example:8080`. Hosts are lowercased and default ports dropped, so `https://A.example/x` and `https://a.example:443/y` share a circuit, while `http://a.example` and `https://a.example:8443` each get their own. Userinfo is never part of it. |
 
 ### Circuit lifetime
 
@@ -295,7 +295,7 @@ A circuit is created on the first request for its key and kept for as long as th
 
 ### Observability
 
-The keyed breakers emit the same events as `AsyncCircuitBreaker` on the same `httpware.circuit_breaker` logger. Each event has one extra attribute, `circuit_key`, which is the `str()` of the request's circuit key. httpware redacts `url` but not `circuit_key`, which reaches log records and span events exactly as the key function returned it. A custom `key` must not return credentials, tokens or other sensitive values. The default origin contains none.
+The keyed breakers emit the same events as `AsyncCircuitBreaker` on the same `httpware.circuit_breaker` logger. Each event has one extra attribute, `circuit_key`: the origin string for the default key, otherwise the `str()` of the request's circuit key. httpware redacts `url` but not `circuit_key`, which reaches log records and span events exactly as the key function returned it. A custom `key` must not return credentials, tokens or other sensitive values. The default origin contains none.
 
 ### Example
 

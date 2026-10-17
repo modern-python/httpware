@@ -40,7 +40,8 @@ The lock-free _CircuitBreakerState holds the transition logic, shared by both wr
 AsyncCircuitBreaker relies on asyncio atomicity (no await inside a transition) plus a
 single-event-loop guard; CircuitBreaker (sync) serializes transitions with a
 threading.Lock and emits events only after releasing it, so a logging handler may send
-requests through the same breaker. Both are sharable across clients (one shared circuit);
+requests through the same breaker. A request to a closed circuit is admitted without the
+lock; its outcome is still recorded under it. Both are sharable across clients (one shared circuit);
 a sync instance cannot be shared with an async one.
 """
 
@@ -196,6 +197,7 @@ class _CircuitBreakerState:
     the caller takes them with the outcome and emits them outside any lock.
     `admit` hands out a ticket: the epoch, which every transition advances by two, plus one
     for the probe. `record` ignores a ticket from an earlier epoch.
+    `closed_ticket` is the epoch while CLOSED and None otherwise, so one read admits without the lock.
     """
 
     def __init__(  # noqa: PLR0913 — breaker state has many orthogonal knobs; a dataclass would be worse
@@ -244,6 +246,7 @@ class _CircuitBreakerState:
         self._opened_at = 0.0
         self._probe_in_flight = False
         self._epoch = 0
+        self.closed_ticket: int | None = 0
         self._rejected_emitted_at = -math.inf
         self._rejections_suppressed = 0
         self._episode_rejections = 0
@@ -256,8 +259,9 @@ class _CircuitBreakerState:
 
     def admit(self, request: httpx2.Request) -> int:
         """Return the request's ticket, or raise _RejectionError or _HalfOpened. No await inside."""
-        if self._state is CircuitState.CLOSED:
-            return self._epoch
+        ticket = self.closed_ticket
+        if ticket is not None:
+            return ticket
         now = self._now()
         if self._state is CircuitState.OPEN:
             elapsed = now - self._opened_at
@@ -341,6 +345,7 @@ class _CircuitBreakerState:
     def _move_to(self, state: CircuitState) -> None:
         self._state = state
         self._epoch += _EPOCH_STEP
+        self.closed_ticket = self._epoch if state is CircuitState.CLOSED else None
 
     def _enter_open(self, request: httpx2.Request, message: str, attributes: dict[str, typing.Any]) -> None:
         if self._state is CircuitState.CLOSED:
@@ -414,13 +419,29 @@ def _rejected(rejection: _RejectionError) -> CircuitOpenError:
     return CircuitOpenError(retry_after=rejection.retry_after)
 
 
-async def _call_async(state: _CircuitBreakerState, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
+def _admit(state: _CircuitBreakerState, request: httpx2.Request) -> int:
     try:
-        ticket = state.admit(request)
+        return state.admit(request)
     except _RejectionError as rejection:
         raise _rejected(rejection) from None
     except _HalfOpened as half_opened:
-        ticket = _half_opened(half_opened)
+        return _half_opened(half_opened)
+
+
+def _admit_locked(state: _CircuitBreakerState, lock: threading.Lock, request: httpx2.Request) -> int:
+    try:
+        with lock:
+            return state.admit(request)
+    except _RejectionError as rejection:
+        raise _rejected(rejection) from None
+    except _HalfOpened as half_opened:
+        return _half_opened(half_opened)
+
+
+async def _call_async(state: _CircuitBreakerState, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
+    ticket = state.closed_ticket
+    if ticket is None:
+        ticket = _admit(state, request)
     try:
         response = await next(request)
     except BaseException as exc:
@@ -440,13 +461,9 @@ def _call_sync(
     request: httpx2.Request,
     next: Next,  # noqa: A002
 ) -> httpx2.Response:
-    try:
-        with lock:
-            ticket = state.admit(request)
-    except _RejectionError as rejection:
-        raise _rejected(rejection) from None
-    except _HalfOpened as half_opened:
-        ticket = _half_opened(half_opened)
+    ticket = state.closed_ticket
+    if ticket is None:
+        ticket = _admit_locked(state, lock, request)
     try:
         response = next(request)
     except BaseException as exc:
@@ -463,15 +480,19 @@ def _call_sync(
     return response
 
 
-def _origin(request: httpx2.Request) -> str:
+def _origin(request: httpx2.Request) -> tuple[str, bytes, int | None]:
+    url = request.url
+    return url.scheme, url.raw_host, url.port
+
+
+def _origin_label(request: httpx2.Request) -> str:
     return f"{request.url.scheme}://{request.url.netloc.decode('ascii')}"
 
 
 class _KeyedStates:
     """One lazily created _CircuitBreakerState per circuit key; the map is never pruned.
 
-    Not synchronized: the async wrapper relies on its single event loop, the sync wrapper
-    calls `get` under its lock.
+    Lookups read the map without a lock; creating a circuit takes `_create_lock`.
     """
 
     def __init__(self, key: Callable[[httpx2.Request], Hashable], **config: typing.Any) -> None:  # noqa: ANN401
@@ -479,13 +500,22 @@ class _KeyedStates:
         self._new_state = functools.partial(_CircuitBreakerState, **config)
         self._new_state()  # validates the config at construction instead of on the first request
         self._states: dict[Hashable, _CircuitBreakerState] = {}
+        self._create_lock = threading.Lock()
 
     def get(self, request: httpx2.Request) -> _CircuitBreakerState:
         circuit_key = self._key(request)
         state = self._states.get(circuit_key)
         if state is None:
-            state = self._states[circuit_key] = self._new_state(key=str(circuit_key))
+            state = self._create(circuit_key, request)
         return state
+
+    def _create(self, circuit_key: Hashable, request: httpx2.Request) -> _CircuitBreakerState:
+        label = _origin_label(request) if self._key is _origin else str(circuit_key)
+        with self._create_lock:
+            state = self._states.get(circuit_key)
+            if state is None:
+                state = self._states[circuit_key] = self._new_state(key=label)
+            return state
 
 
 class AsyncCircuitBreaker:
@@ -534,7 +564,8 @@ class AsyncCircuitBreaker:
 
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Admit, forward, then record the outcome. Fast-fail when the circuit is not closed."""
-        self._check_loop()
+        if self._loop is not asyncio.get_running_loop():
+            self._check_loop()
         return await _call_async(self._state, request, next)
 
 
@@ -585,8 +616,8 @@ class CircuitBreaker:
 class AsyncKeyedCircuitBreaker:
     """Async circuit breaker with one independent circuit per circuit key.
 
-    `key` maps a request to its circuit key; the default is the request URL's origin as a string
-    such as "https://api.example" (scheme, host and non-default port; never userinfo). Every
+    `key` maps a request to its circuit key; the default is the request URL's origin (scheme, host
+    and non-default port; never userinfo), shown in events as "https://api.example". Every
     circuit behaves exactly like an AsyncCircuitBreaker built with the same arguments. Circuits
     are created on first use and kept for the breaker's lifetime, so the key must take a small,
     bounded set of values.
@@ -629,14 +660,16 @@ class AsyncKeyedCircuitBreaker:
 
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Pick the request's circuit, then admit, forward and record the outcome on it."""
-        self._check_loop()
+        if self._loop is not asyncio.get_running_loop():
+            self._check_loop()
         return await _call_async(self._states.get(request), request, next)
 
 
 class KeyedCircuitBreaker:
     """Sync circuit breaker with one independent circuit per circuit key. Mirror of AsyncKeyedCircuitBreaker.
 
-    One threading.Lock serializes circuit lookup and every transition across all keys.
+    One threading.Lock serializes every transition across all keys. Looking up an existing
+    circuit and admitting into a closed one take no lock.
     """
 
     def __init__(  # noqa: PLR0913 — breaker has many orthogonal knobs; a dataclass would be worse
@@ -667,6 +700,4 @@ class KeyedCircuitBreaker:
 
     def __call__(self, request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
         """Pick the request's circuit, then admit, forward and record the outcome on it."""
-        with self._lock:
-            state = self._states.get(request)
-        return _call_sync(state, self._lock, request, next)
+        return _call_sync(self._states.get(request), self._lock, request, next)
