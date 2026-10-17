@@ -277,3 +277,17 @@ async def test_async_response_keeps_default_encoding_with_or_without_a_cap(cap: 
     ) as client:
         response = await client.get("https://example.test/x")
     assert response.text == "café"
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+def test_sync_response_keeps_num_bytes_downloaded_with_or_without_a_cap(cap: int | None) -> None:
+    with Client(transport=httpx2.MockTransport(_streamed_body), max_response_body_bytes=cap) as client:
+        response = client.get("https://example.test/x")
+    assert response.num_bytes_downloaded == len(b"hello")
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+async def test_async_response_keeps_num_bytes_downloaded_with_or_without_a_cap(cap: int | None) -> None:
+    async with AsyncClient(transport=httpx2.MockTransport(_streamed_body_async), max_response_body_bytes=cap) as client:
+        response = await client.get("https://example.test/x")
+    assert response.num_bytes_downloaded == len(b"hello")
