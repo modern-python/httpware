@@ -793,11 +793,10 @@ window.HttpwareDemo = (function () {
             if (L.pend[i].land <= tick) {
               const p = L.pend[i]; L.pend.splice(i, 1);
               let retried = false;
-              // AsyncTimeout bounds the WHOLE operation (outermost: timeout ->
-              // circuitBreaker -> bulkhead -> retry -> terminal). An entry clamped
-              // to its deadline (see clampToDeadline) lands as a TimeoutError
-              // failure here, regardless of what the untimed outcome would have
-              // been, and is never retried.
+              // AsyncTimeout bounds the WHOLE operation (circuitBreaker -> timeout ->
+              // bulkhead -> retry -> terminal). An entry clamped to its deadline (see
+              // clampToDeadline) lands as a TimeoutError failure here, regardless of
+              // what the untimed outcome would have been, and is never retried.
               if (L === B && p.timedOut) {
                 timedOutCount++;
               // Retry decision happens at landing time: a failed lane-B attempt gets
@@ -811,7 +810,7 @@ window.HttpwareDemo = (function () {
                   const backoffSec = rnd() * Math.min(retryCfg.maxDelay, retryCfg.baseDelay * Math.pow(2, p.attempt));
                   const f2 = scenario.fault(now + backoffSec, rnd);
                   const landTicks = Math.max(1, Math.round((backoffSec + f2.ms) * 1000 / TICK));
-                  // Composition order is timeout -> circuitBreaker -> bulkhead -> retry ->
+                  // Composition order is circuitBreaker -> timeout -> bulkhead -> retry ->
                   // terminal: the bulkhead sits OUTSIDE retry, so one slot is acquired
                   // once and held for the WHOLE operation (all attempts), released only
                   // when the operation finally lands. Carry `bh` forward on every retry
@@ -833,14 +832,12 @@ window.HttpwareDemo = (function () {
               // so a null/absent bulkhead or a rejected (never-pushed) request is a no-op.
               // Breaker records ONCE per fully-exhausted retry sequence (not per attempt):
               // brk.res is called here, only on the terminal (non-retried) landing. A
-              // timed-out entry is an outer-timeout cancellation: AsyncTimeout is
-              // OUTERMOST, so the inner breaker's `except BaseException` clause does see
-              // the CancelledError (it releases the in-flight probe slot) but does not
-              // count it as a success/failure outcome — only the outer TimeoutError
-              // surfaces to the caller.
+              // timed-out entry counts as a failure: the breaker sits OUTSIDE
+              // AsyncTimeout, so the TimeoutError raised on expiry passes through it
+              // as a counted failure (a CancelledError would not be counted).
               if (!retried) {
                 L.if--;
-                if (L === B && p.timedOut) { L.bad++; }
+                if (L === B && p.timedOut) { if (brk) brk.res(false, now); L.bad++; }
                 else { if (L === B && brk) brk.res(p.ok, now); if (p.ok) L.ok++; else L.bad++; }
                 if (L === B && bulk && p.bh) bulk.release();
               }
@@ -864,8 +861,9 @@ window.HttpwareDemo = (function () {
             B.rej++; spawnDot(dotsB, els.trackB, 'rej');
           } else {
             if (budget) budget.deposit(now);
-            // Total deadline set once at the first attempt (Infinity when no
-            // AsyncTimeout is configured, so the clamp below is always a no-op).
+            // Total deadline set once at the first attempt, after the breaker admitted
+            // the request, so an open circuit rejects before any deadline starts
+            // (Infinity when no AsyncTimeout is configured: the clamp is a no-op).
             const deadline = tmoCfg ? now + tmoCfg.timeout : Infinity;
             const { land, timedOut } = clampToDeadline(tick, landTicks, deadline);
             B.if++; B.pend.push({ land, ok: f.ok, attempt: 0, bh: !!bulk, start: now, deadline, timedOut });

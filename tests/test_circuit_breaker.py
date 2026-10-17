@@ -18,6 +18,7 @@ import pytest
 from httpware import (
     AsyncClient,
     AsyncRetry,
+    AsyncTimeout,
     CircuitOpenError,
     CircuitState,
     InternalServerError,
@@ -500,6 +501,35 @@ async def test_half_open_second_concurrent_request_rejected_with_none_retry_afte
         await probe_task
 
 
+# ── composition: breaker outside AsyncTimeout ──
+
+
+async def test_breaker_before_timeout_counts_expired_deadlines() -> None:
+    """In the recommended order a hanging upstream opens the circuit.
+
+    With AsyncTimeout outside the breaker, the deadline cancels the breaker's call and
+    the CancelledError is not a counted failure, so the circuit would never open.
+    """
+    sent: list[httpx2.Request] = []
+
+    async def _hang(request: httpx2.Request) -> httpx2.Response:
+        sent.append(request)
+        return await asyncio.get_running_loop().create_future()
+
+    breaker = AsyncCircuitBreaker(failure_threshold=2, _now=_Clock())
+    async with AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(_hang)),
+        middleware=[breaker, AsyncTimeout(timeout=0.01)],
+    ) as client:
+        for _ in range(2):
+            with pytest.raises(TimeoutError):
+                await client.get("https://example.test/x")
+        with pytest.raises(CircuitOpenError):
+            await client.get("https://example.test/x")
+    assert breaker.state is CircuitState.OPEN
+    assert len(sent) == 2  # noqa: PLR2004
+
+
 # ── single-event-loop guard ──
 
 
@@ -512,8 +542,13 @@ def test_cross_loop_use_raises_runtimeerror() -> None:
             await client.get("https://example.test/x")
 
     asyncio.run(_run_once())  # binds to loop L1
-    with pytest.raises(RuntimeError, match="bound to a single event loop"):
+    with pytest.raises(RuntimeError) as info:
         asyncio.run(_run_once())
+    message = str(info.value)
+    assert message.startswith("AsyncCircuitBreaker is bound to the event loop it first ran on (<")
+    assert ") and was called from <" in message
+    assert "once per event loop, for example inside the coroutine passed to asyncio.run()" in message
+    assert "pytest-asyncio" in message
 
 
 # ── rate-mode config validation ──

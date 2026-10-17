@@ -75,14 +75,16 @@ _FAILURE_RATE_THRESHOLD_INVALID = "failure_rate_threshold must be in (0, 1]"
 _WINDOW_SECONDS_INVALID = "window_seconds must be > 0"
 _MINIMUM_CALLS_INVALID = "minimum_calls must be >= 1"
 _CROSS_LOOP_MSG = (
-    "AsyncCircuitBreaker is bound to a single event loop. First seen on {first!r}; "
-    "current request is on {current!r}. Use one AsyncCircuitBreaker per loop; "
-    "cross-thread sharing requires the sync CircuitBreaker primitive."
+    "AsyncCircuitBreaker is bound to the event loop it first ran on ({first!r}) and was called from {current!r}. "
+    "Create async resilience middleware, and the AsyncClient holding it, once per event loop, "
+    "for example inside the coroutine passed to asyncio.run(). "
+    "Sharing one instance across pytest-asyncio's function-scoped loops is the usual way to hit this."
 )
 _KEYED_CROSS_LOOP_MSG = (
-    "AsyncKeyedCircuitBreaker is bound to a single event loop. First seen on {first!r}; "
-    "current request is on {current!r}. Use one AsyncKeyedCircuitBreaker per loop; "
-    "cross-thread sharing requires the sync KeyedCircuitBreaker primitive."
+    "AsyncKeyedCircuitBreaker is bound to the event loop it first ran on ({first!r}) and was called from {current!r}. "
+    "Create async resilience middleware, and the AsyncClient holding it, once per event loop, "
+    "for example inside the coroutine passed to asyncio.run(). "
+    "Sharing one instance across pytest-asyncio's function-scoped loops is the usual way to hit this."
 )
 
 _DEFAULT_FAILURE_STATUS_CODES = frozenset(range(500, 600))

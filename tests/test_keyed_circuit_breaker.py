@@ -214,8 +214,13 @@ def test_cross_loop_use_raises_runtimeerror() -> None:
             await client.get(url)
 
     asyncio.run(_run_once("https://a.test/x"))
-    with pytest.raises(RuntimeError, match="AsyncKeyedCircuitBreaker is bound to a single event loop"):
+    with pytest.raises(RuntimeError) as info:
         asyncio.run(_run_once("https://b.test/x"))
+    message = str(info.value)
+    assert message.startswith("AsyncKeyedCircuitBreaker is bound to the event loop it first ran on (<")
+    assert ") and was called from <" in message
+    assert "once per event loop, for example inside the coroutine passed to asyncio.run()" in message
+    assert "pytest-asyncio" in message
 
 
 class _Held:

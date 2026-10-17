@@ -4,8 +4,9 @@ This is NOT a per-call timeout — httpx2's connect/read/write/pool timeouts are
 right tool for bounding a single outbound call, and AsyncTimeout does not duplicate
 them. What httpx2 cannot bound is the total wall-clock across the whole middleware
 pipeline (most importantly across an AsyncRetry loop, whose attempts and backoff
-sleeps it knows nothing about). Place AsyncTimeout outermost to enforce
-"this whole operation must finish within `timeout` seconds, even across retries."
+sleeps it knows nothing about). Place AsyncTimeout right after the circuit breaker,
+before bulkhead and retry, to enforce "this whole operation must finish within
+`timeout` seconds, even across retries" and let the breaker count an expired deadline.
 
 Async-only by design: a sync total-deadline cannot interrupt a blocking httpx2 call
 mid-flight (sync Python has no cancellation), and httpx2 already covers sync per-call
@@ -38,8 +39,9 @@ class AsyncTimeout:
         including everything it wraps (retries, backoff sleeps, the call itself).
         Must be ``> 0``. On expiry the middleware raises ``httpware.TimeoutError``.
 
-    Place outermost in the chain for an overall-operation deadline. For bounding a
-    single outbound call (connect/read/write/pool), configure ``httpx2`` instead.
+    Place right after the circuit breaker, before bulkhead and retry, so the breaker
+    counts an expired deadline. For bounding a single outbound call
+    (connect/read/write/pool), configure ``httpx2`` instead.
 
     """
 
