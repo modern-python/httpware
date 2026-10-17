@@ -717,7 +717,7 @@ class _HeldCalls:
     def __init__(self, breaker: AsyncCircuitBreaker) -> None:
         self._breaker = breaker
         self._futures: list[asyncio.Future[int]] = []
-        self._tasks: list[asyncio.Task[httpx2.Response]] = []
+        self._tasks: list[asyncio.Task[None]] = []
         self.probes_in_flight = 0
         self.max_probes_in_flight = 0
 
@@ -737,23 +737,29 @@ class _HeldCalls:
             raise InternalServerError(httpx2.Response(status, request=request))
         return httpx2.Response(status, request=request)
 
+    async def _call(self) -> None:
+        with contextlib.suppress(InternalServerError, CircuitOpenError):
+            await self._breaker(httpx2.Request("GET", "https://example.test/x"), self._next)
+
     async def start(self) -> int:
-        """Start a call; return its index once it is blocked in `next` (or already rejected)."""
-        task = asyncio.create_task(self._breaker(httpx2.Request("GET", "https://example.test/x"), self._next))
-        self._tasks.append(task)
+        """Start a call; return its index once it is blocked in `next` (or already rejected).
+
+        The task swallows the breaker's error itself: on 3.11, awaiting a task that failed loses
+        coverage line events in the awaiting test.
+        """
+        self._tasks.append(asyncio.create_task(self._call()))
         await asyncio.sleep(0)
         return len(self._tasks) - 1
 
     async def finish(self, index: int, status: int) -> None:
         self._futures[index].set_result(status)
-        with contextlib.suppress(InternalServerError):
-            await self._tasks[index]
+        await self._tasks[index]
 
     async def drain(self) -> None:
         for future in self._futures:
             if not future.done():
                 future.set_result(HTTPStatus.OK)
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await asyncio.gather(*self._tasks)
 
 
 async def _open_now(breaker: AsyncCircuitBreaker) -> None:
