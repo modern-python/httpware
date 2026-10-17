@@ -17,11 +17,6 @@ from httpware import (
     Retry,
     ServiceUnavailableError,
     TransportError,
-    after_response,
-    async_after_response,
-    async_before_request,
-    async_on_error,
-    before_request,
 )
 from httpware._internal.status import STREAMING_BODY_MARKER
 
@@ -151,6 +146,38 @@ def test_sync_invalid_url_on_request_and_with_response_maps_to_transport_error()
         client.get_with_response(_INVALID_URL, response_model=dict)
 
 
+async def test_async_stream_on_closed_client_raises_transport_error() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok))
+    await client.aclose()
+    with pytest.raises(TransportError, match="closed"):
+        async with client.stream("GET", "https://example.test/x"):
+            pass
+
+
+def test_sync_stream_on_closed_client_raises_transport_error() -> None:
+    client = Client(transport=httpx2.MockTransport(_ok))
+    client.close()
+    with pytest.raises(TransportError, match="closed"), client.stream("GET", "https://example.test/x"):
+        pass
+
+
+async def test_async_stream_runtime_error_on_open_client_propagates() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok))
+    msg = "user code failed"
+    with pytest.raises(RuntimeError, match=msg) as info:
+        async with client.stream("GET", "https://example.test/x"):
+            raise RuntimeError(msg)
+    assert not isinstance(info.value, TransportError)
+
+
+def test_sync_stream_runtime_error_on_open_client_propagates() -> None:
+    client = Client(transport=httpx2.MockTransport(_ok))
+    msg = "user code failed"
+    with pytest.raises(RuntimeError, match=msg) as info, client.stream("GET", "https://example.test/x"):
+        raise RuntimeError(msg)
+    assert not isinstance(info.value, TransportError)
+
+
 def _async_retry_client(handler: typing.Any) -> AsyncClient:  # noqa: ANN401
     return AsyncClient(
         transport=httpx2.MockTransport(handler),
@@ -188,5 +215,3 @@ async def _async_swallow(request: httpx2.Request, exc: Exception) -> httpx2.Resp
 
 def _sync_function_middleware(request: httpx2.Request, next: Next) -> httpx2.Response:  # noqa: A002
     return next(request)
-
-

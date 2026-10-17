@@ -24,7 +24,6 @@ from httpware._internal.status import (
 )
 from httpware.decoders import ResponseDecoder
 from httpware.decoders._resolver import _DecoderResolver
-from httpware.errors import TransportError
 from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
 from httpware.middleware.chain import compose, compose_async
 
@@ -407,17 +406,12 @@ class AsyncClient:
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         cap = self._max_response_body_bytes
-        try:
-            async with _httpx2_exception_mapper():
-                if cap is None:
-                    response = await self._httpx2_client.send(request)
-                else:
-                    streaming = await _send_capped_async(self._httpx2_client, request, cap)
-                    response = await _read_capped_and_close_async(streaming, cap)
-        except RuntimeError as exc:
-            if self._httpx2_client.is_closed:
-                raise TransportError(str(exc)) from exc
-            raise
+        async with _httpx2_exception_mapper(self._httpx2_client):
+            if cap is None:
+                response = await self._httpx2_client.send(request)
+            else:
+                streaming = await _send_capped_async(self._httpx2_client, request, cap)
+                response = await _read_capped_and_close_async(streaming, cap)
         _raise_on_status_error(response)
         return response
 
@@ -1267,7 +1261,7 @@ class AsyncClient:
             if cap is None
             else _stream_capped_async(self._httpx2_client, method, url, kwargs, cap)
         )
-        async with _httpx2_exception_mapper(), opened as response:
+        async with _httpx2_exception_mapper(self._httpx2_client), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
                 if cap is None:
                     await response.aread()  # pre-read body so exc.response.content works
@@ -1345,17 +1339,12 @@ class Client:
 
     def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         cap = self._max_response_body_bytes
-        try:
-            with _httpx2_exception_mapper_sync():
-                if cap is None:
-                    response = self._httpx2_client.send(request)
-                else:
-                    streaming = _send_capped(self._httpx2_client, request, cap)
-                    response = _read_capped_and_close(streaming, cap)
-        except RuntimeError as exc:
-            if self._httpx2_client.is_closed:
-                raise TransportError(str(exc)) from exc
-            raise
+        with _httpx2_exception_mapper_sync(self._httpx2_client):
+            if cap is None:
+                response = self._httpx2_client.send(request)
+            else:
+                streaming = _send_capped(self._httpx2_client, request, cap)
+                response = _read_capped_and_close(streaming, cap)
         _raise_on_status_error(response)
         return response
 
@@ -2226,7 +2215,7 @@ class Client:
             if cap is None
             else _stream_capped(self._httpx2_client, method, url, kwargs, cap)
         )
-        with _httpx2_exception_mapper_sync(), opened as response:
+        with _httpx2_exception_mapper_sync(self._httpx2_client), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
                 if cap is None:
                     response.read()  # pre-read body so exc.response.content works
