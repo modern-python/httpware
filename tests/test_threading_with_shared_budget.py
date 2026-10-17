@@ -1,7 +1,7 @@
 """Demonstrates that a single RetryBudget can be shared across a sync Client and an AsyncClient.
 
 The lock added in Task B2 makes ``RetryBudget`` thread-safe so sync threads and an asyncio
-event loop can deposit/withdraw concurrently without corrupting the internal deques.
+event loop can deposit/withdraw concurrently without corrupting the internal counters.
 """
 
 import asyncio
@@ -54,14 +54,14 @@ async def _drive_async_side(budget: RetryBudget) -> None:
 
 
 def _fixed_clock() -> float:
-    """Return a constant timestamp so RetryBudget._purge never evicts deposits during this test."""
+    """Return a constant timestamp so RetryBudget never expires a deposit during this test."""
     return 0.0
 
 
 def test_shared_budget_across_sync_threads_and_async_loop() -> None:
-    # _now is pinned to a fixed timestamp: all deposits share the same timestamp,
-    # so the TTL window cutoff is also 0.0 and _purge evicts nothing. This makes
-    # the deposit-count assertion exact and independent of wall-clock elapsed time.
+    # _now is pinned to a fixed timestamp: all deposits land in the same bucket and none
+    # expires. This makes the deposit-count assertion exact and independent of wall-clock
+    # elapsed time.
     budget = RetryBudget(ttl=60.0, min_retries_per_sec=1000.0, percent_can_retry=0.5, _now=_fixed_clock)
 
     sync_transport = httpx2.MockTransport(_failing_handler)
@@ -79,14 +79,13 @@ def test_shared_budget_across_sync_threads_and_async_loop() -> None:
     for t in threads:
         t.join()
 
-    # The lock kept the budget's internal deques consistent — no IndexError, no corruption.
+    # The lock kept the budget's internal counters consistent, with no corruption.
     # 0.8.3 deposit-hoist: deposits count requests, not attempts (one per __call__,
-    # regardless of max_attempts). The pinned clock ensures _purge never evicts any
-    # deposit (all timestamps are 0.0, cutoff is 0.0 - 60.0 = -60.0 < 0.0, so the
-    # strict `< cutoff` predicate is always False), making the deposit count exact.
+    # regardless of max_attempts). The pinned clock keeps every deposit in one live
+    # bucket, making the deposit count exact.
     expected_deposits = (_N_SYNC_THREADS * _N_OPS_PER_THREAD) + _N_ASYNC_TASKS
-    assert len(budget._deposits) == expected_deposits, (  # noqa: SLF001
-        f"expected {expected_deposits} deposits, got {len(budget._deposits)}"  # noqa: SLF001
+    assert budget._deposits == expected_deposits, (  # noqa: SLF001
+        f"expected {expected_deposits} deposits, got {budget._deposits}"  # noqa: SLF001
     )
 
     sync_client.close()

@@ -625,7 +625,7 @@ def test_retry_after_exceeds_max_delay_does_not_consume_budget_token_sync() -> N
     with pytest.raises(ServiceUnavailableError):
         client.get("https://example.test/x")
     # Retry-After > max_delay: give up without spending a budget token.
-    assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
+    assert budget._withdrawn == 0  # noqa: SLF001 — implementation-detail access for invariant
 
 
 def test_retry_after_huge_digit_string_gives_up_sync() -> None:

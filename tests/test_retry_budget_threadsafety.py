@@ -1,7 +1,7 @@
 """Thread-safety test for RetryBudget.
 
 Sync Client may share a RetryBudget across a ThreadPoolExecutor. Concurrent
-deposit() / try_withdraw() calls must not corrupt the internal deques. We
+deposit() / try_withdraw() calls must not corrupt the internal counters. We
 spawn many threads doing many ops and assert no exception, sane counters.
 """
 
@@ -41,8 +41,8 @@ def test_concurrent_deposit_withdraw_does_not_corrupt() -> None:
     # Each thread did _N_OPS_PER_THREAD deposits; budget must have accepted them all
     # (and possibly some withdrawals — we don't assert withdrawn count; the ceiling
     # formula doesn't guarantee how many succeed).
-    assert len(budget._deposits) <= _N_THREADS * _N_OPS_PER_THREAD  # noqa: SLF001 — internal state check
-    assert len(budget._deposits) > 0  # noqa: SLF001
+    assert budget._deposits <= _N_THREADS * _N_OPS_PER_THREAD  # noqa: SLF001 — internal state check
+    assert budget._deposits > 0  # noqa: SLF001
 
 
 @pytest.mark.stress
@@ -62,6 +62,29 @@ def test_concurrent_only_deposit_count_matches() -> None:
         t.join()
 
     # With no withdraws and no TTL expiry (60s window, sub-second test), every
-    # deposit lands in the deque. Exact equality proves no deposits were lost
+    # deposit is counted. Exact equality proves no deposits were lost
     # to a race.
-    assert len(budget._deposits) == _N_THREADS * _N_OPS_PER_THREAD  # noqa: SLF001
+    assert budget._deposits == _N_THREADS * _N_OPS_PER_THREAD  # noqa: SLF001
+
+
+@pytest.mark.stress
+def test_concurrent_bucket_rotation_keeps_totals_consistent() -> None:
+    budget = RetryBudget(ttl=0.01, min_retries_per_sec=1000.0, percent_can_retry=0.5)
+    barrier = threading.Barrier(_N_THREADS)
+
+    def worker() -> None:
+        barrier.wait()
+        for _ in range(_N_OPS_PER_THREAD):
+            budget.deposit()
+            budget.try_withdraw()
+
+    threads = [threading.Thread(target=worker) for _ in range(_N_THREADS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert budget._deposits == sum(budget._bucket_deposits)  # noqa: SLF001
+    assert budget._withdrawn == sum(budget._bucket_withdrawn)  # noqa: SLF001
+    assert min(budget._bucket_deposits) >= 0  # noqa: SLF001
+    assert min(budget._bucket_withdrawn) >= 0  # noqa: SLF001

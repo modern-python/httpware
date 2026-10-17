@@ -136,3 +136,48 @@ def test_boundary_budget_values_accepted() -> None:
     assert budget.try_withdraw() is True
     assert budget.try_withdraw() is True
     assert budget.try_withdraw() is False
+
+
+def test_deposit_counts_until_its_bucket_leaves_the_window() -> None:
+    # ttl=10 gives 1 s buckets; a deposit at 0.5 lives in bucket [0, 1) and stops counting at 10.0
+    clock = _Clock(0.5)
+    budget = RetryBudget(ttl=10.0, min_retries_per_sec=0.0, percent_can_retry=1.0, _now=clock.now)
+    budget.deposit()
+    clock.advance(9.49)
+    assert budget.try_withdraw() is True
+    clock.advance(0.01)
+    assert budget.try_withdraw() is False
+
+
+def test_expired_buckets_release_only_their_own_counts() -> None:
+    clock = _Clock()
+    budget = RetryBudget(ttl=10.0, min_retries_per_sec=0.0, percent_can_retry=1.0, _now=clock.now)
+    budget.deposit()
+    clock.advance(5.0)
+    budget.deposit()
+    budget.deposit()
+    clock.advance(5.0)
+    # the first deposit has expired, the two later ones still count
+    assert budget.try_withdraw() is True
+    assert budget.try_withdraw() is True
+    assert budget.try_withdraw() is False
+
+
+def test_withdrawal_expires_with_its_bucket() -> None:
+    clock = _Clock()
+    budget = RetryBudget(ttl=10.0, min_retries_per_sec=0.1, percent_can_retry=0.0, _now=clock.now)
+    assert budget.try_withdraw() is True
+    clock.advance(9.0)
+    assert budget.try_withdraw() is False
+    clock.advance(1.0)
+    assert budget.try_withdraw() is True
+
+
+def test_earlier_timestamp_counts_in_the_current_bucket() -> None:
+    times = iter([5.0, 4.0, 14.5])
+    budget = RetryBudget(ttl=10.0, min_retries_per_sec=0.0, percent_can_retry=1.0, _now=lambda: next(times))
+    budget.deposit()
+    budget.deposit()
+    # both deposits sit in the bucket for [5, 6), which is still live at 14.5
+    assert budget._deposits == 2  # noqa: SLF001, PLR2004
+    assert budget.try_withdraw() is True
