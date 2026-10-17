@@ -33,7 +33,9 @@ To also get the events on the active OpenTelemetry span, install the extra:
 pip install httpware[otel]
 ```
 
-httpware then adds each event to the current span with `trace.get_current_span().add_event(...)`. It never creates spans itself, so the events only show up when something else has started one. A span event leaves out any attribute whose value is `None`, such as `last_status` when the last attempt raised instead of returning a response, because OpenTelemetry SDKs before 1.45 reject `None` values. The log record still has them. The next section shows the minimal setup that does.
+httpware then adds each event to the current span with `trace.get_current_span().add_event(...)`. It never creates spans itself, so the events only show up when something else has started one. The next section shows the minimal setup that does.
+
+A span event leaves out any attribute whose value is `None`, such as `last_status` when the last attempt raised instead of returning a response, because OpenTelemetry SDKs before 1.45 reject `None` values. The log record still has them.
 
 ## Wiring OpenTelemetry
 
