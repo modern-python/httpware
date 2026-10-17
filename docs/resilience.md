@@ -222,6 +222,8 @@ breaker = AsyncCircuitBreaker(
 )
 ```
 
+Once the window holds at least `minimum_calls` outcomes, the rate is checked after every outcome, successes included. A success can therefore be the call that opens the circuit. With `minimum_calls=4` and a threshold of `0.5`, three failures leave the circuit closed because the window holds only three outcomes; a fourth call that succeeds brings it to four, the rate is 3/4, and the circuit opens. That call still returns its response to the caller, and the next request is rejected with `CircuitOpenError`.
+
 In rate mode `failure_threshold` is ignored. Recovery through HALF_OPEN works the same in both modes, and the sync `CircuitBreaker` takes the same parameters.
 
 ### State introspection
