@@ -512,8 +512,13 @@ def test_cross_loop_use_raises_runtimeerror() -> None:
             await client.get("https://example.test/x")
 
     asyncio.run(_run_once())  # binds to loop L1
-    with pytest.raises(RuntimeError, match="bound to a single event loop"):
+    with pytest.raises(RuntimeError) as info:
         asyncio.run(_run_once())
+    message = str(info.value)
+    assert message.startswith("AsyncCircuitBreaker is bound to the event loop it first ran on (<")
+    assert ") and was called from <" in message
+    assert "once per event loop, for example inside the coroutine passed to asyncio.run()" in message
+    assert "pytest-asyncio" in message
 
 
 # ── rate-mode config validation ──

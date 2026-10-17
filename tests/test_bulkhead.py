@@ -495,5 +495,10 @@ def test_cross_loop_acquire_raises_runtimeerror() -> None:
             await client.get("https://example.test/x")
 
     asyncio.run(_run_once())  # captures loop L1, then L1 closes
-    with pytest.raises(RuntimeError, match="AsyncBulkhead is bound to a single event loop"):
+    with pytest.raises(RuntimeError) as info:
         asyncio.run(_run_once())
+    message = str(info.value)
+    assert message.startswith("AsyncBulkhead is bound to the event loop it first ran on (<")
+    assert ") and was called from <" in message
+    assert "once per event loop, for example inside the coroutine passed to asyncio.run()" in message
+    assert "pytest-asyncio" in message

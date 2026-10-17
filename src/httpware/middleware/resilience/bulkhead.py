@@ -31,9 +31,10 @@ from httpware.middleware.resilience._event_loop_guard import check_event_loop
 _MAX_CONCURRENT_INVALID = "max_concurrent must be >= 1"
 _ACQUIRE_TIMEOUT_INVALID = "acquire_timeout must be >= 0"
 _ASYNCBULKHEAD_CROSS_LOOP_MSG = (
-    "AsyncBulkhead is bound to a single event loop. First seen on {first!r}; "
-    "current request is on {current!r}. Use one AsyncBulkhead per loop; "
-    "cross-thread sharing requires the sync Bulkhead primitive."
+    "AsyncBulkhead is bound to the event loop it first ran on ({first!r}) and was called from {current!r}. "
+    "Create async resilience middleware, and the AsyncClient holding it, once per event loop, "
+    "for example inside the coroutine passed to asyncio.run(). "
+    "Sharing one instance across pytest-asyncio's function-scoped loops is the usual way to hit this."
 )
 
 _LOGGER = logging.getLogger("httpware.bulkhead")
