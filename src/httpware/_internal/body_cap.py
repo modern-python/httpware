@@ -189,8 +189,9 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
     Raises `ResponseTooLargeError` (reason="declared") if the declared
     Content-Length already exceeds `cap` — before any byte is read — and
     (reason="streamed") if the decoded body crosses `cap` mid-read. An unencoded
-    body is read into `response` itself; an encoded one into a rebuilt Response.
-    Closes `response` once its whole body is read; on any other path the caller closes it.
+    body is read into `response` itself, which is closed on any error; an encoded
+    one is read into a rebuilt Response. Closes `response` once its whole body is read;
+    on any other path the caller closes it.
     """
     if not _response_has_body(request.method, response.status_code):
         response.read()  # empty body; preserve the original response (and its headers)
@@ -199,7 +200,11 @@ def _read_capped(response: httpx2.Response, cap: int, request: httpx2.Request) -
     if "content-encoding" not in response.headers:
         stream = typing.cast("httpx2.SyncByteStream", response.stream)
         response.stream = _CappedSyncStream(stream, cap, response.status_code, content_length)
-        response.read()
+        try:
+            response.read()
+        except BaseException:
+            response.close()
+            raise
         return response
     try:
         content = _accumulate_capped(response.iter_bytes(), cap)
@@ -220,7 +225,11 @@ async def _read_capped_async(response: httpx2.Response, cap: int, request: httpx
     if "content-encoding" not in response.headers:
         stream = typing.cast("httpx2.AsyncByteStream", response.stream)
         response.stream = _CappedAsyncStream(stream, cap, response.status_code, content_length)
-        await response.aread()
+        try:
+            await response.aread()
+        except BaseException:
+            await response.aclose()
+            raise
         return response
     buf = bytearray()
     async for chunk in response.aiter_bytes():
