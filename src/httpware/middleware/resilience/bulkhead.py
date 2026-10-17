@@ -1,9 +1,9 @@
 """AsyncBulkhead middleware — concurrency limiter via asyncio.Semaphore.
 
 The middleware owns an asyncio.Semaphore(max_concurrent). On each request,
-it acquires a slot (bounded by acquire_timeout via asyncio.timeout) and
-releases the slot in a try/finally so success, exceptions, and cancellation
-all release deterministically.
+it acquires a slot and releases it in a try/finally so success, exceptions,
+and cancellation all release deterministically. When every slot is taken,
+asyncio.timeout bounds the wait by acquire_timeout.
 
 AsyncBulkhead is the sharable unit — pass the same instance to multiple
 AsyncClient(middleware=[shared]) calls to enforce a joint cap across clients.
@@ -112,7 +112,7 @@ class AsyncBulkhead:
         """Acquire a slot (bounded by acquire_timeout), invoke next, release."""
         self._check_loop()
         try:
-            if self._acquire_timeout is None:
+            if self._acquire_timeout is None or not self._sem.locked():
                 await self._sem.acquire()
             else:
                 async with asyncio.timeout(self._acquire_timeout):
