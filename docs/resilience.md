@@ -363,6 +363,32 @@ async def main() -> None:
 
 Your own middleware that sets something per call, like the request-ID middleware in [Middleware](middleware.md), also belongs before `AsyncRetry`, so every attempt of a call shares one ID.
 
+## One event loop per instance
+
+`AsyncBulkhead`, `AsyncCircuitBreaker` and `AsyncKeyedCircuitBreaker` are bound to the event loop they first run on. Using the same instance from another loop raises `RuntimeError`, and so does a later `asyncio.run()` in the same thread, because each `asyncio.run()` starts a new loop. `httpx2.AsyncClient` can't be reused across `asyncio.run()` calls either. Create the async resilience middleware, and the `AsyncClient` holding it, once per event loop, for example inside the coroutine you pass to `asyncio.run()`:
+
+```python
+import asyncio
+
+from httpware import AsyncClient
+from httpware.middleware.resilience import AsyncCircuitBreaker, AsyncRetry
+
+
+async def main() -> None:
+    async with AsyncClient(
+        base_url="https://api.example.com",
+        middleware=[AsyncCircuitBreaker(), AsyncRetry()],
+    ) as client:
+        await client.get("/users/1")
+
+
+asyncio.run(main())
+```
+
+The usual way to hit the error is in tests: pytest-asyncio gives each test function its own loop by default, so an instance created at module level or in a session-scoped fixture fails in the second test that uses it. Create it in a function-scoped fixture or in the test.
+
+To share a cap or a circuit across threads, use the sync classes with `Client`.
+
 ## Sync Retry and Bulkhead
 
 Use these with the sync `Client`.
