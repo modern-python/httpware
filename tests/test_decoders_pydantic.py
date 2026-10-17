@@ -288,8 +288,8 @@ def test_unhashable_model_builds_adapter_once() -> None:
 
 
 def test_unhashable_models_with_the_same_repr_do_not_share_an_adapter() -> None:
-    first_row = pydantic.create_model("Twin", a=int)
-    second_row = pydantic.create_model("Twin", b=int)
+    first_row = pydantic.create_model("Twin", a=(int, ...))
+    second_row = pydantic.create_model("Twin", b=(int, ...))
     first = typing.Annotated[list[first_row], {"k": 1}]  # ty: ignore[invalid-type-form]
     second = typing.Annotated[list[second_row], {"k": 1}]  # ty: ignore[invalid-type-form]
     assert repr(first) == repr(second)
