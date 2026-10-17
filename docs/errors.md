@@ -49,7 +49,7 @@ ClientError                          (catch-all for anything httpware raises)
 
 Only statuses from 400 to 599 raise. Any other status returns the response unchanged.
 
-The numbered rows are exported as `STATUS_TO_EXCEPTION`, a `Mapping[int, type[StatusError]]`, so you can look up a class in code with `STATUS_TO_EXCEPTION.get(404)`. The two fallback rows are not in the mapping.
+The numbered rows are exported as `STATUS_TO_EXCEPTION`, a `Mapping[int, type[StatusError]]`, so you can look up a class in code with `STATUS_TO_EXCEPTION.get(404)`. The two fallback rows are not in the mapping. The mapping is read-only, and assigning to it raises `TypeError`. To raise your own class for a status, catch the httpware error in a middleware and raise yours from it.
 
 ## Catching strategies
 
@@ -112,7 +112,7 @@ exc.response.request.url  # the failing URL (httpx2.URL)
 exc.response.request.method  # the HTTP method
 ```
 
-The exception's `repr` and message strip `user:pass@` userinfo and mask the values of known-sensitive query and URL-fragment parameters (`api_key`, `apikey`, `access_token`, `refresh_token`, `token`, `secret`, `client_secret`, `password`, `passwd`, `pwd`, `auth`, `authorization`, `sig`, `signature`, `key`, `private_key`, `session`, `sessionid`, `x-api-key`) as `REDACTED`, keeping the keys. Values under other names are left as they are, so avoid putting other secrets in query strings. Request headers such as `Authorization` and `Cookie` are never redacted, and `exc.response.request.headers` returns them in full.
+The exception's `repr` and message strip `user:pass@` userinfo and replace every query-parameter value with `REDACTED`, keeping the keys, so `?page=2&X-Amz-Signature=abc` shows as `?page=REDACTED&X-Amz-Signature=REDACTED`. Fragment values get the same treatment, and a fragment without `=`, like `#section-3`, is kept. The unredacted URL is still on `exc.response.request.url`. Request headers such as `Authorization` and `Cookie` are never redacted, and `exc.response.request.headers` returns them in full.
 
 ## Resilience-error payloads
 
@@ -149,6 +149,12 @@ Fields:
 - `model: type`: the type passed as `response_model=`.
 - `original: BaseException`: the decoder's own exception, such as `pydantic.ValidationError`, `msgspec.ValidationError` or `msgspec.DecodeError`. It is also `exc.__cause__`.
 
+The message names the model and the type of `original`, and adds the error count when `original` has an `error_count()` method, as `pydantic.ValidationError` does:
+
+    failed to decode response into User: ValidationError (2 errors)
+
+A model that is not a class, such as `User | None` or `list[User]`, appears as its `repr`. The message never quotes the body. `str(exc.original)` can: a pydantic `ValidationError` echoes the input values it rejected, so check what it holds before you log it.
+
 ```python
 from httpware import AsyncClient, DecodeError
 
@@ -156,12 +162,7 @@ from httpware import AsyncClient, DecodeError
 try:
     user = await client.get("/users/1", response_model=User)
 except DecodeError as exc:
-    _LOGGER.error(
-        "decode failed for %s into %s: %s",
-        exc.response.request.url,
-        exc.model.__name__,
-        exc.original,
-    )
+    _LOGGER.error("%s", exc)
     raise
 ```
 

@@ -1,14 +1,16 @@
 """Tests for the status-keyed exception tree in httpware.errors."""
 
 import builtins
-import inspect
+import copy
 import pickle
+from collections.abc import Callable
 from http import HTTPStatus
 
 import httpx2
 import pydantic
 import pytest
 
+import httpware
 from httpware.errors import (
     STATUS_TO_EXCEPTION,
     BadRequestError,
@@ -33,7 +35,6 @@ from httpware.errors import (
     TransportError,
     UnauthorizedError,
     UnprocessableEntityError,
-    _KeywordReduceMixin,
 )
 
 
@@ -80,6 +81,11 @@ def test_status_to_exception_table() -> None:
         500: InternalServerError,
         503: ServiceUnavailableError,
     } == STATUS_TO_EXCEPTION
+
+
+def test_status_to_exception_cannot_be_mutated() -> None:
+    with pytest.raises(TypeError):
+        STATUS_TO_EXCEPTION[418] = BadRequestError  # ty: ignore[invalid-assignment]
 
 
 def test_status_error_stores_response() -> None:
@@ -182,10 +188,9 @@ def test_status_error_summary_preserves_port() -> None:
     assert str(exc) == "404 GET https://example.test:8080/x"
 
 
-def test_status_error_summary_passthrough_when_at_in_query_only() -> None:
-    # `@` in query-string with no userinfo — should fall through after urlsplit returns no user/pass.
+def test_status_error_summary_masks_at_sign_in_query_value() -> None:
     exc = NotFoundError(_make_response(404, url="https://example.test/x?email=foo@bar.com"))
-    assert str(exc) == "404 GET https://example.test/x?email=foo@bar.com"
+    assert str(exc) == "404 GET https://example.test/x?email=REDACTED"
 
 
 def test_status_error_strips_userinfo_with_ipv6_host() -> None:
@@ -293,14 +298,40 @@ def test_decode_error_stores_fields() -> None:
     assert exc.original is inner
 
 
-def test_decode_error_summary_includes_model_and_original() -> None:
-    response = _make_response(200)
-    inner = ValueError("bad payload")
-    exc = DecodeError(response=response, model=_DecodeErrorModel, original=inner)
-    summary = str(exc)
-    assert "_DecodeErrorModel" in summary
-    assert "bad payload" in summary
-    assert summary.startswith("failed to decode response into ")
+def _validation_error(payload: bytes) -> pydantic.ValidationError:
+    with pytest.raises(pydantic.ValidationError) as caught:
+        _DecodeErrorModel.model_validate_json(payload)
+    return caught.value
+
+
+def test_decode_error_summary_names_model_and_exception_type_only() -> None:
+    exc = DecodeError(response=_make_response(200), model=_DecodeErrorModel, original=ValueError("body: topsecret"))
+    assert str(exc) == "failed to decode response into _DecodeErrorModel: ValueError"
+
+
+def test_decode_error_summary_counts_validation_errors_without_body_content() -> None:
+    original = _validation_error(b'{"id": "topsecret", "extra": 1}')
+    exc = DecodeError(response=_make_response(200), model=_DecodeErrorModel, original=original)
+    assert str(exc) == "failed to decode response into _DecodeErrorModel: ValidationError (1 error)"
+    assert exc.original is original
+
+
+class _TwoFieldModel(pydantic.BaseModel):
+    id: int
+    name: str
+
+
+def test_decode_error_summary_pluralises_error_count() -> None:
+    with pytest.raises(pydantic.ValidationError) as caught:
+        _TwoFieldModel.model_validate_json(b'{"id": "topsecret", "name": 3}')
+    exc = DecodeError(response=_make_response(200), model=_TwoFieldModel, original=caught.value)
+    assert str(exc) == "failed to decode response into _TwoFieldModel: ValidationError (2 errors)"
+
+
+@pytest.mark.parametrize("model", [_DecodeErrorModel | None, list[_DecodeErrorModel]], ids=["optional", "generic"])
+def test_decode_error_summary_uses_repr_for_non_class_models(model: type) -> None:
+    exc = DecodeError(response=_make_response(200), model=model, original=ValueError("x"))
+    assert str(exc) == f"failed to decode response into {model!r}: ValueError"
 
 
 def test_decode_error_rejects_positional_args() -> None:
@@ -424,14 +455,14 @@ def test_circuit_open_error_pickleable_with_none() -> None:
     assert restored.retry_after is None
 
 
-def test_status_error_message_masks_query_secret() -> None:
-    request = httpx2.Request("GET", "https://example.test/p?api_key=topsecret&page=2")
+def test_status_error_message_masks_every_query_value() -> None:
+    request = httpx2.Request("GET", "https://example.test/p?api_key=topsecret&page=2&X-Amz-Signature=sig")
     response = httpx2.Response(404, request=request)
     exc = NotFoundError(response)
-    assert "topsecret" not in str(exc)
-    assert "api_key=REDACTED" in str(exc)
-    assert "page=2" in str(exc)
-    assert "topsecret" not in repr(exc)
+    expected_url = "https://example.test/p?api_key=REDACTED&page=REDACTED&X-Amz-Signature=REDACTED"
+    assert str(exc) == f"404 GET {expected_url}"
+    assert repr(exc) == f"<NotFoundError status=404 method=GET url={expected_url}>"
+    assert "X-Amz-Signature=sig" in str(exc.response.request.url)
 
 
 def test_response_too_large_error_fields_and_message() -> None:
@@ -470,45 +501,61 @@ def test_response_too_large_error_pickle_round_trip() -> None:
     assert restored.reason == "streamed"
 
 
-def _keyword_reduce_instances() -> tuple[ClientError, ...]:
-    return (
-        RetryBudgetExhaustedError(last_response=None, last_exception=None, attempts=3),
-        BulkheadFullError(max_concurrent=1, acquire_timeout=None),
-        CircuitOpenError(retry_after=None),
-        DecodeError(response=_make_response(200), model=_DecodeErrorModel, original=ValueError("x")),
-        MissingDecoderError(model=_Foo, registered_names=()),
-        ResponseTooLargeError(status_code=200, limit=10, content_length=None, reason="streamed"),
-    )
+_ERROR_FACTORIES: tuple[Callable[[], ClientError], ...] = (
+    lambda: ClientError("root"),
+    lambda: TransportError("connection refused"),
+    lambda: NetworkError("connection reset"),
+    lambda: TimeoutError("timed out"),
+    lambda: StatusError(_make_response(418)),
+    lambda: ClientStatusError(_make_response(418)),
+    lambda: ServerStatusError(_make_response(502)),
+    lambda: BadRequestError(_make_response(400)),
+    lambda: UnauthorizedError(_make_response(401)),
+    lambda: ForbiddenError(_make_response(403)),
+    lambda: NotFoundError(_make_response(404)),
+    lambda: ConflictError(_make_response(409)),
+    lambda: UnprocessableEntityError(_make_response(422)),
+    lambda: RateLimitedError(_make_response(429)),
+    lambda: InternalServerError(_make_response(500)),
+    lambda: ServiceUnavailableError(_make_response(503)),
+    lambda: RetryBudgetExhaustedError(last_response=_make_response(503), last_exception=None, attempts=3),
+    lambda: BulkheadFullError(max_concurrent=1, acquire_timeout=None),
+    lambda: CircuitOpenError(retry_after=None),
+    lambda: DecodeError(response=_make_response(200), model=_DecodeErrorModel, original=ValueError("x")),
+    lambda: MissingDecoderError(model=_Foo, registered_names=()),
+    lambda: ResponseTooLargeError(status_code=200, limit=10, content_length=None, reason="streamed"),
+)
 
 
-def test_every_keyword_reduce_class_has_a_case_here() -> None:
-    """INVARIANT: no class carries _KeywordReduceMixin without its precondition being checked.
-
-    The mixin is safe only for classes whose instance __dict__ mirrors their keyword-only
-    __init__, and that is a property of each class rather than of the mixin. A seventh class
-    added to the tree would otherwise inherit __reduce__ and inherit nothing that checks it.
-    A root-level __reduce__ on ClientError was rejected for the same reason: the argless
-    subclasses keep their message in args and have an empty __dict__, so replaying it would
-    silently drop the message. Enumerating the subclasses here makes adding one an edit
-    somebody has to make.
-    """
-    assert {type(exc) for exc in _keyword_reduce_instances()} == set(_KeywordReduceMixin.__subclasses__())
+def _pickle_round_trip(exc: ClientError) -> ClientError:
+    return pickle.loads(pickle.dumps(exc))  # noqa: S301 — round-tripping our own exception
 
 
-@pytest.mark.parametrize("exc", _keyword_reduce_instances(), ids=lambda e: type(e).__name__)
-def test_keyword_reduce_classes_dict_mirrors_their_init_parameters(exc: ClientError) -> None:
-    """INVARIANT: a _KeywordReduceMixin instance's __dict__ is exactly its __init__ keywords.
-
-    __reduce__ replays the instance __dict__ as keyword arguments, so the two drift apart
-    silently: storing a derived attribute alongside the declared fields, or accepting a
-    keyword that __init__ consumes without assigning, both leave a class that constructs,
-    reprs and raises perfectly well. The damage appears only in a process that unpickles the
-    exception — a Celery worker or a multiprocessing pool — which is rarely the process the
-    suite runs in, and never the one the author is looking at.
-    """
-    keywords = {
-        name
-        for name, parameter in inspect.signature(type(exc).__init__).parameters.items()
-        if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+def test_every_exported_error_class_has_a_round_trip_case() -> None:
+    """INVARIANT: every exported ClientError class is covered by the copy round-trip below."""
+    exported = {
+        obj
+        for name in httpware.__all__
+        if isinstance(obj := getattr(httpware, name), type) and issubclass(obj, ClientError)
     }
-    assert set(vars(exc)) == keywords
+    assert {type(factory()) for factory in _ERROR_FACTORIES} == exported
+
+
+@pytest.mark.parametrize("copier", [_pickle_round_trip, copy.copy, copy.deepcopy], ids=["pickle", "copy", "deepcopy"])
+@pytest.mark.parametrize("factory", _ERROR_FACTORIES, ids=lambda factory: type(factory()).__name__)
+def test_error_round_trip_keeps_notes_and_attributes(
+    factory: Callable[[], ClientError],
+    copier: Callable[[ClientError], ClientError],
+) -> None:
+    exc = factory()
+    exc.add_note("request id abc")
+    vars(exc)["tenant"] = "acme"
+
+    restored = copier(exc)
+
+    assert type(restored) is type(exc)
+    assert restored.args == exc.args
+    assert str(restored) == str(exc)
+    assert restored.__notes__ == ["request id abc"]
+    assert vars(restored)["tenant"] == "acme"
+    assert set(vars(restored)) == set(vars(exc))
