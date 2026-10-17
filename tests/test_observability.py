@@ -40,13 +40,11 @@ def test_emit_event_redacts_url_secret_in_log_record(caplog: pytest.LogCaptureFi
             "test.event",
             level=logging.WARNING,
             message="leaky",
-            attributes={"url": "https://u:p@example.test/x?api_key=topsecret"},
+            attributes={"url": "https://u:p@example.test/x?api_key=topsecret&X-Amz-Signature=sig"},
         )
 
     record = caplog.records[0]
-    assert "topsecret" not in record.url  # ty: ignore[unresolved-attribute]
-    assert "api_key=REDACTED" in record.url  # ty: ignore[unresolved-attribute]
-    assert "u:p@" not in record.url  # ty: ignore[unresolved-attribute]
+    assert record.url == "https://example.test/x?api_key=REDACTED&X-Amz-Signature=REDACTED"  # ty: ignore[unresolved-attribute]
 
 
 def test_emit_event_redacts_url_secret_in_otel_event() -> None:
@@ -61,12 +59,11 @@ def test_emit_event_redacts_url_secret_in_otel_event() -> None:
             "test.event",
             level=logging.WARNING,
             message="leaky",
-            attributes={"url": "https://example.test/x?token=topsecret"},
+            attributes={"url": "https://example.test/x?token=topsecret&X-Amz-Signature=sig"},
         )
 
     _, kwargs = mock_span.add_event.call_args
-    assert "topsecret" not in kwargs["attributes"]["url"]
-    assert "token=REDACTED" in kwargs["attributes"]["url"]
+    assert kwargs["attributes"]["url"] == "https://example.test/x?token=REDACTED&X-Amz-Signature=REDACTED"
 
 
 def test_emit_event_respects_level_parameter(caplog: pytest.LogCaptureFixture) -> None:

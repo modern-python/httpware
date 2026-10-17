@@ -188,10 +188,9 @@ def test_status_error_summary_preserves_port() -> None:
     assert str(exc) == "404 GET https://example.test:8080/x"
 
 
-def test_status_error_summary_passthrough_when_at_in_query_only() -> None:
-    # `@` in query-string with no userinfo — should fall through after urlsplit returns no user/pass.
+def test_status_error_summary_masks_at_sign_in_query_value() -> None:
     exc = NotFoundError(_make_response(404, url="https://example.test/x?email=foo@bar.com"))
-    assert str(exc) == "404 GET https://example.test/x?email=foo@bar.com"
+    assert str(exc) == "404 GET https://example.test/x?email=REDACTED"
 
 
 def test_status_error_strips_userinfo_with_ipv6_host() -> None:
@@ -430,14 +429,14 @@ def test_circuit_open_error_pickleable_with_none() -> None:
     assert restored.retry_after is None
 
 
-def test_status_error_message_masks_query_secret() -> None:
-    request = httpx2.Request("GET", "https://example.test/p?api_key=topsecret&page=2")
+def test_status_error_message_masks_every_query_value() -> None:
+    request = httpx2.Request("GET", "https://example.test/p?api_key=topsecret&page=2&X-Amz-Signature=sig")
     response = httpx2.Response(404, request=request)
     exc = NotFoundError(response)
-    assert "topsecret" not in str(exc)
-    assert "api_key=REDACTED" in str(exc)
-    assert "page=2" in str(exc)
-    assert "topsecret" not in repr(exc)
+    expected_url = "https://example.test/p?api_key=REDACTED&page=REDACTED&X-Amz-Signature=REDACTED"
+    assert str(exc) == f"404 GET {expected_url}"
+    assert repr(exc) == f"<NotFoundError status=404 method=GET url={expected_url}>"
+    assert "X-Amz-Signature=sig" in str(exc.response.request.url)
 
 
 def test_response_too_large_error_fields_and_message() -> None:

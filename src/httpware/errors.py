@@ -7,8 +7,8 @@ Unknown 4xx falls back to ClientStatusError; unknown 5xx to ServerStatusError.
 The fallback assumes 400 <= status < 600.
 
 __repr__ and the summary message run response.request.url through
-_internal.redaction.redact_url, which strips user:pass@ userinfo and masks the
-values of known-sensitive query parameters. NOTE: the full request headers
+_internal.redaction.redact_url, which strips user:pass@ userinfo and masks
+every query parameter value. NOTE: the full request headers
 (Authorization, Cookie, ...) remain reachable via exc.response.request — handler
 authors must redact those before logging.
 """
