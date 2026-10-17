@@ -13,6 +13,8 @@ The logger and event names below are a stable public contract:
 
 Each log record has an `event` field holding the event name, such as `event="circuit.opened"`, which you can filter on in your log aggregator. `circuit.rejected` is emitted at most once per second per circuit, so an open circuit under heavy traffic does not flood your logs. The first rejection of each outage is always emitted, `suppressed` counts the rejections left out since the previous one, and `circuit.closed` reports the outage's total in `rejected`. Events from `AsyncKeyedCircuitBreaker` and `KeyedCircuitBreaker` also carry `circuit_key`, the circuit they belong to. [Resilience](resilience.md) describes when each event fires.
 
+`retry.giving_up` fires when a retryable failure is re-raised without another attempt, and its `reason` attribute says why. `max_attempts` means every attempt failed. `retry_after_exceeds_max_delay` means the server's `Retry-After` asked for a longer wait than `max_delay` allows; these events also carry `retry_after` and `max_delay` in seconds. Both kinds carry `attempts`, `method`, `url`, `last_status` and `last_exception_type`.
+
 Events that carry a `url` attribute get it redacted first: httpware strips `user:pass@` userinfo and replaces every query-parameter value with `REDACTED`, keeping the keys. A URL logged as `https://api.test/items?page=REDACTED&sort=REDACTED` came from `https://api.test/items?page=2&sort=name`.
 
 ```python

@@ -179,6 +179,7 @@ class _RetryPolicy:
                     "url": str(request.url),
                     "last_status": last_response.status_code if last_response is not None else None,
                     "last_exception_type": type(exc).__qualname__,
+                    "reason": "max_attempts",
                 },
             )
             raise exc
@@ -195,6 +196,22 @@ class _RetryPolicy:
                     retry_after=retry_after,
                     max_delay=self.max_delay,
                 ),
+            )
+            _emit_event(
+                _LOGGER,
+                "retry.giving_up",
+                level=logging.WARNING,
+                message=f"retry gave up after {attempt + 1} attempts: Retry-After exceeded max_delay",
+                attributes={
+                    "attempts": attempt + 1,
+                    "method": request.method,
+                    "url": str(request.url),
+                    "last_status": last_response.status_code if last_response is not None else None,
+                    "last_exception_type": type(exc).__qualname__,
+                    "reason": "retry_after_exceeds_max_delay",
+                    "retry_after": retry_after,
+                    "max_delay": self.max_delay,
+                },
             )
             raise exc
 

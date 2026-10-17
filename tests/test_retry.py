@@ -647,6 +647,28 @@ async def test_retry_giving_up_emits_observability_event(caplog: pytest.LogCaptu
     assert record.method == "GET"  # ty: ignore[unresolved-attribute]
     assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[unresolved-attribute]
     assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
+    assert record.reason == "max_attempts"  # ty: ignore[unresolved-attribute]
+
+
+async def test_retry_after_exceeding_max_delay_emits_giving_up_event(caplog: pytest.LogCaptureFixture) -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders([(HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9999"})])
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
+
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
+        await client.get("https://example.test/x")
+
+    records = [r for r in caplog.records if r.name == "httpware.retry" and r.event == "retry.giving_up"]  # ty: ignore[unresolved-attribute]
+    assert len(records) == 1
+    record = records[0]
+    assert record.levelno == logging.WARNING
+    assert record.reason == "retry_after_exceeds_max_delay"  # ty: ignore[unresolved-attribute]
+    assert record.attempts == 1  # ty: ignore[unresolved-attribute]
+    assert record.method == "GET"  # ty: ignore[unresolved-attribute]
+    assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[unresolved-attribute]
+    assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
+    assert record.retry_after == 9999.0  # noqa: PLR2004 — matches the header above  # ty: ignore[unresolved-attribute]
+    assert record.max_delay == 2.5  # noqa: PLR2004 — matches max_delay above  # ty: ignore[unresolved-attribute]
 
 
 async def test_retry_budget_refused_emits_observability_event(caplog: pytest.LogCaptureFixture) -> None:

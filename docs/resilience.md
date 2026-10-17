@@ -28,7 +28,7 @@ from httpware.middleware.resilience import AsyncRetry
 | `max_delay` | `5.0` (s) | Ceiling for backoff and the longest `Retry-After` honored. Must be finite and `>= 0`; a negative, NaN or infinite value raises `ValueError`. |
 | `retry_status_codes` | `frozenset({408, 429, 502, 503, 504})` | Status codes considered retryable. |
 | `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only. To retry POST, pass a frozenset that includes `"POST"`. Matching ignores case, so `"post"` works too. |
-| `respect_retry_after` | `True` | When a retryable response has a `Retry-After` header, wait that long instead of the jittered backoff. If the value is over `max_delay`, `AsyncRetry` gives up and re-raises the `StatusError` with a PEP 678 note: `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. To avoid this, set `respect_retry_after=False` or raise `max_delay`. |
+| `respect_retry_after` | `True` | When a retryable response has a `Retry-After` header, wait that long instead of the jittered backoff. If the value is over `max_delay`, `AsyncRetry` gives up, emits `retry.giving_up` with `reason="retry_after_exceeds_max_delay"`, and re-raises the `StatusError` with a PEP 678 note: `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. To avoid this, set `respect_retry_after=False` or raise `max_delay`. |
 | `budget` | `RetryBudget()` | The token bucket. Pass one shared `RetryBudget` to several clients to give them a joint budget. |
 
 To bound the total time across all attempts, put [`AsyncTimeout`](#asynctimeout) first in the chain. To bound a single request, set `httpx2.Timeout` on the client or pass `timeout=` per request.
