@@ -41,7 +41,7 @@ The built-in decoders build a parser once per model (a `pydantic.TypeAdapter` or
 
 ## One sync protocol for both clients
 
-Middleware comes in sync and async versions, but there is only one `ResponseDecoder` protocol, used by both clients. `decode` is synchronous because the client has the whole body by the time it runs, so there is nothing to await. If a middleware returns a streamed response it never read, the client reads it before decoding. In `AsyncClient` that stream also has to support sync iteration, as `httpx2.ByteStream` does; otherwise the middleware should `await response.aread()` before returning it. The same decoder works with either client.
+Middleware comes in sync and async versions, but there is only one `ResponseDecoder` protocol, used by both clients. `decode` is synchronous because the client has the whole body by the time it runs, so there is nothing to await. If a middleware returns a streamed response it never read, the client reads it before decoding. The stream has to match the client: async in `AsyncClient` and sync in `Client`, or the call raises `TypeError` (see [Middleware](middleware.md)). An in-memory body such as `content=b"..."` works in both. The same decoder works with either client.
 
 ## Writing your own
 
