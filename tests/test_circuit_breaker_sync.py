@@ -978,3 +978,15 @@ def test_suppressed_never_counts_a_previous_outage(caplog: pytest.LogCaptureFixt
         _open_now(breaker)
         _reject(breaker)
     assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+
+
+def test_locked_admission_into_a_circuit_closed_since_the_unlocked_read_gets_the_closed_ticket() -> None:
+    """The sync slow path admits under the lock after an unlocked read saw a circuit that was not closed."""
+    breaker = CircuitBreaker(failure_threshold=1, reset_timeout=0.0)
+    with _client(_StatusSequence([HTTPStatus.INTERNAL_SERVER_ERROR]), breaker=breaker) as client:
+        with pytest.raises(InternalServerError):
+            client.get("https://example.test/x")
+        client.get("https://example.test/x")
+    state = breaker._state  # noqa: SLF001
+    assert state.state is CircuitState.CLOSED
+    assert state.admit(httpx2.Request("GET", "https://example.test/x")) == state.closed_ticket == state._epoch  # noqa: SLF001

@@ -6,13 +6,14 @@ Every exception is collected so the single `except` branch always runs (see
 test_circuit_breaker_freethreaded_stress.py for why).
 """
 
+import contextlib
 import threading
 from http import HTTPStatus
 
 import httpx2
 import pytest
 
-from httpware import Client, KeyedCircuitBreaker
+from httpware import Client, InternalServerError, KeyedCircuitBreaker
 from httpware.errors import CircuitOpenError, StatusError
 
 
@@ -55,3 +56,32 @@ def test_keyed_circuit_breaker_opens_every_origin_under_parallel_failures() -> N
         with pytest.raises(CircuitOpenError):
             client.get(f"https://{host}/x")
     client.close()
+
+
+@pytest.mark.stress
+def test_racing_first_requests_share_one_circuit_per_origin() -> None:
+    """Every thread finds the same circuit for an origin, so no recorded failure is lost to a duplicate."""
+    breaker = KeyedCircuitBreaker(failure_threshold=_N_THREADS * _N_OPS + 1)
+    start = threading.Barrier(_N_THREADS)
+
+    def worker(index: int) -> None:
+        start.wait()
+        for op in range(_N_OPS):
+            request = httpx2.Request("GET", f"https://{_HOSTS[(index + op) % len(_HOSTS)]}/x")
+            with contextlib.suppress(InternalServerError):
+                breaker(request, _raise_500)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(_N_THREADS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    states = breaker._states._states  # noqa: SLF001
+    assert len(states) == len(_HOSTS)
+    assert sum(state._consecutive_failures for state in states.values()) == _N_THREADS * _N_OPS  # noqa: SLF001
+    assert {state._consecutive_failures for state in states.values()} == {_N_THREADS * _N_OPS // len(_HOSTS)}  # noqa: SLF001
+
+
+def _raise_500(request: httpx2.Request) -> httpx2.Response:
+    raise InternalServerError(httpx2.Response(HTTPStatus.INTERNAL_SERVER_ERROR, request=request))
