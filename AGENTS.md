@@ -36,9 +36,11 @@ Every module under `src/httpware/` is named for what it does; read it. What a si
   sibling).
 - `errors.py` owns the tree and both construction rules. Status-keyed `StatusError` subclasses take
   a single positional `response` and never define `__init__`; the six non-status subclasses are
-  keyword-only and inherit `__reduce__` from `_KeywordReduceMixin`, whose precondition is enforced
-  by `tests/test_errors.py::test_keyword_reduce_classes_dict_mirrors_their_init_parameters`. Adding
-  a class means picking a side, and both sides are checked.
+  keyword-only. Pickling and copying go through one `__reduce__` on `ClientError`: it rebuilds the
+  instance from `args` without calling `__init__` and restores `__dict__`, so a new class needs no
+  pickling code, only picklable attributes. Adding a class means picking a construction side and
+  adding a case to `_ERROR_FACTORIES` in `tests/test_errors.py`, which an invariant test enforces
+  for every exported error class.
 - `decoders/_resolver.py` is the **single dispatch path** for Seam B: `_DecoderResolver.resolve`
   walks the frozen decoder tuple, raises `MissingDecoderError` *before* the HTTP call when nothing
   claims the model, and returns a `_BoundDecoder` whose `decode` wraps any decoder-side failure as

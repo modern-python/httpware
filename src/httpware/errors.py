@@ -22,8 +22,20 @@ import httpx2
 from httpware._internal.redaction import redact_url
 
 
+def _restore_client_error(cls: "type[ClientError]", args: tuple[Any, ...]) -> "ClientError":
+    return cls.__new__(cls, *args)
+
+
 class ClientError(Exception):
-    """Root of the httpware exception tree."""
+    """Root of the httpware exception tree.
+
+    Pickle, ``copy.copy`` and ``copy.deepcopy`` rebuild every subclass from its
+    ``args`` without calling ``__init__``, then restore the instance ``__dict__``,
+    so notes and attributes set after construction survive the round trip.
+    """
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_restore_client_error, (type(self), self.args), self.__dict__)
 
 
 class TransportError(ClientError):
@@ -48,10 +60,6 @@ class TimeoutError(ClientError, builtins.TimeoutError):  # noqa: A001
     """
 
 
-def _reconstruct_status_error(cls: "type[StatusError]", response: httpx2.Response) -> "StatusError":
-    return cls(response)
-
-
 class StatusError(ClientError):
     """Base for HTTP-status-keyed errors.
 
@@ -74,9 +82,6 @@ class StatusError(ClientError):
         method = self.response.request.method
         url = redact_url(str(self.response.request.url))
         return f"<{cls_name} status={self.response.status_code} method={method} url={url}>"
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (_reconstruct_status_error, (type(self), self.response))
 
 
 class ClientStatusError(StatusError):
@@ -136,27 +141,7 @@ STATUS_TO_EXCEPTION: Mapping[int, type[StatusError]] = {
 }
 
 
-def _reconstruct_kwonly(cls: type, kwargs: dict[str, Any]) -> Any:  # noqa: ANN401
-    return cls(**kwargs)
-
-
-class _KeywordReduceMixin:
-    """Shared __reduce__ for keyword-only ClientError subclasses.
-
-    For subclasses whose __init__ is keyword-only and whose instance
-    __dict__ exactly mirrors it. Reconstruction replays self.__dict__ as
-    keyword arguments (cls(**kwargs)): an attribute stored beyond
-    __init__'s keyword parameters raises TypeError on unpickle (unexpected
-    keyword argument); a keyword parameter __init__ doesn't assign to self
-    is silently dropped if it has a default (unpickle reverts to it) or
-    raises TypeError if it doesn't (missing required argument).
-    """
-
-    def __reduce__(self) -> tuple[Any, ...]:
-        return (_reconstruct_kwonly, (type(self), self.__dict__))
-
-
-class RetryBudgetExhaustedError(_KeywordReduceMixin, ClientError):
+class RetryBudgetExhaustedError(ClientError):
     """Raised when a retry was needed but the RetryBudget refused to permit it.
 
     Carries the last response and/or exception observed before the budget refused,
@@ -180,7 +165,7 @@ class RetryBudgetExhaustedError(_KeywordReduceMixin, ClientError):
         super().__init__(f"retry budget exhausted after {attempts} attempt(s)")
 
 
-class BulkheadFullError(_KeywordReduceMixin, ClientError):
+class BulkheadFullError(ClientError):
     """Raised when ``acquire_timeout`` elapses before a bulkhead slot becomes available.
 
     Carries the configured caps for caller logging/alerting.
@@ -195,7 +180,7 @@ class BulkheadFullError(_KeywordReduceMixin, ClientError):
         super().__init__(f"bulkhead full (max_concurrent={max_concurrent}, acquire_timeout={acquire_timeout})")
 
 
-class CircuitOpenError(_KeywordReduceMixin, ClientError):
+class CircuitOpenError(ClientError):
     """Raised when a CircuitBreaker refuses a request because the circuit is not closed.
 
     Fires when the circuit is OPEN, or when it is HALF_OPEN and the single probe
@@ -214,7 +199,7 @@ class CircuitOpenError(_KeywordReduceMixin, ClientError):
             super().__init__(f"circuit open (retry_after={retry_after:.3f}s)")
 
 
-class DecodeError(_KeywordReduceMixin, ClientError):
+class DecodeError(ClientError):
     """Raised when the active ResponseDecoder failed to decode response.content.
 
     The HTTP call itself succeeded — status was 2xx/3xx and the transport
@@ -253,7 +238,7 @@ def _missing_decoder_summary(model: type, registered_names: tuple[str, ...]) -> 
     return f"no decoder for response_model={model!r}: {hint}"
 
 
-class MissingDecoderError(_KeywordReduceMixin, ClientError):
+class MissingDecoderError(ClientError):
     """Raised when response_model= is set but no registered decoder claims the model.
 
     Fires at .send() entry, BEFORE the HTTP call — no point sending a request
@@ -270,7 +255,7 @@ class MissingDecoderError(_KeywordReduceMixin, ClientError):
         super().__init__(_missing_decoder_summary(model, registered_names))
 
 
-class ResponseTooLargeError(_KeywordReduceMixin, ClientError):
+class ResponseTooLargeError(ClientError):
     """Raised when a response body exceeds the client's max_response_body_bytes cap.
 
     Status-agnostic: fires on any non-streaming send() and on stream()'s internal
