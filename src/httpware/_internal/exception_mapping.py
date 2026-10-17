@@ -2,8 +2,8 @@
 
 map_httpx2_exception is a pure function used by both Client._terminal and
 AsyncClient._terminal, and by both stream() methods. Clause ordering:
-TimeoutException -> InvalidURL/CookieConflict -> NetworkError -> HTTPError
-(subclass before parent so the right type wins). The two context managers
+TimeoutException -> InvalidURL/CookieConflict -> NetworkError/RemoteProtocolError
+-> HTTPError (subclass before parent so the right type wins). The two context managers
 below wrap it for use as `with`/`async with` blocks around the httpx2 call.
 """
 
@@ -25,7 +25,7 @@ def map_httpx2_exception(exc: BaseException) -> NetworkError | TimeoutError | Tr
         return TimeoutError(str(exc))
     if isinstance(exc, (httpx2.InvalidURL, httpx2.CookieConflict)):
         return TransportError(str(exc))
-    if isinstance(exc, httpx2.NetworkError):
+    if isinstance(exc, (httpx2.NetworkError, httpx2.RemoteProtocolError)):
         return NetworkError(str(exc))
     if isinstance(exc, httpx2.HTTPError):
         return TransportError(str(exc))
