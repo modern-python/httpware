@@ -11,7 +11,7 @@ import typing
 from typing import TypeVar
 
 from httpware._internal import import_checker
-from httpware.decoders._caching import _get_or_build
+from httpware.decoders._caching import _Cache, _lookup
 
 
 if import_checker.is_pydantic_installed:
@@ -25,6 +25,14 @@ MISSING_DEPENDENCY_MESSAGE = (
 T = TypeVar("T")
 
 
+def _build_adapter(model: object) -> "TypeAdapter[typing.Any] | None":
+    """Return a `TypeAdapter` for `model`, or None when pydantic cannot build a schema for it."""
+    try:
+        return TypeAdapter(model)
+    except Exception:  # noqa: BLE001 — can_decode is a probe; any failure means no
+        return None
+
+
 class PydanticDecoder:
     """Decode raw response bytes into `model` via a per-instance cached `pydantic.TypeAdapter`.
 
@@ -34,42 +42,25 @@ class PydanticDecoder:
     `ImportError`.
     """
 
-    _adapters: dict[type, "TypeAdapter[typing.Any]"]
-    _can_decode_results: dict[type, bool]
+    _adapters: "_Cache[TypeAdapter[typing.Any]]"
 
     def __init__(self) -> None:
         if not import_checker.is_pydantic_installed:
             raise ImportError(MISSING_DEPENDENCY_MESSAGE)
         self._adapters = {}
-        self._can_decode_results = {}
-
-    def _get_adapter(self, model: type[T]) -> "TypeAdapter[T]":
-        return _get_or_build(self._adapters, model, lambda: TypeAdapter(model))
 
     def can_decode(self, model: type) -> bool:
         """Return True iff pydantic can build a schema for `model`.
 
-        The verdict is memoized per `model` so a rejection (which costs a
-        `PydanticSchemaGenerationError` round-trip) is not re-probed on every
-        dispatch. Unhashable models skip the cache and probe fresh.
+        The adapter, or the rejection, is cached per `model`, so `decode` reuses
+        what this built. `msgspec.Struct` subclasses are rejected: pydantic
+        cannot build a schema for them.
         """
-        return _get_or_build(self._can_decode_results, model, lambda: self._probe_can_decode(model))
-
-    def _probe_can_decode(self, model: type) -> bool:
-        """Decide whether pydantic can build a schema for `model` (uncached).
-
-        Probes via `_get_adapter`; subsequent calls (including `decode`) reuse
-        the cached `TypeAdapter`. Rejects `msgspec.Struct` subclasses —
-        pydantic raises `PydanticSchemaGenerationError` (a `TypeError`) when
-        building a schema for them.
-        """
-        try:
-            self._get_adapter(model)
-        except Exception:  # noqa: BLE001 — can_decode is a probe; any failure means no
-            return False
-        return True
+        return _lookup(self._adapters, model, _build_adapter) is not None
 
     def decode(self, content: bytes, model: type[T]) -> T:
         """Validate `content` as JSON against `model` in a single parse pass."""
-        adapter = self._get_adapter(model)
+        adapter = _lookup(self._adapters, model, _build_adapter)
+        if adapter is None:
+            adapter = TypeAdapter(model)  # raises pydantic's own schema error
         return adapter.validate_json(content)

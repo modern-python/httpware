@@ -36,9 +36,9 @@ class _BoundDecoder(Generic[T]):
         self._model = model
 
     def decode(self, response: httpx2.Response) -> T:
-        """Decode `response.content` into `model`, wrapping any failure as `DecodeError`."""
+        """Read the body if needed and decode it into `model`, wrapping any failure as `DecodeError`."""
         try:
-            return self._decoder.decode(response.content, self._model)
+            return self._decoder.decode(response.read(), self._model)
         except Exception as exc:
             raise DecodeError(response=response, model=self._model, original=exc) from exc
 

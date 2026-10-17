@@ -125,10 +125,7 @@ def test_cache_invariance_concurrent_first_calls_threadpool() -> None:
             results = list(pool.map(one_decode, range(50)))
 
         assert all(type(r) is User and r.id == 1 for r in results)
-        # `dict` reads/writes are atomic in CPython but the get→set sequence in
-        # `_get_or_build` is not — concurrent first-callers may both build a
-        # TypeAdapter before one wins (idempotent; loser is GC'd). Bounded by
-        # worker count.
+        # Concurrent first callers may each build an adapter; the last write wins.
         assert 1 <= spy.call_count <= n_workers
 
 
@@ -216,28 +213,28 @@ def test_pydantic_can_decode_uses_cache() -> None:
 def test_pydantic_can_decode_result_is_cached() -> None:
     """Repeat can_decode calls reuse a cached verdict, not the per-dispatch probe."""
     decoder = PydanticDecoder()
-    with patch.object(decoder, "_get_adapter", wraps=decoder._get_adapter) as spy:  # noqa: SLF001
+    with patch("httpware.decoders.pydantic.TypeAdapter", wraps=pydantic.TypeAdapter) as spy:
         assert decoder.can_decode(User) is True
         assert decoder.can_decode(User) is True
     assert spy.call_count == 1
-    assert decoder._can_decode_results[User] is True  # noqa: SLF001
+    assert decoder._adapters[User][1] is not None  # noqa: SLF001
 
 
 def test_pydantic_can_decode_caches_negative_verdict() -> None:
     """A rejection is cached too, so repeat probes skip the schema-build round-trip."""
     decoder = PydanticDecoder()
-    with patch.object(decoder, "_get_adapter", wraps=decoder._get_adapter) as spy:  # noqa: SLF001
+    with patch("httpware.decoders.pydantic.TypeAdapter", wraps=pydantic.TypeAdapter) as spy:
         assert decoder.can_decode(_Struct) is False
         assert decoder.can_decode(_Struct) is False
     assert spy.call_count == 1
-    assert decoder._can_decode_results[_Struct] is False  # noqa: SLF001
+    assert decoder._adapters[_Struct] == (_Struct, None)  # noqa: SLF001
 
 
 def test_pydantic_can_decode_unhashable_model_does_not_raise() -> None:
     """An unhashable model falls back to a fresh probe instead of raising from the cache."""
     decoder = PydanticDecoder()
-    decoder._can_decode_results = MagicMock()  # noqa: SLF001
-    decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
+    decoder._adapters = MagicMock()  # noqa: SLF001
+    decoder._adapters.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
     assert decoder.can_decode(User) is True
 
 
@@ -255,3 +252,52 @@ def test_can_decode_agrees_with_decode_for_unhashable_buildable_model() -> None:
     decoder = PydanticDecoder()
     assert decoder.can_decode(model) is True  # ty: ignore[invalid-argument-type]
     assert decoder.decode(b"42", model) == 42  # noqa: PLR2004  # ty: ignore[invalid-argument-type]
+
+
+class _Left(pydantic.BaseModel):
+    x: int
+
+
+class _Right(pydantic.BaseModel):
+    x: int
+
+
+def test_union_member_order_is_part_of_the_cache_key() -> None:
+    """Smart mode breaks a tie by member order, so `A | B` and `B | A` decode differently."""
+    decoder = PydanticDecoder()
+    assert type(decoder.decode(b'{"x": 1}', _Left | _Right)) is _Left  # ty: ignore[invalid-argument-type]
+    assert type(decoder.decode(b'{"x": 1}', _Right | _Left)) is _Right
+
+
+def test_nested_union_member_order_is_part_of_the_cache_key() -> None:
+    decoder = PydanticDecoder()
+    (left,) = decoder.decode(b'[{"x": 1}]', list[_Left | _Right])
+    (right,) = decoder.decode(b'[{"x": 1}]', list[_Right | _Left])
+    assert type(left) is _Left
+    assert type(right) is _Right
+
+
+def test_unhashable_model_builds_adapter_once() -> None:
+    with patch("httpware.decoders.pydantic.TypeAdapter", wraps=pydantic.TypeAdapter) as spy:
+        decoder = PydanticDecoder()
+        for _ in range(3):
+            model = typing.Annotated[list[int], {"a": 1}]
+            assert decoder.can_decode(model) is True  # ty: ignore[invalid-argument-type]
+            assert decoder.decode(b"[1]", model) == [1]  # ty: ignore[invalid-argument-type]
+    assert spy.call_count == 1
+
+
+def test_unhashable_models_with_the_same_repr_do_not_share_an_adapter() -> None:
+    first_row = pydantic.create_model("Twin", a=int)
+    second_row = pydantic.create_model("Twin", b=int)
+    first = typing.Annotated[list[first_row], {"k": 1}]  # ty: ignore[invalid-type-form]
+    second = typing.Annotated[list[second_row], {"k": 1}]  # ty: ignore[invalid-type-form]
+    assert repr(first) == repr(second)
+    decoder = PydanticDecoder()
+    assert decoder.decode(b'[{"a": 1}]', first)[0].a == 1  # ty: ignore[invalid-argument-type]
+    assert decoder.decode(b'[{"b": 2}]', second)[0].b == 2  # noqa: PLR2004  # ty: ignore[invalid-argument-type]
+
+
+def test_decode_into_rejected_model_raises_the_schema_error() -> None:
+    with pytest.raises(pydantic.PydanticSchemaGenerationError):
+        PydanticDecoder().decode(b'{"id": 1, "name": "Ada"}', _Struct)
