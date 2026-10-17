@@ -1,6 +1,7 @@
 """Sync/async feature parity across the two client surfaces."""
 
 import inspect
+import typing
 
 import pytest
 
@@ -21,7 +22,14 @@ def _public_methods(cls: type) -> dict[str, inspect.Signature]:
 
 
 def _parameter_shape(signature: inspect.Signature) -> list[tuple[str, str]]:
-    return [(p.name, p.kind.name) for p in signature.parameters.values()]
+    shape = []
+    for parameter in signature.parameters.values():
+        if typing.get_origin(parameter.annotation) is typing.Unpack:
+            (options,) = typing.get_args(parameter.annotation)
+            shape += [(name, inspect.Parameter.KEYWORD_ONLY.name) for name in options.__annotations__]
+        else:
+            shape.append((parameter.name, parameter.kind.name))
+    return shape
 
 
 def test_client_and_asyncclient_expose_the_same_public_methods() -> None:
@@ -56,9 +64,11 @@ def test_mirrored_client_methods_take_the_same_parameters(name: str) -> None:
     Matching method names are the cheap half of parity and the half that drifts least. The
     expensive half is the signature: a keyword added to `AsyncClient.post` and forgotten on
     `Client.post` leaves both surfaces looking complete while one of them silently cannot
-    express the option. Only names, order and kind are compared — the two worlds legitimately
-    annotate `middleware` and every return type differently, and pinning those here would
-    make the test fail on changes that preserve the parity it exists to protect.
+    express the option. A `**options: Unpack[...]` parameter is expanded into the keywords of its
+    TypedDict, so the comparison sees each keyword a caller can pass.
+    Only names, order and kind are compared: the two worlds legitimately annotate `middleware`
+    and every return type differently, and pinning those here would make the test fail on
+    changes that preserve the parity it exists to protect.
     """
     sync = inspect.signature(getattr(httpware.Client, name))
     asynchronous = inspect.signature(getattr(httpware.AsyncClient, name))

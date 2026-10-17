@@ -117,6 +117,10 @@ isort.no-lines-before = ["standard-library", "local-folder"]
 include = ["scripts/**"]
 rules = { unresolved-import = "ignore" }
 
+[[tool.ty.overrides]]
+include = ["tests/test_client_typing.py"]
+rules = { unused-ignore-comment = "error" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ""

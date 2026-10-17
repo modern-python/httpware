@@ -1,109 +1,56 @@
 """Tests for request assembly functions in httpware.client module."""
 
 import httpx2
+import pytest
 
-from httpware.client import _assemble_request_kwargs
+from httpware import Client
+from httpware.client import _BODY_REQUEST_OPTION_DEFAULTS, _REQUEST_OPTION_DEFAULTS, _request_kwargs
 
 
-class TestAssembleRequestKwargs:
-    """Tests for _assemble_request_kwargs."""
+_CLIENT = Client.__new__(Client)
+
+
+class TestRequestKwargs:
+    """Tests for _request_kwargs."""
+
+    def test_no_options_returns_empty_dict(self) -> None:
+        assert _request_kwargs(_CLIENT, "post", {}, _BODY_REQUEST_OPTION_DEFAULTS) == {}
 
     def test_all_unset_returns_empty_dict(self) -> None:
-        """When all arguments are at their unset values, return empty dict."""
-        result = _assemble_request_kwargs(
-            params=None,
-            headers=None,
-            cookies=None,
-            timeout=httpx2.USE_CLIENT_DEFAULT,
-            extensions=None,
-            json=None,
-            content=None,
-            data=None,
-            files=None,
-        )
-        assert result == {}
+        """When every option is passed at its unset value, return empty dict."""
+        options = dict.fromkeys(_BODY_REQUEST_OPTION_DEFAULTS) | {"timeout": httpx2.USE_CLIENT_DEFAULT}
+        assert _request_kwargs(_CLIENT, "post", options, _BODY_REQUEST_OPTION_DEFAULTS) == {}
 
     def test_all_set_returns_full_dict(self) -> None:
-        """When all arguments are set to real values, return dict with all keys."""
-        params_val = {"key": "value"}
-        headers_val = {"X-Test": "header"}
-        cookies_val = {"session": "123"}
-        timeout_val = 5.0
-        extensions_val = {"timeout": 10.0}
-        json_val = {"data": "json"}
-        content_val = b"binary content"
-        data_val = {"form": "data"}
-        files_val = [("file", ("name.txt", b"content"))]
-
-        result = _assemble_request_kwargs(
-            params=params_val,
-            headers=headers_val,
-            cookies=cookies_val,
-            timeout=timeout_val,
-            extensions=extensions_val,
-            json=json_val,
-            content=content_val,
-            data=data_val,
-            files=files_val,
-        )
-
-        assert result == {
-            "params": params_val,
-            "headers": headers_val,
-            "cookies": cookies_val,
-            "timeout": timeout_val,
-            "extensions": extensions_val,
-            "json": json_val,
-            "content": content_val,
-            "data": data_val,
-            "files": files_val,
+        """When all options are set to real values, return dict with all keys."""
+        options = {
+            "params": {"key": "value"},
+            "headers": {"X-Test": "header"},
+            "cookies": {"session": "123"},
+            "timeout": 5.0,
+            "extensions": {"timeout": 10.0},
+            "json": {"data": "json"},
+            "content": b"binary content",
+            "data": {"form": "data"},
+            "files": [("file", ("name.txt", b"content"))],
         }
+        assert _request_kwargs(_CLIENT, "post", options, _BODY_REQUEST_OPTION_DEFAULTS) == options
 
     def test_timeout_use_client_default_omitted(self) -> None:
         """When timeout is httpx2.USE_CLIENT_DEFAULT, it is omitted."""
-        result = _assemble_request_kwargs(
-            params=None,
-            headers=None,
-            cookies=None,
-            timeout=httpx2.USE_CLIENT_DEFAULT,
-            extensions=None,
-            json=None,
-            content=None,
-            data=None,
-            files=None,
-        )
-        assert "timeout" not in result
-        assert result == {}
+        options = {"timeout": httpx2.USE_CLIENT_DEFAULT}
+        assert _request_kwargs(_CLIENT, "get", options, _REQUEST_OPTION_DEFAULTS) == {}
 
     def test_timeout_none_is_included(self) -> None:
         """When timeout is None (not USE_CLIENT_DEFAULT), it is included."""
-        result = _assemble_request_kwargs(
-            params=None,
-            headers=None,
-            cookies=None,
-            timeout=None,
-            extensions=None,
-            json=None,
-            content=None,
-            data=None,
-            files=None,
-        )
-        assert "timeout" in result
-        assert result["timeout"] is None
+        assert _request_kwargs(_CLIENT, "get", {"timeout": None}, _REQUEST_OPTION_DEFAULTS) == {"timeout": None}
 
     def test_timeout_numeric_value_is_included(self) -> None:
         """When timeout is a numeric value, it is included."""
         timeout_value = 10.5
-        result = _assemble_request_kwargs(
-            params=None,
-            headers=None,
-            cookies=None,
-            timeout=timeout_value,
-            extensions=None,
-            json=None,
-            content=None,
-            data=None,
-            files=None,
-        )
-        assert "timeout" in result
-        assert result["timeout"] == timeout_value
+        result = _request_kwargs(_CLIENT, "get", {"timeout": timeout_value}, _REQUEST_OPTION_DEFAULTS)
+        assert result == {"timeout": timeout_value}
+
+    def test_unknown_option_raises_type_error_naming_it(self) -> None:
+        with pytest.raises(TypeError, match=r"^Client\.get\(\) got an unexpected keyword argument 'json'$"):
+            _request_kwargs(_CLIENT, "get", {"json": {"a": 1}}, _REQUEST_OPTION_DEFAULTS)
