@@ -17,12 +17,15 @@ import pytest
 
 from httpware import (
     AsyncClient,
+    AsyncRetry,
     CircuitOpenError,
     CircuitState,
     InternalServerError,
     NetworkError,
     NotFoundError,
     RateLimitedError,
+    RetryBudget,
+    RetryBudgetExhaustedError,
     ServiceUnavailableError,
     TimeoutError,  # noqa: A004 — intentional: httpware.TimeoutError shadows the builtin
 )
@@ -700,3 +703,191 @@ async def test_rate_mode_probe_failure_reopens_with_classic_attributes(caplog: p
     assert rec.failures == 1  # ty: ignore[unresolved-attribute]  # classic probe-failure shape
     assert hasattr(rec, "failure_threshold")
     assert not hasattr(rec, "failure_rate")  # NOT the rate shape
+
+
+# ── stragglers: outcomes apply to the state the request was admitted under ──
+
+
+class _HeldCalls:
+    """Starts breaker calls whose `next` blocks until `finish` gives it a status.
+
+    Tracks how many calls that entered `next` while the circuit was HALF_OPEN are in flight.
+    """
+
+    def __init__(self, breaker: AsyncCircuitBreaker) -> None:
+        self._breaker = breaker
+        self._futures: list[asyncio.Future[int]] = []
+        self._tasks: list[asyncio.Task[httpx2.Response]] = []
+        self.probes_in_flight = 0
+        self.max_probes_in_flight = 0
+
+    async def _next(self, request: httpx2.Request) -> httpx2.Response:
+        probe = self._breaker.state is CircuitState.HALF_OPEN
+        if probe:
+            self.probes_in_flight += 1
+            self.max_probes_in_flight = max(self.max_probes_in_flight, self.probes_in_flight)
+        future: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+        self._futures.append(future)
+        try:
+            status = await future
+        finally:
+            if probe:
+                self.probes_in_flight -= 1
+        if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise InternalServerError(httpx2.Response(status, request=request))
+        return httpx2.Response(status, request=request)
+
+    async def start(self) -> int:
+        """Start a call; return its index once it is blocked in `next` (or already rejected)."""
+        task = asyncio.create_task(self._breaker(httpx2.Request("GET", "https://example.test/x"), self._next))
+        self._tasks.append(task)
+        await asyncio.sleep(0)
+        return len(self._tasks) - 1
+
+    async def finish(self, index: int, status: int) -> None:
+        self._futures[index].set_result(status)
+        with contextlib.suppress(InternalServerError):
+            await self._tasks[index]
+
+    async def drain(self) -> None:
+        for future in self._futures:
+            if not future.done():
+                future.set_result(HTTPStatus.OK)
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+
+
+async def _open_now(breaker: AsyncCircuitBreaker) -> None:
+    async def _five_hundred(request: httpx2.Request) -> httpx2.Response:
+        raise InternalServerError(httpx2.Response(HTTPStatus.INTERNAL_SERVER_ERROR, request=request))
+
+    with pytest.raises(InternalServerError):
+        await breaker(httpx2.Request("GET", "https://example.test/x"), _five_hundred)
+
+
+async def test_stale_closed_era_failure_does_not_reopen_half_open_circuit() -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=1.0, _now=clock)
+    calls = _HeldCalls(breaker)
+    straggler = await calls.start()
+    await _open_now(breaker)
+    clock.advance(1.0)
+    probe = await calls.start()
+    await calls.finish(straggler, HTTPStatus.INTERNAL_SERVER_ERROR)
+    assert breaker.state is CircuitState.HALF_OPEN
+    await calls.finish(probe, HTTPStatus.OK)
+    assert breaker.state is CircuitState.CLOSED
+
+
+async def test_stale_closed_era_successes_do_not_close_half_open_circuit() -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=1.0, success_threshold=3, _now=clock)
+    calls = _HeldCalls(breaker)
+    stragglers = [await calls.start(), await calls.start()]
+    await _open_now(breaker)
+    clock.advance(1.0)
+    probe = await calls.start()
+    for straggler in stragglers:
+        await calls.finish(straggler, HTTPStatus.OK)
+    await calls.finish(probe, HTTPStatus.OK)
+    assert breaker.state is CircuitState.HALF_OPEN
+
+
+async def test_stragglers_never_let_a_second_probe_in() -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=1.0, success_threshold=2, _now=clock)
+    calls = _HeldCalls(breaker)
+    straggler = await calls.start()
+    await _open_now(breaker)
+    clock.advance(1.0)
+    await calls.start()
+    await calls.finish(straggler, HTTPStatus.INTERNAL_SERVER_ERROR)
+    clock.advance(1.0)
+    await calls.start()
+    await calls.drain()
+    assert calls.max_probes_in_flight == 1
+
+
+# ── a RetryBudgetExhaustedError is classified by its last_exception ──
+
+
+def _no_retry_budget() -> RetryBudget:
+    return RetryBudget(min_retries_per_sec=0.0, percent_can_retry=0.0)
+
+
+def _behind_starved_retry(
+    handler: Callable[[httpx2.Request], httpx2.Response], breaker: AsyncCircuitBreaker
+) -> AsyncClient:
+    return AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(handler)),
+        middleware=[
+            breaker,
+            AsyncRetry(budget=_no_retry_budget(), base_delay=0.0, retry_status_codes=frozenset({429, 503})),
+        ],
+    )
+
+
+async def test_budget_exhausted_on_5xx_is_a_counted_failure() -> None:
+    breaker = AsyncCircuitBreaker(failure_threshold=1, _now=_Clock())
+    async with _behind_starved_retry(_StatusSequence([503]), breaker) as client:
+        with pytest.raises(RetryBudgetExhaustedError):
+            await client.get("https://example.test/x")
+        with pytest.raises(CircuitOpenError):
+            await client.get("https://example.test/x")
+
+
+async def test_budget_exhausted_on_network_error_is_a_counted_failure() -> None:
+    def _refuse(request: httpx2.Request) -> httpx2.Response:
+        msg = "refused"
+        raise httpx2.ConnectError(msg, request=request)
+
+    breaker = AsyncCircuitBreaker(failure_threshold=1, _now=_Clock())
+    async with _behind_starved_retry(_refuse, breaker) as client:
+        with pytest.raises(RetryBudgetExhaustedError) as info:
+            await client.get("https://example.test/x")
+        assert isinstance(info.value.last_exception, NetworkError)
+        with pytest.raises(CircuitOpenError):
+            await client.get("https://example.test/x")
+
+
+async def test_budget_exhausted_on_4xx_is_a_success() -> None:
+    breaker = AsyncCircuitBreaker(failure_threshold=2, _now=_Clock())
+    async with _behind_starved_retry(_StatusSequence([500, 429, 500, 200]), breaker) as client:
+        with pytest.raises(InternalServerError):
+            await client.get("https://example.test/x")
+        with pytest.raises(RetryBudgetExhaustedError):
+            await client.get("https://example.test/x")
+        with pytest.raises(InternalServerError):
+            await client.get("https://example.test/x")
+        response = await client.get("https://example.test/x")
+    assert response.status_code == HTTPStatus.OK
+
+
+async def test_budget_exhausted_with_a_foreign_last_exception_leaves_the_circuit_alone() -> None:
+    async def _exhausted(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        raise RetryBudgetExhaustedError(last_response=None, last_exception=ValueError("boom"), attempts=1)
+
+    breaker = AsyncCircuitBreaker(failure_threshold=1, _now=_Clock())
+    for _ in range(3):
+        with pytest.raises(RetryBudgetExhaustedError):
+            await breaker(httpx2.Request("GET", "https://example.test/x"), _exhausted)
+    assert breaker.state is CircuitState.CLOSED
+
+
+# ── circuit.rejected is rate limited per circuit ──
+
+
+async def test_rejected_event_is_emitted_at_most_once_per_second(caplog: pytest.LogCaptureFixture) -> None:
+    clock = _Clock()
+    breaker = AsyncCircuitBreaker(failure_threshold=1, reset_timeout=30.0, _now=clock)
+    await _open_now(breaker)
+
+    async def _unreachable(request: httpx2.Request) -> httpx2.Response:  # pragma: no cover — OPEN never forwards
+        return httpx2.Response(HTTPStatus.OK, request=request)
+
+    with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
+        for step in (0.0, 0.0, 0.0, 0.5, 0.49, 0.01, 0.2):
+            clock.advance(step)
+            with pytest.raises(CircuitOpenError):
+                await breaker(httpx2.Request("GET", "https://example.test/x"), _unreachable)
+    rejected = [r for r in caplog.records if r.event == "circuit.rejected"]  # ty: ignore[unresolved-attribute]
+    assert [r.suppressed for r in rejected] == [0, 4]  # ty: ignore[unresolved-attribute]

@@ -46,9 +46,9 @@ _Avoid_: adapter, which names the third-party object a decoder builds and memoiz
 **Counted failure**:
 The circuit breaker's unit of account: a `NetworkError`, an httpware `TimeoutError`, or a
 `StatusError` whose status is in the effective failure set (default: all 5xx). Every other 4xx —
-429 included — counts as a *success*, and any other exception type propagates without touching
-circuit state. "Failure" alone is ambiguous here: a failed request is very often not a counted
-failure.
+429 included — counts as a *success*. A `RetryBudgetExhaustedError` is classified by its
+`last_exception`, and any other exception type propagates without touching circuit state. "Failure"
+alone is ambiguous here: a failed request is very often not a counted failure.
 
 **Circuit key**:
 The value a keyed circuit breaker computes from a request to pick its circuit; requests with equal

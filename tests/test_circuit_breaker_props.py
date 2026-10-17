@@ -1,8 +1,13 @@
-"""Property test: while OPEN and before reset_timeout, the breaker never forwards.
+"""Property tests for the AsyncCircuitBreaker state machine.
 
-Drives the AsyncCircuitBreaker directly with a stub `next` that records calls.
-Hypothesis generates random advance/outcome sequences. Time is injected via a clock.
+Drives the breaker directly with stub `next` callables; time is injected via a clock.
 """
+
+import asyncio
+import contextlib
+import dataclasses
+import typing
+from http import HTTPStatus
 
 import httpx2
 import pytest
@@ -10,7 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from httpware import CircuitOpenError, InternalServerError
-from httpware.middleware.resilience.circuit_breaker import AsyncCircuitBreaker
+from httpware.middleware.resilience.circuit_breaker import AsyncCircuitBreaker, CircuitState
 
 
 class _Clock:
@@ -66,3 +71,113 @@ async def test_open_circuit_never_forwards_before_reset_timeout(
             await breaker(_request(), _ok)
 
     assert forwarded == 0  # `next` (_ok) was never called while OPEN pre-timeout
+
+
+_FOREIGN = 0
+
+
+@dataclasses.dataclass
+class _InFlight:
+    future: asyncio.Future[int]
+    task: asyncio.Task[httpx2.Response]
+    generation: int
+
+
+class _Harness:
+    """Starts and finishes breaker calls, tracking the circuit's generation and probes in flight.
+
+    The generation counts observed state changes; each operation causes at most one.
+    """
+
+    def __init__(self, breaker: AsyncCircuitBreaker) -> None:
+        self.breaker = breaker
+        self.generation = 0
+        self.observed = breaker.state
+        self.in_flight: list[_InFlight] = []
+        self.probes_in_flight = 0
+
+    def _observe(self) -> None:
+        if self.breaker.state is not self.observed:
+            self.generation += 1
+            self.observed = self.breaker.state
+
+    async def _next(self, request: httpx2.Request) -> httpx2.Response:
+        call = self.in_flight[-1]
+        probe = self.breaker.state is CircuitState.HALF_OPEN
+        self.probes_in_flight += probe
+        assert self.probes_in_flight <= 1
+        try:
+            status = await call.future
+        finally:
+            self.probes_in_flight -= probe
+        if status == _FOREIGN:
+            msg = "foreign"
+            raise ValueError(msg)
+        if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise InternalServerError(httpx2.Response(status, request=request))
+        return httpx2.Response(status, request=request)
+
+    async def start(self) -> None:
+        future: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+        call = _InFlight(future, asyncio.create_task(self.breaker(_request(), self._next)), self.generation)
+        self.in_flight.append(call)
+        await asyncio.sleep(0)
+        self._observe()
+        call.generation = self.generation
+        if call.task.done():
+            self.in_flight.remove(call)
+            assert isinstance(call.task.exception(), CircuitOpenError)
+
+    async def finish(self, index: int, status: int) -> None:
+        call = self.in_flight.pop(index % len(self.in_flight))
+        before = self.breaker.state
+        call.future.set_result(status)
+        with contextlib.suppress(InternalServerError, ValueError):
+            await call.task
+        if call.generation != self.generation:
+            assert self.breaker.state is before
+        self._observe()
+
+    async def drain(self) -> None:
+        for call in self.in_flight:
+            call.future.set_result(HTTPStatus.OK)
+        await asyncio.gather(*(call.task for call in self.in_flight))
+
+
+_operations = st.lists(
+    st.one_of(
+        st.just(("start",)),
+        st.tuples(
+            st.just("finish"), st.integers(min_value=0, max_value=31), st.sampled_from([200, 404, 500, _FOREIGN])
+        ),
+    ),
+    min_size=8,
+    max_size=40,
+)
+
+
+@given(
+    failure_threshold=st.integers(min_value=1, max_value=2),
+    success_threshold=st.integers(min_value=1, max_value=3),
+    operations=_operations,
+)
+@settings(max_examples=200, deadline=None)
+async def test_outcomes_only_move_the_state_they_were_admitted_under(
+    failure_threshold: int,
+    success_threshold: int,
+    operations: list[tuple[typing.Any, ...]],
+) -> None:
+    """A call finishing after the circuit has changed state leaves it alone, and probes never overlap."""
+    breaker = AsyncCircuitBreaker(
+        failure_threshold=failure_threshold,
+        reset_timeout=0.0,
+        success_threshold=success_threshold,
+        _now=_Clock(),
+    )
+    harness = _Harness(breaker)
+    for operation in operations:
+        if operation[0] == "start":
+            await harness.start()
+        elif harness.in_flight:
+            await harness.finish(operation[1], operation[2])
+    await harness.drain()

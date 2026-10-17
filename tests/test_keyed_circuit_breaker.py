@@ -216,3 +216,45 @@ def test_cross_loop_use_raises_runtimeerror() -> None:
     asyncio.run(_run_once("https://a.test/x"))
     with pytest.raises(RuntimeError, match="AsyncKeyedCircuitBreaker is bound to a single event loop"):
         asyncio.run(_run_once("https://b.test/x"))
+
+
+class _Held:
+    """A `next` that blocks until released, then answers `status`."""
+
+    def __init__(self, status: int) -> None:
+        self.status = status
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.entered.set()
+        await self.release.wait()
+        if self.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise InternalServerError(httpx2.Response(self.status, request=request))
+        return httpx2.Response(self.status, request=request)
+
+
+async def test_stale_closed_era_failure_does_not_reopen_a_half_open_circuit() -> None:
+    clock = _Clock()
+    breaker = AsyncKeyedCircuitBreaker(failure_threshold=1, reset_timeout=1.0, _now=clock)
+    request = httpx2.Request("GET", "https://a.test/x")
+    straggler_next = _Held(HTTPStatus.INTERNAL_SERVER_ERROR)
+    straggler = asyncio.create_task(breaker(request, straggler_next))
+    await straggler_next.entered.wait()
+    opener = _Held(HTTPStatus.INTERNAL_SERVER_ERROR)
+    opener.release.set()
+    with pytest.raises(InternalServerError):
+        await breaker(request, opener)
+    clock.t = 1.0
+    probe_next = _Held(HTTPStatus.OK)
+    probe = asyncio.create_task(breaker(request, probe_next))
+    await probe_next.entered.wait()
+    straggler_next.release.set()
+    with pytest.raises(InternalServerError):
+        await straggler
+    probe_next.release.set()
+    await probe
+    after = _Held(HTTPStatus.OK)
+    after.release.set()
+    response = await breaker(request, after)
+    assert response.status_code == HTTPStatus.OK
