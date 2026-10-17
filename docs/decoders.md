@@ -35,6 +35,10 @@ Both clients take `decoders: Sequence[ResponseDecoder] | None = None`. The list 
 - If `response_model=` is set and no decoder accepts it, the client raises `MissingDecoderError` before sending the request. That means nothing handles the type, and the fix is to install an extra or pass `decoders=[...]`. A `DecodeError` instead means a decoder ran and the body didn't fit the type, which points at the server or the model. See [Errors](errors.md).
 - `MsgspecDecoder` accepts a `Struct`, dataclass, `TypedDict` or `NamedTuple` only if msgspec can decode every field type itself, nested fields included. A field typed as a pydantic model or some other class would need a `dec_hook`, which `MsgspecDecoder` doesn't take, so it declines the model and you get `MissingDecoderError` before the request goes out.
 
+## Keep response models long-lived
+
+The built-in decoders build a parser once per model (a `pydantic.TypeAdapter` or a `msgspec.json.Decoder`) and cache it, so define each response model once, at module level, and reuse it. Each decoder caches up to 4,096 models. When the cache is full, the next new model empties it. A model created per request, for example with `pydantic.create_model` or `msgspec.defstruct`, takes a new slot every time, so the cache keeps filling up and emptying, and every model seen after it empties gets its parser built again.
+
 ## One sync protocol for both clients
 
 Middleware comes in sync and async versions, but there is only one `ResponseDecoder` protocol, used by both clients. `decode` is synchronous because the client has the whole body by the time it runs, so there is nothing to await. If a middleware returns a streamed response it never read, the client reads it before decoding. In `AsyncClient` that stream also has to support sync iteration, as `httpx2.ByteStream` does; otherwise the middleware should `await response.aread()` before returning it. The same decoder works with either client.
