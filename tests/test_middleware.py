@@ -1,7 +1,9 @@
 """Tests for the AsyncMiddleware protocol, AsyncNext type, chain composition, and decorators."""
 
 import asyncio
+import functools
 import typing
+from collections.abc import Callable
 from http import HTTPStatus
 
 import httpx2
@@ -189,3 +191,34 @@ def test_compose_get_type_hints_resolves_without_nameerror() -> None:
     """Sync mirror — sync `compose` get_type_hints must also resolve."""
     hints = typing.get_type_hints(compose)
     assert "middleware" in hints
+
+
+async def _passthrough(*args: typing.Any) -> typing.Any:  # noqa: ANN401
+    return args[-1]  # pragma: no cover — never invoked; the test only checks repr()
+
+
+class _CallableTransform:
+    async def __call__(self, *args: typing.Any) -> typing.Any:  # noqa: ANN401
+        return args[-1]  # pragma: no cover — never invoked; the test only checks repr()
+
+
+@pytest.mark.parametrize(
+    ("decorator", "name"),
+    [
+        (async_before_request, "async_before_request"),
+        (async_after_response, "async_after_response"),
+        (async_on_error, "async_on_error"),
+    ],
+)
+@pytest.mark.parametrize(
+    "factory",
+    [lambda: functools.partial(_passthrough), _CallableTransform],
+    ids=["partial", "callable_instance"],
+)
+def test_decorator_repr_falls_back_to_repr_without_qualname(
+    decorator: Callable[[typing.Any], AsyncMiddleware],
+    name: str,
+    factory: Callable[[], typing.Any],
+) -> None:
+    f = factory()
+    assert repr(decorator(f)) == f"<{name}({f!r})>"

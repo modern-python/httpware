@@ -44,7 +44,7 @@ def async_before_request(f: Callable[[httpx2.Request], Awaitable[httpx2.Request]
             return await next(await f(request))
 
         def __repr__(self) -> str:
-            return f"<async_before_request({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+            return f"<async_before_request({getattr(f, '__qualname__', repr(f))})>"
 
     return _BeforeRequestMiddleware()
 
@@ -60,7 +60,7 @@ def async_after_response(
             return await f(request, response)
 
         def __repr__(self) -> str:
-            return f"<async_after_response({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+            return f"<async_after_response({getattr(f, '__qualname__', repr(f))})>"
 
     return _AfterResponseMiddleware()
 
@@ -85,7 +85,7 @@ def async_on_error(
                 return result
 
         def __repr__(self) -> str:
-            return f"<async_on_error({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+            return f"<async_on_error({getattr(f, '__qualname__', repr(f))})>"
 
     return _OnErrorMiddleware()
 
@@ -110,7 +110,7 @@ def before_request(f: Callable[[httpx2.Request], httpx2.Request]) -> Middleware:
             return next(f(request))
 
         def __repr__(self) -> str:
-            return f"<before_request({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+            return f"<before_request({getattr(f, '__qualname__', repr(f))})>"
 
     return _BeforeRequestMiddleware()
 
@@ -126,7 +126,7 @@ def after_response(
             return f(request, response)
 
         def __repr__(self) -> str:
-            return f"<after_response({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+            return f"<after_response({getattr(f, '__qualname__', repr(f))})>"
 
     return _AfterResponseMiddleware()
 
@@ -151,6 +151,6 @@ def on_error(
                 return result
 
         def __repr__(self) -> str:
-            return f"<on_error({f.__qualname__})>"  # ty: ignore[unresolved-attribute]
+            return f"<on_error({getattr(f, '__qualname__', repr(f))})>"
 
     return _OnErrorMiddleware()

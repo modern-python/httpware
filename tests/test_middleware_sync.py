@@ -1,5 +1,8 @@
 """Tests for the sync Middleware protocol, Next type, chain composition, and decorators."""
 
+import functools
+import typing
+from collections.abc import Callable
 from http import HTTPStatus
 
 import httpx2
@@ -197,3 +200,34 @@ def test_on_error_lets_systemexit_propagate() -> None:
     dispatch = compose((swallow_all,), terminal_se)
     with pytest.raises(SystemExit):
         dispatch(_make_request())
+
+
+def _passthrough(*args: typing.Any) -> typing.Any:  # noqa: ANN401
+    return args[-1]  # pragma: no cover — never invoked; the test only checks repr()
+
+
+class _CallableTransform:
+    def __call__(self, *args: typing.Any) -> typing.Any:  # noqa: ANN401
+        return args[-1]  # pragma: no cover — never invoked; the test only checks repr()
+
+
+@pytest.mark.parametrize(
+    ("decorator", "name"),
+    [
+        (before_request, "before_request"),
+        (after_response, "after_response"),
+        (on_error, "on_error"),
+    ],
+)
+@pytest.mark.parametrize(
+    "factory",
+    [lambda: functools.partial(_passthrough), _CallableTransform],
+    ids=["partial", "callable_instance"],
+)
+def test_decorator_repr_falls_back_to_repr_without_qualname(
+    decorator: Callable[[typing.Any], Middleware],
+    name: str,
+    factory: Callable[[], typing.Any],
+) -> None:
+    f = factory()
+    assert repr(decorator(f)) == f"<{name}({f!r})>"
