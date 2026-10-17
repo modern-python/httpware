@@ -50,6 +50,8 @@ If the request body was an async iterable, `AsyncRetry` does not retry, because 
 httpware: not retrying because the request body is a stream that cannot replay across attempts
 ```
 
+The same applies to a request you build yourself and pass to `send()` or `send_with_response()`, whether it comes from `client.build_request()` or `httpx2.Request()`. `send()` marks it as streaming when its body is not held in memory and is not a multipart upload, so `content=` with a generator is marked, while `content=b"..."`, `json=`, `data=` and `files=` are not. A body built from a list of chunks also counts as streaming here, because `send()` cannot tell it from a generator; `client.post()` and the other verb methods see the original argument and don't mark it.
+
 The note, and the `retry.streaming_refused` event on `httpware.retry`, appear only when the failure would otherwise have been retried. A POST with a streaming body, for example, is re-raised without the note because POST is not retried in the first place. See [Observability](observability.md).
 
 ### Exhaustion behavior

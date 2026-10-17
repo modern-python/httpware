@@ -20,6 +20,7 @@ from httpware._internal.status import (
     STREAMING_BODY_MARKER,
     _is_streaming_body_async,
     _is_streaming_body_sync,
+    _mark_streaming_body,
     _raise_on_status_error,
 )
 from httpware.decoders import ResponseDecoder
@@ -427,7 +428,14 @@ class AsyncClient:
         *,
         response_model: type[T] | None = None,
     ) -> httpx2.Response | T:
-        """Send `request` through the middleware chain. Decode if `response_model` is set."""
+        """Send `request` through the middleware chain. Decode if `response_model` is set.
+
+        A request whose body is a one-shot stream gets STREAMING_BODY_MARKER, so retry middleware will not replay it.
+        """
+        _mark_streaming_body(request)
+        return await self._send(request, response_model)
+
+    async def _send(self, request: httpx2.Request, response_model: type[T] | None) -> httpx2.Response | T:
         if response_model is None:
             return await self._dispatch(request)
 
@@ -450,6 +458,10 @@ class AsyncClient:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
+        _mark_streaming_body(request)
+        return await self._send_with_response(request, response_model)
+
+    async def _send_with_response(self, request: httpx2.Request, response_model: type[T]) -> tuple[httpx2.Response, T]:
         bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
         return response, bound.decode(response)
@@ -521,7 +533,7 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        return await self.send(request, response_model=response_model)
+        return await self._send(request, response_model)
 
     async def _request_with_body_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
         self,
@@ -552,7 +564,7 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        return await self.send_with_response(request, response_model=response_model)
+        return await self._send_with_response(request, response_model)
 
     @typing.overload
     async def get(
@@ -1384,7 +1396,14 @@ class Client:
         *,
         response_model: type[T] | None = None,
     ) -> httpx2.Response | T:
-        """Send `request` through the middleware chain. Decode if `response_model` is set."""
+        """Send `request` through the middleware chain. Decode if `response_model` is set.
+
+        A request whose body is a one-shot stream gets STREAMING_BODY_MARKER, so retry middleware will not replay it.
+        """
+        _mark_streaming_body(request)
+        return self._send(request, response_model)
+
+    def _send(self, request: httpx2.Request, response_model: type[T] | None) -> httpx2.Response | T:
         if response_model is None:
             return self._dispatch(request)
 
@@ -1407,6 +1426,10 @@ class Client:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
+        _mark_streaming_body(request)
+        return self._send_with_response(request, response_model)
+
+    def _send_with_response(self, request: httpx2.Request, response_model: type[T]) -> tuple[httpx2.Response, T]:
         bound = self._decoder_resolver.resolve(response_model)
         response = self._dispatch(request)
         return response, bound.decode(response)
@@ -1478,7 +1501,7 @@ class Client:
             data=data,
             files=files,
         )
-        return self.send(request, response_model=response_model)
+        return self._send(request, response_model)
 
     def _request_with_body_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
         self,
@@ -1509,7 +1532,7 @@ class Client:
             data=data,
             files=files,
         )
-        return self.send_with_response(request, response_model=response_model)
+        return self._send_with_response(request, response_model)
 
     @typing.overload
     def get(

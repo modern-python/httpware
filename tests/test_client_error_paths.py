@@ -192,6 +192,106 @@ def _sync_retry_client(handler: typing.Any) -> Client:  # noqa: ANN401
     )
 
 
+async def test_async_send_of_built_streaming_request_refuses_retry() -> None:
+    handler = _AsyncCounting503()
+    client = _async_retry_client(handler)
+    request = client.build_request("POST", "https://example.test/upload", content=_async_chunks())
+    with pytest.raises(ServiceUnavailableError) as info:
+        await client.send(request)
+    assert handler.calls == 1
+    assert _REFUSAL_NOTE in info.value.__notes__
+
+
+async def test_async_send_of_raw_streaming_request_refuses_retry() -> None:
+    handler = _AsyncCounting503()
+    client = _async_retry_client(handler)
+    request = httpx2.Request("POST", "https://example.test/upload", content=_async_chunks())
+    with pytest.raises(ServiceUnavailableError) as info:
+        await client.send(request)
+    assert handler.calls == 1
+    assert _REFUSAL_NOTE in info.value.__notes__
+
+
+async def test_async_send_with_response_of_raw_streaming_request_refuses_retry() -> None:
+    handler = _AsyncCounting503()
+    client = _async_retry_client(handler)
+    request = httpx2.Request("POST", "https://example.test/upload", content=_async_chunks())
+    with pytest.raises(ServiceUnavailableError):
+        await client.send_with_response(request, response_model=dict)
+    assert handler.calls == 1
+
+
+def test_sync_send_of_built_streaming_request_refuses_retry() -> None:
+    handler = _Counting503()
+    client = _sync_retry_client(handler)
+    request = client.build_request("POST", "https://example.test/upload", content=_sync_chunks())
+    with pytest.raises(ServiceUnavailableError) as info:
+        client.send(request)
+    assert handler.calls == 1
+    assert _REFUSAL_NOTE in info.value.__notes__
+
+
+def test_sync_send_of_raw_streaming_request_refuses_retry() -> None:
+    handler = _Counting503()
+    client = _sync_retry_client(handler)
+    request = httpx2.Request("POST", "https://example.test/upload", content=_sync_chunks())
+    with pytest.raises(ServiceUnavailableError) as info:
+        client.send(request)
+    assert handler.calls == 1
+    assert _REFUSAL_NOTE in info.value.__notes__
+
+
+def test_sync_send_with_response_of_raw_streaming_request_refuses_retry() -> None:
+    handler = _Counting503()
+    client = _sync_retry_client(handler)
+    request = httpx2.Request("POST", "https://example.test/upload", content=_sync_chunks())
+    with pytest.raises(ServiceUnavailableError):
+        client.send_with_response(request, response_model=dict)
+    assert handler.calls == 1
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"content": b"body"}, id="bytes"),
+        pytest.param({"json": {"a": 1}}, id="json"),
+        pytest.param({"data": {"a": "1"}}, id="form"),
+        pytest.param({"files": {"f": b"file"}}, id="multipart"),
+    ],
+)
+def test_sync_send_of_raw_replayable_request_is_not_marked(kwargs: dict[str, typing.Any]) -> None:
+    seen: list[dict[str, typing.Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(dict(request.extensions))
+        return _ok(request)
+
+    client = Client(transport=httpx2.MockTransport(handler))
+    client.send(httpx2.Request("POST", "https://example.test/upload", **kwargs))
+    assert STREAMING_BODY_MARKER not in seen[0]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"content": b"body"}, id="bytes"),
+        pytest.param({"json": {"a": 1}}, id="json"),
+        pytest.param({"data": {"a": "1"}}, id="form"),
+        pytest.param({"files": {"f": b"file"}}, id="multipart"),
+    ],
+)
+async def test_async_send_of_raw_replayable_request_is_not_marked(kwargs: dict[str, typing.Any]) -> None:
+    seen: list[dict[str, typing.Any]] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(dict(request.extensions))
+        return _ok(request)
+
+    client = AsyncClient(transport=httpx2.MockTransport(handler))
+    await client.send(httpx2.Request("POST", "https://example.test/upload", **kwargs))
+    assert STREAMING_BODY_MARKER not in seen[0]
+
+
 class _AsyncPassThrough:
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         return await next(request)
