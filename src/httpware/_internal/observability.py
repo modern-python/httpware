@@ -26,7 +26,7 @@ def _emit_event(
 
     The ``url`` attribute, when present, is run through
     ``redaction.redact_url`` here — at the single emission boundary — so a
-    request URL's userinfo and known-sensitive query/fragment secrets never
+    request URL's userinfo and query/fragment parameter values never
     reach a log record or span event, regardless of how a caller built the
     attributes dict.
 
