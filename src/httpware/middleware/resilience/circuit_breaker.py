@@ -564,7 +564,8 @@ class AsyncCircuitBreaker:
 
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Admit, forward, then record the outcome. Fast-fail when the circuit is not closed."""
-        self._check_loop()
+        if self._loop is not asyncio.get_running_loop():
+            self._check_loop()
         return await _call_async(self._state, request, next)
 
 
@@ -659,7 +660,8 @@ class AsyncKeyedCircuitBreaker:
 
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Pick the request's circuit, then admit, forward and record the outcome on it."""
-        self._check_loop()
+        if self._loop is not asyncio.get_running_loop():
+            self._check_loop()
         return await _call_async(self._states.get(request), request, next)
 
 

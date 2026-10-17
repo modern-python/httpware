@@ -110,7 +110,8 @@ class AsyncBulkhead:
 
     async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002
         """Acquire a slot (bounded by acquire_timeout), invoke next, release."""
-        self._check_loop()
+        if self._loop is not asyncio.get_running_loop():
+            self._check_loop()
         try:
             if self._acquire_timeout is None or not self._sem.locked():
                 await self._sem.acquire()

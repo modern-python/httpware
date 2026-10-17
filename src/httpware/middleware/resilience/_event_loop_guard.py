@@ -11,24 +11,17 @@ def check_event_loop(
     loop_lock: threading.Lock,
     message_template: str,
 ) -> None:
-    """Bind the caller to the first event loop that calls it.
+    """Bind the caller to the running loop if it has none yet, else raise RuntimeError.
 
-    Raises RuntimeError on a later call from a different loop. `get_loop`/`set_loop`
-    read and write the caller's cached-loop attribute. The inner check re-reads via
-    `get_loop()` rather than reusing the outer snapshot, so a thread that loses the
-    race to acquire `loop_lock` still sees whichever loop the winner just bound
-    (double-checked locking) — the outer unlocked read handles the common
-    already-bound case without lock overhead.
+    The slow path of the caller's unlocked `self._loop is asyncio.get_running_loop()` check.
+    `get_loop`/`set_loop` read and write the caller's cached-loop attribute; the read under
+    `loop_lock` sees a loop that another thread bound after the caller's unlocked read.
     """
     current = asyncio.get_running_loop()
-    cached = get_loop()
-    if cached is current:
-        return
-    if cached is not None:
-        raise RuntimeError(message_template.format(first=cached, current=current))
     with loop_lock:
         cached = get_loop()
         if cached is None:
             set_loop(current)
-        elif cached is not current:
-            raise RuntimeError(message_template.format(first=cached, current=current))
+            return
+    if cached is not current:
+        raise RuntimeError(message_template.format(first=cached, current=current))
