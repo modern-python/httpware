@@ -450,6 +450,8 @@ class AsyncClient:
 
         bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
+        if not response.is_closed:
+            await response.aread()
         return bound.decode(response)
 
     async def send_with_response(
@@ -473,6 +475,8 @@ class AsyncClient:
     async def _send_with_response(self, request: httpx2.Request, response_model: type[T]) -> tuple[httpx2.Response, T]:
         bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
+        if not response.is_closed:
+            await response.aread()
         return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:

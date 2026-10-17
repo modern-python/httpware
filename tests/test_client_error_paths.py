@@ -347,3 +347,35 @@ def test_sync_client_accepts_sync_middleware() -> None:
             after_response(lambda _, response: response),
         ],
     )
+
+
+async def _async_json_chunks() -> AsyncIterator[bytes]:
+    yield b'{"id": '
+    yield b"1}"
+
+
+class _UnreadAsyncStreamResponse:
+    async def __call__(self, request: httpx2.Request, next: AsyncNext) -> httpx2.Response:  # noqa: A002, ARG002
+        return httpx2.Response(HTTPStatus.OK, content=_async_json_chunks(), request=request)
+
+
+async def test_async_send_decodes_unread_async_stream_from_middleware() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok), middleware=[_UnreadAsyncStreamResponse()])
+    decoded = await client.send(httpx2.Request("GET", "https://example.test/x"), response_model=dict)
+    assert decoded == {"id": 1}
+
+
+async def test_async_send_with_response_decodes_unread_async_stream_from_middleware() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok), middleware=[_UnreadAsyncStreamResponse()])
+    response, decoded = await client.send_with_response(
+        httpx2.Request("GET", "https://example.test/x"), response_model=dict
+    )
+    assert decoded == {"id": 1}
+    assert response.content == b'{"id": 1}'
+
+
+async def test_async_verb_decodes_unread_async_stream_from_middleware() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok), middleware=[_UnreadAsyncStreamResponse()])
+    assert await client.get("https://example.test/x", response_model=dict) == {"id": 1}
+    _, decoded = await client.get_with_response("https://example.test/x", response_model=dict)
+    assert decoded == {"id": 1}
