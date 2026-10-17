@@ -39,12 +39,14 @@ def test_pydantic_cache_is_bounded_and_releases_old_models() -> None:
     assert refs[0]() is None
 
 
-def test_msgspec_cache_is_bounded_and_releases_old_models() -> None:
+def test_msgspec_cache_is_bounded_and_drops_old_models() -> None:
+    """Checks our cache only: older msgspec inspects through `typing.Tuple[...]`, whose LRU keeps recent models."""
     decoder = MsgspecDecoder()
-    models = (msgspec.defstruct(f"S{i}", [("x", int)]) for i in range(_CAP + 1))
-    refs = _decode_through_fresh_models(decoder, models)
+    models = [msgspec.defstruct(f"S{i}", [("x", int)]) for i in range(_CAP + 1)]
+    for model in models:
+        decoder.decode(b'{"x": 1}', model)
     assert len(decoder._adapters) <= _CAP  # noqa: SLF001
-    assert refs[0]() is None
+    assert all(cached is not models[0] for cached, _ in decoder._adapters.values())  # noqa: SLF001
 
 
 def test_repr_keyed_cache_is_bounded() -> None:
