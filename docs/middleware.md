@@ -189,7 +189,7 @@ with Client(base_url="https://api.example.com", middleware=[add_request_id]) as 
     client.get("/users/1")
 ```
 
-Sync and async middleware don't mix: pass `Middleware` to `Client` and `AsyncMiddleware` to `AsyncClient`.
+Sync and async middleware don't mix: pass `Middleware` to `Client` and `AsyncMiddleware` to `AsyncClient`. `Client` raises `TypeError` when you build it with async middleware, such as `AsyncRetry` or a function wrapped by `@async_before_request`.
 
 ## See also
 

@@ -31,6 +31,19 @@ ClientError                          (catch-all for anything httpware raises)
 └── ResponseTooLargeError            (response body exceeds max_response_body_bytes; status-agnostic)
 ```
 
+## Mapping `httpx2` exceptions
+
+An exception from `httpx2` is re-raised as an httpware one, with the original on `__cause__`:
+
+| `httpx2` exception | httpware exception |
+|---|---|
+| `TimeoutException` and its subclasses | `TimeoutError` |
+| `NetworkError` (connect, read, write and close errors) | `NetworkError` |
+| `RemoteProtocolError`, such as a server dropping a keep-alive connection mid-response | `NetworkError` |
+| any other `HTTPError`, `InvalidURL`, `CookieConflict` | `TransportError` |
+
+`NetworkError` and `TimeoutError` are the transient ones: `AsyncRetry` and `Retry` retry them, and the circuit breaker counts them. An invalid URL raises `TransportError` from every method, whether `httpx2` rejects it while the request is built or while it is sent. So does a call on a client that has been closed, `stream()` included.
+
 ## Status-to-exception mapping
 
 | Status | Exception class |

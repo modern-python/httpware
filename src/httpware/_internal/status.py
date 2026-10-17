@@ -18,6 +18,15 @@ Retry / AsyncRetry read this marker to refuse retrying a streamed-body request
 (the consumed iterator cannot replay across attempts)."""
 
 
+def _mark_streaming_body(request: httpx2.Request) -> None:
+    """Set STREAMING_BODY_MARKER unless the body is in memory, multipart, or the marker is already set."""
+    if isinstance(request.stream, httpx2.ByteStream) or STREAMING_BODY_MARKER in request.extensions:
+        return
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        return
+    request.extensions[STREAMING_BODY_MARKER] = True
+
+
 def _raise_on_status_error(response: httpx2.Response) -> None:
     """Raise the appropriate StatusError subclass for a 4xx/5xx response. No-op for 2xx/3xx."""
     status = response.status_code

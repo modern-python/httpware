@@ -1,6 +1,7 @@
 """Client + AsyncClient — thin httpx2 wrappers with typed decoding and middleware."""
 
 import contextlib
+import inspect
 import ssl
 import typing
 from collections.abc import AsyncGenerator, Callable, Generator, Mapping, Sequence
@@ -14,16 +15,17 @@ from httpware._internal.body_cap import _read_capped, _read_capped_async, _valid
 from httpware._internal.exception_mapping import (
     _httpx2_exception_mapper,
     _httpx2_exception_mapper_sync,
+    map_httpx2_exception,
 )
 from httpware._internal.status import (
     STREAMING_BODY_MARKER,
     _is_streaming_body_async,
     _is_streaming_body_sync,
+    _mark_streaming_body,
     _raise_on_status_error,
 )
 from httpware.decoders import ResponseDecoder
 from httpware.decoders._resolver import _DecoderResolver
-from httpware.errors import TransportError
 from httpware.middleware import AsyncMiddleware, AsyncNext, Middleware, Next
 from httpware.middleware.chain import compose, compose_async
 
@@ -40,6 +42,7 @@ _UNSUPPORTED_OPTION_HINTS = {
     "event_hooks": "event_hooks=... is not supported; use middleware=... instead.",
 }
 _TOO_MANY_REDIRECTS_MESSAGE = "Exceeded maximum allowed redirects."
+_ASYNC_MIDDLEWARE_MESSAGE = "Client() got async middleware {middleware!r}; pass AsyncMiddleware to AsyncClient instead."
 _NO_AUTH = httpx2.Auth()
 _BASE_URL_QUERY_MESSAGE = (
     "base_url must not contain a query string: httpx2 appends request paths after it, "
@@ -66,6 +69,13 @@ def _build_default_decoders() -> tuple[ResponseDecoder, ...]:
 
         decoders.append(MsgspecDecoder())
     return tuple(decoders)
+
+
+def _reject_async_middleware(middleware: Sequence[Middleware]) -> None:
+    """Raise TypeError if any middleware, or its `__call__`, is a coroutine function."""
+    for item in middleware:
+        if inspect.iscoroutinefunction(item) or inspect.iscoroutinefunction(type(item).__call__):
+            raise TypeError(_ASYNC_MIDDLEWARE_MESSAGE.format(middleware=item))
 
 
 def _reject_base_url_query(base_url: httpx2.URL | str) -> None:
@@ -106,7 +116,9 @@ class _ClientOptions(_ClientOptionsBase, total=False, closed=True):
     mounts: Mapping[str, httpx2.BaseTransport | None] | None
 
 
-def _is_unset(value: object) -> bool:
+def _is_unset(name: str, value: object) -> bool:
+    if name == "timeout":
+        return False
     return value is None or (isinstance(value, str) and not value)
 
 
@@ -119,6 +131,8 @@ def _select_httpx2_options(
 ) -> dict[str, typing.Any]:
     """Return the options to forward to the owned httpx2 client, dropping unset ones.
 
+    `None` and `""` mean unset, except for `timeout`, where an explicit `None` means no timeout.
+
     Raise TypeError for unsupported options or options combined with `httpx2_client`.
     """
     unsupported = sorted(options.keys() - supported)
@@ -128,7 +142,7 @@ def _select_httpx2_options(
         )
         msg = f"{owner}() got unexpected keyword arguments {unsupported}.{hints}"
         raise TypeError(msg)
-    forwarded = {name: value for name, value in options.items() if not _is_unset(value)}
+    forwarded = {name: value for name, value in options.items() if not _is_unset(name, value)}
     if httpx2_client is not None and forwarded:
         raise TypeError(_HTTPX2_CLIENT_CONFLICT_MESSAGE.format(names=sorted(forwarded)))
     return forwarded
@@ -402,17 +416,12 @@ class AsyncClient:
 
     async def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         cap = self._max_response_body_bytes
-        try:
-            async with _httpx2_exception_mapper():
-                if cap is None:
-                    response = await self._httpx2_client.send(request)
-                else:
-                    streaming = await _send_capped_async(self._httpx2_client, request, cap)
-                    response = await _read_capped_and_close_async(streaming, cap)
-        except RuntimeError as exc:
-            if self._httpx2_client.is_closed:
-                raise TransportError(str(exc)) from exc
-            raise
+        async with _httpx2_exception_mapper(self._httpx2_client):
+            if cap is None:
+                response = await self._httpx2_client.send(request)
+            else:
+                streaming = await _send_capped_async(self._httpx2_client, request, cap)
+                response = await _read_capped_and_close_async(streaming, cap)
         _raise_on_status_error(response)
         return response
 
@@ -428,12 +437,21 @@ class AsyncClient:
         *,
         response_model: type[T] | None = None,
     ) -> httpx2.Response | T:
-        """Send `request` through the middleware chain. Decode if `response_model` is set."""
+        """Send `request` through the middleware chain. Decode if `response_model` is set.
+
+        A request whose body is a one-shot stream gets STREAMING_BODY_MARKER, so retry middleware will not replay it.
+        """
+        _mark_streaming_body(request)
+        return await self._send(request, response_model)
+
+    async def _send(self, request: httpx2.Request, response_model: type[T] | None) -> httpx2.Response | T:
         if response_model is None:
             return await self._dispatch(request)
 
         bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
+        if not response.is_closed:
+            await response.aread()
         return bound.decode(response)
 
     async def send_with_response(
@@ -451,8 +469,14 @@ class AsyncClient:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
+        _mark_streaming_body(request)
+        return await self._send_with_response(request, response_model)
+
+    async def _send_with_response(self, request: httpx2.Request, response_model: type[T]) -> tuple[httpx2.Response, T]:
         bound = self._decoder_resolver.resolve(response_model)
         response = await self._dispatch(request)
+        if not response.is_closed:
+            await response.aread()
         return response, bound.decode(response)
 
     def build_request(self, method: str, url: str, **kwargs: typing.Any) -> httpx2.Request:
@@ -485,7 +509,10 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        request = _build_request(self._httpx2_client, method, url, kwargs)
+        try:
+            request = _build_request(self._httpx2_client, method, url, kwargs)
+        except httpx2.InvalidURL as exc:
+            raise map_httpx2_exception(exc) from exc
         if _is_streaming_body_async(content) or _is_streaming_body_async(data) or _is_streaming_body_async(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
@@ -519,7 +546,7 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        return await self.send(request, response_model=response_model)
+        return await self._send(request, response_model)
 
     async def _request_with_body_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
         self,
@@ -550,7 +577,7 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        return await self.send_with_response(request, response_model=response_model)
+        return await self._send_with_response(request, response_model)
 
     @typing.overload
     async def get(
@@ -1259,7 +1286,7 @@ class AsyncClient:
             if cap is None
             else _stream_capped_async(self._httpx2_client, method, url, kwargs, cap)
         )
-        async with _httpx2_exception_mapper(), opened as response:
+        async with _httpx2_exception_mapper(self._httpx2_client), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
                 if cap is None:
                     await response.aread()  # pre-read body so exc.response.content works
@@ -1314,6 +1341,7 @@ class Client:
         **httpx2_options: typing.Unpack[_ClientOptions],
     ) -> None:
         _validate_max_response_body_bytes(max_response_body_bytes)
+        _reject_async_middleware(middleware)
         forwarded = _select_httpx2_options(
             type(self).__name__,
             httpx2_options,
@@ -1337,17 +1365,12 @@ class Client:
 
     def _terminal(self, request: httpx2.Request) -> httpx2.Response:
         cap = self._max_response_body_bytes
-        try:
-            with _httpx2_exception_mapper_sync():
-                if cap is None:
-                    response = self._httpx2_client.send(request)
-                else:
-                    streaming = _send_capped(self._httpx2_client, request, cap)
-                    response = _read_capped_and_close(streaming, cap)
-        except RuntimeError as exc:
-            if self._httpx2_client.is_closed:
-                raise TransportError(str(exc)) from exc
-            raise
+        with _httpx2_exception_mapper_sync(self._httpx2_client):
+            if cap is None:
+                response = self._httpx2_client.send(request)
+            else:
+                streaming = _send_capped(self._httpx2_client, request, cap)
+                response = _read_capped_and_close(streaming, cap)
         _raise_on_status_error(response)
         return response
 
@@ -1387,7 +1410,14 @@ class Client:
         *,
         response_model: type[T] | None = None,
     ) -> httpx2.Response | T:
-        """Send `request` through the middleware chain. Decode if `response_model` is set."""
+        """Send `request` through the middleware chain. Decode if `response_model` is set.
+
+        A request whose body is a one-shot stream gets STREAMING_BODY_MARKER, so retry middleware will not replay it.
+        """
+        _mark_streaming_body(request)
+        return self._send(request, response_model)
+
+    def _send(self, request: httpx2.Request, response_model: type[T] | None) -> httpx2.Response | T:
         if response_model is None:
             return self._dispatch(request)
 
@@ -1410,6 +1440,10 @@ class Client:
         Not for streaming responses — decodes ``response.content``, which
         requires the body to be fully read. Use ``stream()`` for streaming.
         """
+        _mark_streaming_body(request)
+        return self._send_with_response(request, response_model)
+
+    def _send_with_response(self, request: httpx2.Request, response_model: type[T]) -> tuple[httpx2.Response, T]:
         bound = self._decoder_resolver.resolve(response_model)
         response = self._dispatch(request)
         return response, bound.decode(response)
@@ -1444,7 +1478,10 @@ class Client:
             data=data,
             files=files,
         )
-        request = _build_request(self._httpx2_client, method, url, kwargs)
+        try:
+            request = _build_request(self._httpx2_client, method, url, kwargs)
+        except httpx2.InvalidURL as exc:
+            raise map_httpx2_exception(exc) from exc
         if _is_streaming_body_sync(content) or _is_streaming_body_sync(data) or _is_streaming_body_sync(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
@@ -1478,7 +1515,7 @@ class Client:
             data=data,
             files=files,
         )
-        return self.send(request, response_model=response_model)
+        return self._send(request, response_model)
 
     def _request_with_body_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
         self,
@@ -1509,7 +1546,7 @@ class Client:
             data=data,
             files=files,
         )
-        return self.send_with_response(request, response_model=response_model)
+        return self._send_with_response(request, response_model)
 
     @typing.overload
     def get(
@@ -2215,7 +2252,7 @@ class Client:
             if cap is None
             else _stream_capped(self._httpx2_client, method, url, kwargs, cap)
         )
-        with _httpx2_exception_mapper_sync(), opened as response:
+        with _httpx2_exception_mapper_sync(self._httpx2_client), opened as response:
             if HTTPStatus.BAD_REQUEST <= response.status_code < 600:  # noqa: PLR2004 — 600 is the synthetic upper bound for 5xx
                 if cap is None:
                     response.read()  # pre-read body so exc.response.content works

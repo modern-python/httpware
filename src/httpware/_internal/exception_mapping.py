@@ -2,9 +2,10 @@
 
 map_httpx2_exception is a pure function used by both Client._terminal and
 AsyncClient._terminal, and by both stream() methods. Clause ordering:
-TimeoutException -> InvalidURL/CookieConflict -> NetworkError -> HTTPError
-(subclass before parent so the right type wins). The two context managers
-below wrap it for use as `with`/`async with` blocks around the httpx2 call.
+TimeoutException -> InvalidURL/CookieConflict -> NetworkError/RemoteProtocolError
+-> HTTPError (subclass before parent so the right type wins). The two context managers
+below wrap it for use as `with`/`async with` blocks around the httpx2 call,
+and also turn the RuntimeError httpx2 raises on a closed client into TransportError.
 """
 
 import contextlib
@@ -25,7 +26,7 @@ def map_httpx2_exception(exc: BaseException) -> NetworkError | TimeoutError | Tr
         return TimeoutError(str(exc))
     if isinstance(exc, (httpx2.InvalidURL, httpx2.CookieConflict)):
         return TransportError(str(exc))
-    if isinstance(exc, httpx2.NetworkError):
+    if isinstance(exc, (httpx2.NetworkError, httpx2.RemoteProtocolError)):
         return NetworkError(str(exc))
     if isinstance(exc, httpx2.HTTPError):
         return TransportError(str(exc))
@@ -33,22 +34,33 @@ def map_httpx2_exception(exc: BaseException) -> NetworkError | TimeoutError | Tr
 
 
 @contextlib.asynccontextmanager
-async def _httpx2_exception_mapper() -> AsyncGenerator[None]:
-    """Map httpx2 exceptions to httpware exceptions. Shared by AsyncClient._terminal and stream()."""
+async def _httpx2_exception_mapper(client: httpx2.AsyncClient) -> AsyncGenerator[None]:
+    """Map httpx2 exceptions, and use of a closed `client`, to httpware exceptions.
+
+    Shared by AsyncClient._terminal and stream().
+    """
     try:
         yield
     except httpx2.HTTPError as exc:
         raise map_httpx2_exception(exc) from exc
     except (httpx2.InvalidURL, httpx2.CookieConflict) as exc:
         raise map_httpx2_exception(exc) from exc
+    except RuntimeError as exc:
+        if client.is_closed:
+            raise TransportError(str(exc)) from exc
+        raise
 
 
 @contextlib.contextmanager
-def _httpx2_exception_mapper_sync() -> Generator[None]:
-    """Map httpx2 exceptions to httpware exceptions. Sync sibling of _httpx2_exception_mapper."""
+def _httpx2_exception_mapper_sync(client: httpx2.Client) -> Generator[None]:
+    """Sync sibling of _httpx2_exception_mapper."""
     try:
         yield
     except httpx2.HTTPError as exc:
         raise map_httpx2_exception(exc) from exc
     except (httpx2.InvalidURL, httpx2.CookieConflict) as exc:
         raise map_httpx2_exception(exc) from exc
+    except RuntimeError as exc:
+        if client.is_closed:
+            raise TransportError(str(exc)) from exc
+        raise

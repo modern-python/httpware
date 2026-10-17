@@ -124,7 +124,7 @@ async def main() -> None:
 
 `base_url` must not contain a query string; a client built with one raises `ValueError`. Put query parameters shared by every request in `params=` instead.
 
-The other keywords of `httpx2.AsyncClient` and `httpx2.Client` (`verify`, `proxy`, `http2`, `transport`, `follow_redirects`, ...) are passed through to the `httpx2` client that httpware builds and closes. Two are refused. `cert` is deprecated by `httpx2` in favour of an `ssl.SSLContext` passed as `verify`. `event_hooks` run below the middleware chain, so use [middleware](middleware.md) instead.
+The other keywords of `httpx2.AsyncClient` and `httpx2.Client` (`verify`, `proxy`, `http2`, `transport`, `follow_redirects`, ...) are passed through to the `httpx2` client that httpware builds and closes. An option set to `None` counts as not passed, so `httpx2` keeps its default, with one exception: `timeout=None` turns the timeout off. Leave `timeout` out to keep the `httpx2` default of 5 seconds. Two options are refused. `cert` is deprecated by `httpx2` in favour of an `ssl.SSLContext` passed as `verify`. `event_hooks` run below the middleware chain, so use [middleware](middleware.md) instead.
 
 ```python
 import ssl
