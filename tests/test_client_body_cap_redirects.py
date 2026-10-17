@@ -48,10 +48,30 @@ def _huge_intermediate_body_sync(pulled: list[bytes]) -> httpx2.MockTransport:
     return _redirect_with_body(huge_body)
 
 
-def _redirect_with_body(body: Callable[[], AsyncIterator[bytes] | Iterator[bytes]]) -> httpx2.MockTransport:
+def _small_intermediate_body(read_to_end: list[bool], headers: dict[str, str] | None = None) -> httpx2.MockTransport:
+    async def small_body() -> AsyncIterator[bytes]:
+        yield b"moved"
+        read_to_end.append(True)
+
+    return _redirect_with_body(small_body, headers)
+
+
+def _small_intermediate_body_sync(
+    read_to_end: list[bool], headers: dict[str, str] | None = None
+) -> httpx2.MockTransport:
+    def small_body() -> Iterator[bytes]:
+        yield b"moved"
+        read_to_end.append(True)
+
+    return _redirect_with_body(small_body, headers)
+
+
+def _redirect_with_body(
+    body: Callable[[], AsyncIterator[bytes] | Iterator[bytes]], headers: dict[str, str] | None = None
+) -> httpx2.MockTransport:
     def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path == "/start":
-            return httpx2.Response(HTTPStatus.FOUND, headers={"location": "/final"}, content=body())
+            return httpx2.Response(HTTPStatus.FOUND, headers={"location": "/final", **(headers or {})}, content=body())
         return httpx2.Response(HTTPStatus.OK, content=b"done")
 
     return httpx2.MockTransport(handler)
@@ -69,10 +89,10 @@ async def test_async_follows_redirects_under_a_body_cap() -> None:
     assert str(response.url) == "https://example.test/final"
 
 
-@pytest.mark.parametrize(("cap", "intermediate_read"), [(None, True), (1024, False)])
-async def test_async_reads_an_intermediate_redirect_body_only_without_a_cap(
+@pytest.mark.parametrize(("cap", "chunks_pulled"), [(None, 100), (1024, 2)])
+async def test_async_reads_an_intermediate_redirect_body_only_up_to_the_cap(
     cap: int | None,
-    intermediate_read: bool,
+    chunks_pulled: int,
 ) -> None:
     pulled: list[bytes] = []
     async with AsyncClient(
@@ -82,10 +102,10 @@ async def test_async_reads_an_intermediate_redirect_body_only_without_a_cap(
     ) as client:
         response = await client.get("https://example.test/start")
     assert response.content == b"done"
-    assert bool(pulled) is intermediate_read
+    assert len(pulled) == chunks_pulled
 
 
-async def test_async_stream_never_reads_an_intermediate_redirect_body() -> None:
+async def test_async_stream_reads_an_intermediate_redirect_body_only_up_to_the_cap() -> None:
     pulled: list[bytes] = []
     async with (
         AsyncClient(
@@ -97,7 +117,36 @@ async def test_async_stream_never_reads_an_intermediate_redirect_body() -> None:
     ):
         body = await response.aread()
     assert body == b"done"
-    assert pulled == []
+    assert len(pulled) == 2  # noqa: PLR2004 (the chunk crossing the cap is the last one pulled)
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+async def test_async_reads_an_intermediate_redirect_body_to_the_end_with_or_without_a_cap(cap: int | None) -> None:
+    read_to_end: list[bool] = []
+    async with AsyncClient(
+        transport=_small_intermediate_body(read_to_end),
+        follow_redirects=True,
+        max_response_body_bytes=cap,
+    ) as client:
+        response = await client.get("https://example.test/start")
+    assert response.content == b"done"
+    assert read_to_end == [True]
+
+
+@pytest.mark.parametrize(("method", "read_to_end_expected"), [("GET", []), ("HEAD", [True])])
+async def test_async_skips_an_intermediate_redirect_body_declared_over_the_cap_unless_bodiless(
+    method: str,
+    read_to_end_expected: list[bool],
+) -> None:
+    read_to_end: list[bool] = []
+    async with AsyncClient(
+        transport=_small_intermediate_body(read_to_end, headers={"content-length": "2048"}),
+        follow_redirects=True,
+        max_response_body_bytes=1024,
+    ) as client:
+        response = await client.request(method, "https://example.test/start")
+    assert response.status_code == HTTPStatus.OK
+    assert read_to_end == read_to_end_expected
 
 
 async def test_async_records_redirect_history_under_a_body_cap() -> None:
@@ -176,10 +225,10 @@ async def test_async_caller_provided_client_follows_redirects_under_a_body_cap()
     assert response.content == b"done"
 
 
-@pytest.mark.parametrize(("cap", "intermediate_read"), [(None, True), (1024, False)])
-def test_sync_reads_an_intermediate_redirect_body_only_without_a_cap(
+@pytest.mark.parametrize(("cap", "chunks_pulled"), [(None, 100), (1024, 2)])
+def test_sync_reads_an_intermediate_redirect_body_only_up_to_the_cap(
     cap: int | None,
-    intermediate_read: bool,
+    chunks_pulled: int,
 ) -> None:
     pulled: list[bytes] = []
     with Client(
@@ -189,10 +238,10 @@ def test_sync_reads_an_intermediate_redirect_body_only_without_a_cap(
     ) as client:
         response = client.get("https://example.test/start")
     assert response.content == b"done"
-    assert bool(pulled) is intermediate_read
+    assert len(pulled) == chunks_pulled
 
 
-def test_sync_stream_never_reads_an_intermediate_redirect_body() -> None:
+def test_sync_stream_reads_an_intermediate_redirect_body_only_up_to_the_cap() -> None:
     pulled: list[bytes] = []
     with (
         Client(
@@ -204,7 +253,36 @@ def test_sync_stream_never_reads_an_intermediate_redirect_body() -> None:
     ):
         body = response.read()
     assert body == b"done"
-    assert pulled == []
+    assert len(pulled) == 2  # noqa: PLR2004 (the chunk crossing the cap is the last one pulled)
+
+
+@pytest.mark.parametrize("cap", [None, 1024])
+def test_sync_reads_an_intermediate_redirect_body_to_the_end_with_or_without_a_cap(cap: int | None) -> None:
+    read_to_end: list[bool] = []
+    with Client(
+        transport=_small_intermediate_body_sync(read_to_end),
+        follow_redirects=True,
+        max_response_body_bytes=cap,
+    ) as client:
+        response = client.get("https://example.test/start")
+    assert response.content == b"done"
+    assert read_to_end == [True]
+
+
+@pytest.mark.parametrize(("method", "read_to_end_expected"), [("GET", []), ("HEAD", [True])])
+def test_sync_skips_an_intermediate_redirect_body_declared_over_the_cap_unless_bodiless(
+    method: str,
+    read_to_end_expected: list[bool],
+) -> None:
+    read_to_end: list[bool] = []
+    with Client(
+        transport=_small_intermediate_body_sync(read_to_end, headers={"content-length": "2048"}),
+        follow_redirects=True,
+        max_response_body_bytes=1024,
+    ) as client:
+        response = client.request(method, "https://example.test/start")
+    assert response.status_code == HTTPStatus.OK
+    assert read_to_end == read_to_end_expected
 
 
 def test_sync_follows_redirects_under_a_body_cap() -> None:

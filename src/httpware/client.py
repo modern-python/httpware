@@ -11,7 +11,13 @@ import httpx2
 import typing_extensions
 
 from httpware._internal import import_checker
-from httpware._internal.body_cap import _read_capped, _read_capped_async, _validate_max_response_body_bytes
+from httpware._internal.body_cap import (
+    _discard_within_cap,
+    _discard_within_cap_async,
+    _read_capped,
+    _read_capped_async,
+    _validate_max_response_body_bytes,
+)
 from httpware._internal.exception_mapping import (
     _httpx2_exception_mapper,
     _httpx2_exception_mapper_sync,
@@ -165,12 +171,22 @@ async def _read_capped_and_close_async(streaming: httpx2.Response, cap: int) -> 
         await streaming.aclose()
 
 
+async def _discard_and_close_async(response: httpx2.Response, cap: int) -> None:
+    """Close an intermediate `response`, first reading an unread body that fits `cap` so its connection is reused."""
+    try:
+        if not response.is_stream_consumed:
+            await _discard_within_cap_async(response, cap)
+    finally:
+        await response.aclose()
+
+
 async def _send_redirect_hops_async(
     client: httpx2.AsyncClient,
     request: httpx2.Request,
     prior_history: list[httpx2.Response],
+    cap: int,
 ) -> httpx2.Response:
-    """Send `request` streaming, following redirects hop by hop without reading intermediate bodies.
+    """Send `request` streaming, following redirects hop by hop and keeping no intermediate body.
 
     Histories and the `max_redirects` count include `prior_history`, as in httpx2.
     """
@@ -182,13 +198,13 @@ async def _send_redirect_hops_async(
         response.history = list(hops)
         if not client.follow_redirects or response.next_request is None:
             return response
-        await response.aclose()
+        await _discard_and_close_async(response, cap)
         hops.append(response)
         request = response.next_request
 
 
 async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request, cap: int) -> httpx2.Response:
-    """Send `request` streaming, driving the client's auth flow and redirects without reading intermediate bodies.
+    """Send `request` streaming, driving the client's auth flow and redirects and keeping no intermediate body.
 
     An auth that sets `requires_response_body` gets each response buffered under `cap` instead.
     """
@@ -198,7 +214,7 @@ async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request
     try:
         request = await anext(flow)
         while True:
-            response = await _send_redirect_hops_async(client, request, history)
+            response = await _send_redirect_hops_async(client, request, history, cap)
             if auth.requires_response_body:
                 response = await _read_capped_and_close_async(response, cap)
             try:
@@ -208,7 +224,7 @@ async def _send_capped_async(client: httpx2.AsyncClient, request: httpx2.Request
             except BaseException:
                 await response.aclose()
                 raise
-            await response.aclose()
+            await _discard_and_close_async(response, cap)
             response.history = list(history)
             history.append(response)
             request = next_request
@@ -252,10 +268,20 @@ def _read_capped_and_close(streaming: httpx2.Response, cap: int) -> httpx2.Respo
         streaming.close()
 
 
+def _discard_and_close(response: httpx2.Response, cap: int) -> None:
+    """Sync mirror of `_discard_and_close_async`."""
+    try:
+        if not response.is_stream_consumed:
+            _discard_within_cap(response, cap)
+    finally:
+        response.close()
+
+
 def _send_redirect_hops(
     client: httpx2.Client,
     request: httpx2.Request,
     prior_history: list[httpx2.Response],
+    cap: int,
 ) -> httpx2.Response:
     """Sync mirror of `_send_redirect_hops_async`."""
     hops = list(prior_history)
@@ -266,7 +292,7 @@ def _send_redirect_hops(
         response.history = list(hops)
         if not client.follow_redirects or response.next_request is None:
             return response
-        response.close()
+        _discard_and_close(response, cap)
         hops.append(response)
         request = response.next_request
 
@@ -279,7 +305,7 @@ def _send_capped(client: httpx2.Client, request: httpx2.Request, cap: int) -> ht
     try:
         request = next(flow)
         while True:
-            response = _send_redirect_hops(client, request, history)
+            response = _send_redirect_hops(client, request, history, cap)
             if auth.requires_response_body:
                 response = _read_capped_and_close(response, cap)
             try:
@@ -289,7 +315,7 @@ def _send_capped(client: httpx2.Client, request: httpx2.Request, cap: int) -> ht
             except BaseException:
                 response.close()
                 raise
-            response.close()
+            _discard_and_close(response, cap)
             response.history = list(history)
             history.append(response)
             request = next_request
