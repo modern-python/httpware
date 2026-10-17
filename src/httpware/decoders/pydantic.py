@@ -25,7 +25,7 @@ MISSING_DEPENDENCY_MESSAGE = (
 T = TypeVar("T")
 
 
-def _build_adapter(model: object) -> "TypeAdapter[typing.Any] | None":
+def _build_adapter(model: typing.Any) -> "TypeAdapter[typing.Any] | None":  # noqa: ANN401
     """Return a `TypeAdapter` for `model`, or None when pydantic cannot build a schema for it."""
     try:
         return TypeAdapter(model)
