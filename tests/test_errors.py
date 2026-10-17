@@ -298,14 +298,40 @@ def test_decode_error_stores_fields() -> None:
     assert exc.original is inner
 
 
-def test_decode_error_summary_includes_model_and_original() -> None:
-    response = _make_response(200)
-    inner = ValueError("bad payload")
-    exc = DecodeError(response=response, model=_DecodeErrorModel, original=inner)
-    summary = str(exc)
-    assert "_DecodeErrorModel" in summary
-    assert "bad payload" in summary
-    assert summary.startswith("failed to decode response into ")
+def _validation_error(payload: bytes) -> pydantic.ValidationError:
+    with pytest.raises(pydantic.ValidationError) as caught:
+        _DecodeErrorModel.model_validate_json(payload)
+    return caught.value
+
+
+def test_decode_error_summary_names_model_and_exception_type_only() -> None:
+    exc = DecodeError(response=_make_response(200), model=_DecodeErrorModel, original=ValueError("body: topsecret"))
+    assert str(exc) == "failed to decode response into _DecodeErrorModel: ValueError"
+
+
+def test_decode_error_summary_counts_validation_errors_without_body_content() -> None:
+    original = _validation_error(b'{"id": "topsecret", "extra": 1}')
+    exc = DecodeError(response=_make_response(200), model=_DecodeErrorModel, original=original)
+    assert str(exc) == "failed to decode response into _DecodeErrorModel: ValidationError (1 error)"
+    assert exc.original is original
+
+
+class _TwoFieldModel(pydantic.BaseModel):
+    id: int
+    name: str
+
+
+def test_decode_error_summary_pluralises_error_count() -> None:
+    with pytest.raises(pydantic.ValidationError) as caught:
+        _TwoFieldModel.model_validate_json(b'{"id": "topsecret", "name": 3}')
+    exc = DecodeError(response=_make_response(200), model=_TwoFieldModel, original=caught.value)
+    assert str(exc) == "failed to decode response into _TwoFieldModel: ValidationError (2 errors)"
+
+
+@pytest.mark.parametrize("model", [_DecodeErrorModel | None, list[_DecodeErrorModel]], ids=["optional", "generic"])
+def test_decode_error_summary_uses_repr_for_non_class_models(model: type) -> None:
+    exc = DecodeError(response=_make_response(200), model=model, original=ValueError("x"))
+    assert str(exc) == f"failed to decode response into {model!r}: ValueError"
 
 
 def test_decode_error_rejects_positional_args() -> None:

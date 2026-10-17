@@ -202,6 +202,16 @@ class CircuitOpenError(ClientError):
             super().__init__(f"circuit open (retry_after={retry_after:.3f}s)")
 
 
+def _decode_error_summary(model: type, original: BaseException) -> str:
+    model_name = model.__name__ if isinstance(model, type) else repr(model)
+    summary = f"failed to decode response into {model_name}: {type(original).__qualname__}"
+    error_count = getattr(original, "error_count", None)
+    if not callable(error_count):
+        return summary
+    count = error_count()
+    return f"{summary} ({count} error{'' if count == 1 else 's'})"
+
+
 class DecodeError(ClientError):
     """Raised when the active ResponseDecoder failed to decode response.content.
 
@@ -209,7 +219,9 @@ class DecodeError(ClientError):
     delivered the body intact — but the body could not be parsed into the
     requested response_model. Always chained from the underlying library
     exception via ``raise ... from exc``; that exception is also exposed as
-    ``self.original`` for structured handling.
+    ``self.original`` for structured handling. The message names the model
+    and the original exception's type, plus its error count when it has an
+    ``error_count()`` method (pydantic), and never includes body content.
     """
 
     response: httpx2.Response
@@ -226,7 +238,7 @@ class DecodeError(ClientError):
         self.response = response
         self.model = model
         self.original = original
-        super().__init__(f"failed to decode response into {model.__name__}: {original}")
+        super().__init__(_decode_error_summary(model, original))
 
 
 def _missing_decoder_summary(model: type, registered_names: tuple[str, ...]) -> str:

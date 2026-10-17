@@ -149,6 +149,12 @@ Fields:
 - `model: type`: the type passed as `response_model=`.
 - `original: BaseException`: the decoder's own exception, such as `pydantic.ValidationError`, `msgspec.ValidationError` or `msgspec.DecodeError`. It is also `exc.__cause__`.
 
+The message names the model and the type of `original`, and adds the error count when `original` has an `error_count()` method, as `pydantic.ValidationError` does:
+
+    failed to decode response into User: ValidationError (2 errors)
+
+A model that is not a class, such as `User | None` or `list[User]`, appears as its `repr`. The message never quotes the body. `str(exc.original)` can: a pydantic `ValidationError` echoes the input values it rejected, so check what it holds before you log it.
+
 ```python
 from httpware import AsyncClient, DecodeError
 
@@ -156,12 +162,7 @@ from httpware import AsyncClient, DecodeError
 try:
     user = await client.get("/users/1", response_model=User)
 except DecodeError as exc:
-    _LOGGER.error(
-        "decode failed for %s into %s: %s",
-        exc.response.request.url,
-        exc.model.__name__,
-        exc.original,
-    )
+    _LOGGER.error("%s", exc)
     raise
 ```
 
