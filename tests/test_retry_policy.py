@@ -7,6 +7,7 @@ path is random, so it is asserted by bounds; the Retry-After path by exact value
 """
 
 import datetime as dt
+import math
 
 import httpx2
 import pytest
@@ -166,6 +167,25 @@ def test_respect_retry_after_false_ignores_header() -> None:
     assert delay <= _BASE_DELAY  # jitter, not the 2.0 header value
 
 
+@pytest.mark.parametrize(
+    "header",
+    ["9" * 309, "9" * 400, "9" * 5000, " " + "9" * 5000 + " "],
+    ids=["309-digits", "400-digits", "5000-digits", "5000-digits-padded"],
+)
+def test_retry_after_too_large_for_a_float_gives_up(header: str) -> None:
+    request = _request("PUT")
+    exc = _status_exc(503, request, retry_after=header)
+    with pytest.raises(ServiceUnavailableError) as ei:
+        _policy().decide(attempt=0, request=request, exc=exc)
+    assert any("Retry-After (infs) exceeded max_delay" in note for note in _notes(ei.value))
+
+
+def test_retry_after_hugely_negative_counts_as_zero() -> None:
+    request = _request("PUT")
+    exc = _status_exc(503, request, retry_after="-" + "9" * 400)
+    assert _policy().decide(attempt=0, request=request, exc=exc) == 0.0
+
+
 @pytest.mark.parametrize("zone", ["-0000", "", "XYZ"])
 def test_retry_after_date_without_a_usable_zone_is_read_as_gmt(zone: str) -> None:
     future = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=_DATE_AHEAD_SECONDS)
@@ -206,3 +226,46 @@ def test_budget_refusal_raises_with_cause_and_fields() -> None:
 def test_invalid_max_attempts_rejected() -> None:
     with pytest.raises(ValueError, match="max_attempts must be >= 1"):
         _policy(max_attempts=0)
+
+
+@pytest.mark.parametrize("base_delay", [-0.1, -1, math.nan])
+def test_invalid_base_delay_rejected(base_delay: float) -> None:
+    with pytest.raises(ValueError, match="base_delay must be >= 0"):
+        _RetryPolicy(
+            max_attempts=3,
+            base_delay=base_delay,
+            max_delay=_MAX_DELAY,
+            retry_status_codes=DEFAULT_RETRY_STATUS_CODES,
+            retry_methods=DEFAULT_IDEMPOTENT_METHODS,
+            respect_retry_after=True,
+            budget=None,
+        )
+
+
+@pytest.mark.parametrize("max_delay", [-0.1, -1, math.nan, math.inf])
+def test_invalid_max_delay_rejected(max_delay: float) -> None:
+    with pytest.raises(ValueError, match="max_delay must be a finite number >= 0"):
+        _RetryPolicy(
+            max_attempts=3,
+            base_delay=_BASE_DELAY,
+            max_delay=max_delay,
+            retry_status_codes=DEFAULT_RETRY_STATUS_CODES,
+            retry_methods=DEFAULT_IDEMPOTENT_METHODS,
+            respect_retry_after=True,
+            budget=None,
+        )
+
+
+@pytest.mark.parametrize(("base_delay", "max_delay"), [(0.0, 0.0), (0.0, _MAX_DELAY), (math.inf, _MAX_DELAY)])
+def test_boundary_delays_accepted(base_delay: float, max_delay: float) -> None:
+    policy = _RetryPolicy(
+        max_attempts=3,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        retry_status_codes=DEFAULT_RETRY_STATUS_CODES,
+        retry_methods=DEFAULT_IDEMPOTENT_METHODS,
+        respect_retry_after=True,
+        budget=None,
+    )
+    request = _request("PUT")
+    assert 0.0 <= policy.decide(attempt=0, request=request, exc=_status_exc(503, request)) <= max_delay

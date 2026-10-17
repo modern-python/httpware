@@ -17,6 +17,20 @@ from collections import deque
 from collections.abc import Callable
 
 
+_TTL_INVALID = "ttl must be a finite number > 0"
+_MIN_RETRIES_PER_SEC_INVALID = "min_retries_per_sec must be a finite number >= 0"
+_PERCENT_CAN_RETRY_INVALID = "percent_can_retry must be a finite number >= 0"
+
+
+def _validate_budget_config(*, ttl: float, min_retries_per_sec: float, percent_can_retry: float) -> None:
+    if not (ttl > 0 and math.isfinite(ttl)):
+        raise ValueError(_TTL_INVALID)
+    if not (min_retries_per_sec >= 0 and math.isfinite(min_retries_per_sec)):
+        raise ValueError(_MIN_RETRIES_PER_SEC_INVALID)
+    if not (percent_can_retry >= 0 and math.isfinite(percent_can_retry)):
+        raise ValueError(_PERCENT_CAN_RETRY_INVALID)
+
+
 class RetryBudget:
     """Token-bucket budget bounding retry rate to prevent retry storms.
 
@@ -33,6 +47,7 @@ class RetryBudget:
         percent_can_retry: float = 0.2,
         _now: Callable[[], float] = time.monotonic,
     ) -> None:
+        _validate_budget_config(ttl=ttl, min_retries_per_sec=min_retries_per_sec, percent_can_retry=percent_can_retry)
         self._ttl = ttl
         self._min_retries_per_sec = min_retries_per_sec
         self._percent_can_retry = percent_can_retry

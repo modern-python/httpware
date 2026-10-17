@@ -17,6 +17,7 @@ import asyncio
 import datetime as dt
 import email.utils
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
@@ -56,6 +57,8 @@ DEFAULT_IDEMPOTENT_METHODS = frozenset(
 _RETRYABLE_EXCEPTIONS = (StatusError, NetworkError, TimeoutError)
 
 _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
+_BASE_DELAY_INVALID = "base_delay must be >= 0"
+_MAX_DELAY_INVALID = "max_delay must be a finite number >= 0"
 _STREAMING_BODY_REFUSAL_NOTE = (
     "httpware: not retrying because the request body is a stream that cannot replay across attempts"
 )
@@ -66,12 +69,27 @@ _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE = (
 _LOGGER = logging.getLogger("httpware.retry")
 
 
+def _validate_retry_config(*, max_attempts: int, base_delay: float, max_delay: float) -> None:
+    if max_attempts < 1:
+        raise ValueError(_MAX_ATTEMPTS_INVALID)
+    if not base_delay >= 0:
+        raise ValueError(_BASE_DELAY_INVALID)
+    if not (max_delay >= 0 and math.isfinite(max_delay)):
+        raise ValueError(_MAX_DELAY_INVALID)
+
+
 def _parse_retry_after(value: str) -> float | None:
-    """Parse a Retry-After header value. Returns None on malformed input."""
+    """Parse a Retry-After header value. Returns None on malformed input, inf for integers too large for a float."""
     try:
-        return max(0.0, float(int(value)))  # clamp: negative integers are malformed servers
-    except (ValueError, OverflowError):
-        pass
+        seconds = int(value)
+    except ValueError:
+        if value.strip().isdigit() and value.isascii():
+            return math.inf  # past int()'s digit limit
+    else:
+        try:
+            return max(0.0, float(seconds))  # clamp: negative integers are malformed servers
+        except OverflowError:
+            return math.inf if seconds > 0 else 0.0
     try:
         parsed = email.utils.parsedate_to_datetime(value)
     except (TypeError, ValueError, OverflowError):
@@ -105,13 +123,12 @@ class _RetryPolicy:
         respect_retry_after: bool,
         budget: RetryBudget | None,
     ) -> None:
-        if max_attempts < 1:
-            raise ValueError(_MAX_ATTEMPTS_INVALID)
+        _validate_retry_config(max_attempts=max_attempts, base_delay=base_delay, max_delay=max_delay)
         self.max_attempts = max_attempts
         self.base_delay = base_delay
         self.max_delay = max_delay
         self.retry_status_codes = retry_status_codes
-        self.retry_methods = retry_methods
+        self.retry_methods = frozenset(method.upper() for method in retry_methods)
         self.respect_retry_after = respect_retry_after
         self.budget = budget if budget is not None else RetryBudget()
 
@@ -128,7 +145,7 @@ class _RetryPolicy:
         exception. `exc` is the currently-handled exception (one of
         _RETRYABLE_EXCEPTIONS); see the class docstring for chaining semantics.
         """
-        method_eligible = request.method.upper() in self.retry_methods
+        method_eligible = request.method in self.retry_methods
         if isinstance(exc, StatusError):
             retryable_status = exc.response.status_code in self.retry_status_codes
             if not method_eligible or not retryable_status:
@@ -168,6 +185,7 @@ class _RetryPolicy:
                     "url": str(request.url),
                     "last_status": last_response.status_code if last_response is not None else None,
                     "last_exception_type": type(exc).__qualname__,
+                    "reason": "max_attempts",
                 },
             )
             raise exc
@@ -184,6 +202,22 @@ class _RetryPolicy:
                     retry_after=retry_after,
                     max_delay=self.max_delay,
                 ),
+            )
+            _emit_event(
+                _LOGGER,
+                "retry.giving_up",
+                level=logging.WARNING,
+                message=f"retry gave up after {attempt + 1} attempts: Retry-After exceeded max_delay",
+                attributes={
+                    "attempts": attempt + 1,
+                    "method": request.method,
+                    "url": str(request.url),
+                    "last_status": last_response.status_code if last_response is not None else None,
+                    "last_exception_type": type(exc).__qualname__,
+                    "reason": "retry_after_exceeds_max_delay",
+                    "retry_after": retry_after,
+                    "max_delay": self.max_delay,
+                },
             )
             raise exc
 

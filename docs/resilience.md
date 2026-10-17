@@ -24,11 +24,11 @@ from httpware.middleware.resilience import AsyncRetry
 | Parameter | Default | Effect |
 |---|---|---|
 | `max_attempts` | `3` | Total tries, including the first. `1` disables retries; `<1` raises `ValueError`. |
-| `base_delay` | `0.1` (s) | Floor for the full-jitter exponential backoff. |
-| `max_delay` | `5.0` (s) | Ceiling for backoff. |
+| `base_delay` | `0.1` (s) | Floor for the full-jitter exponential backoff. Must be `>= 0`; a negative or NaN value raises `ValueError`. |
+| `max_delay` | `5.0` (s) | Ceiling for backoff and the longest `Retry-After` honored. Must be finite and `>= 0`; a negative, NaN or infinite value raises `ValueError`. |
 | `retry_status_codes` | `frozenset({408, 429, 502, 503, 504})` | Status codes considered retryable. |
-| `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only. To retry POST, pass a frozenset that includes `"POST"`. |
-| `respect_retry_after` | `True` | When a retryable response has a `Retry-After` header, wait that long instead of the jittered backoff. If the value is over `max_delay`, `AsyncRetry` gives up and re-raises the `StatusError` with a PEP 678 note: `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. To avoid this, set `respect_retry_after=False` or raise `max_delay`. |
+| `retry_methods` | `frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})` | Idempotent methods only. To retry POST, pass a frozenset that includes `"POST"`. Matching ignores case, so `"post"` works too. |
+| `respect_retry_after` | `True` | When a retryable response has a `Retry-After` header, wait that long instead of the jittered backoff. If the value is over `max_delay`, `AsyncRetry` gives up, emits `retry.giving_up` with `reason="retry_after_exceeds_max_delay"`, and re-raises the `StatusError` with a PEP 678 note: `httpware: Retry-After (Ns) exceeded max_delay (Ms); giving up`. To avoid this, set `respect_retry_after=False` or raise `max_delay`. |
 | `budget` | `RetryBudget()` | The token bucket. Pass one shared `RetryBudget` to several clients to give them a joint budget. |
 
 To bound the total time across all attempts, put [`AsyncTimeout`](#asynctimeout) first in the chain. To bound a single request, set `httpx2.Timeout` on the client or pass `timeout=` per request.
@@ -40,7 +40,7 @@ To bound the total time across all attempts, put [`AsyncTimeout`](#asynctimeout)
 - integer seconds: `Retry-After: 30` waits 30 seconds.
 - an HTTP date (RFC 5322): `Retry-After: Wed, 21 Oct 2026 07:28:00 GMT` waits until that time, or not at all if it has passed.
 
-Either form over `max_delay` makes `AsyncRetry` give up as described above. Negative integers count as 0. Malformed values are ignored and the jittered backoff is used instead.
+Either form over `max_delay` makes `AsyncRetry` give up as described above. An integer too large to fit in a float counts as an infinite wait, so it always exceeds `max_delay`. Negative integers count as 0. Malformed values are ignored and the jittered backoff is used instead.
 
 ### Streaming-body refusal
 
@@ -70,9 +70,11 @@ A token bucket in the style of Finagle's retry budget. Each request deposits a t
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `ttl` | `10.0` (s) | Sliding window over which deposits and withdrawals count. |
-| `min_retries_per_sec` | `10.0` | Floor: at least this many retries per second are allowed, whatever the deposit rate. |
-| `percent_can_retry` | `0.2` | Fraction of recent deposits that can convert to retries (above the floor). |
+| `ttl` | `10.0` (s) | Sliding window over which deposits and withdrawals count. Must be finite and `> 0`. |
+| `min_retries_per_sec` | `10.0` | Floor: at least this many retries per second are allowed, whatever the deposit rate. Must be finite and `>= 0`. |
+| `percent_can_retry` | `0.2` | Fraction of recent deposits that can convert to retries (above the floor). Must be finite and `>= 0`; values above `1.0` allow more retries than requests. |
+
+An out-of-range value raises `ValueError` when the budget is constructed.
 
 ### The token-bucket formula
 

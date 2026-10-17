@@ -128,6 +128,18 @@ async def test_retries_post_when_method_explicitly_included() -> None:
     assert handler.calls == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
 
 
+async def test_retry_methods_match_case_insensitively() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
+    client = _client(
+        handler,
+        retry=AsyncRetry(_sleep=sleeper, retry_methods=frozenset({"post"}), base_delay=0.01, max_delay=0.02),
+    )
+    response = await client.post("https://example.test/x", json={"x": 1})
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
+
+
 async def test_max_attempts_one_means_no_retries() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])
@@ -141,6 +153,16 @@ async def test_max_attempts_one_means_no_retries() -> None:
 def test_max_attempts_zero_rejected() -> None:
     with pytest.raises(ValueError, match="max_attempts must be >= 1"):
         AsyncRetry(max_attempts=0)
+
+
+def test_negative_base_delay_rejected() -> None:
+    with pytest.raises(ValueError, match="base_delay must be >= 0"):
+        AsyncRetry(base_delay=-1)
+
+
+def test_negative_max_delay_rejected() -> None:
+    with pytest.raises(ValueError, match="max_delay must be a finite number >= 0"):
+        AsyncRetry(max_delay=-1)
 
 
 async def test_budget_exhausted_raises_retry_budget_exhausted_error() -> None:
@@ -625,6 +647,28 @@ async def test_retry_giving_up_emits_observability_event(caplog: pytest.LogCaptu
     assert record.method == "GET"  # ty: ignore[unresolved-attribute]
     assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[unresolved-attribute]
     assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
+    assert record.reason == "max_attempts"  # ty: ignore[unresolved-attribute]
+
+
+async def test_retry_after_exceeding_max_delay_emits_giving_up_event(caplog: pytest.LogCaptureFixture) -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequenceWithHeaders([(HTTPStatus.SERVICE_UNAVAILABLE, {"Retry-After": "9999"})])
+    client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=2.5))
+
+    with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
+        await client.get("https://example.test/x")
+
+    records = [r for r in caplog.records if r.name == "httpware.retry" and r.event == "retry.giving_up"]  # ty: ignore[unresolved-attribute]
+    assert len(records) == 1
+    record = records[0]
+    assert record.levelno == logging.WARNING
+    assert record.reason == "retry_after_exceeds_max_delay"  # ty: ignore[unresolved-attribute]
+    assert record.attempts == 1  # ty: ignore[unresolved-attribute]
+    assert record.method == "GET"  # ty: ignore[unresolved-attribute]
+    assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[unresolved-attribute]
+    assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
+    assert record.retry_after == 9999.0  # noqa: PLR2004 — matches the header above  # ty: ignore[unresolved-attribute]
+    assert record.max_delay == 2.5  # noqa: PLR2004 — matches max_delay above  # ty: ignore[unresolved-attribute]
 
 
 async def test_retry_budget_refused_emits_observability_event(caplog: pytest.LogCaptureFixture) -> None:
@@ -735,8 +779,7 @@ async def test_retry_after_exceeds_max_delay_does_not_consume_budget_token() -> 
     assert len(budget._withdrawn) == 0  # noqa: SLF001 — implementation-detail access for invariant
 
 
-async def test_retry_after_huge_digit_string_does_not_crash() -> None:
-    """A very large Retry-After integer string must fall back to jitter, not crash with OverflowError."""
+async def test_retry_after_huge_digit_string_gives_up() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequenceWithHeaders(
         [
@@ -745,10 +788,11 @@ async def test_retry_after_huge_digit_string_does_not_crash() -> None:
         ]
     )
     client = _client(handler, retry=AsyncRetry(_sleep=sleeper, base_delay=0.01, max_delay=0.05))
-    response = await client.get("https://example.test/x")
-    assert response.status_code == HTTPStatus.OK
-    assert len(sleeper.calls) == 1
-    assert 0.0 <= sleeper.calls[0] <= 0.05  # noqa: PLR2004 — 0.05 matches max_delay literal above
+    with pytest.raises(ServiceUnavailableError) as exc_info:
+        await client.get("https://example.test/x")
+    assert any("exceeded max_delay" in n for n in getattr(exc_info.value, "__notes__", []))
+    assert sleeper.calls == []
+    assert handler.calls == 1
 
 
 async def test_method_ineligible_with_streaming_body_does_not_attach_streaming_note() -> None:
