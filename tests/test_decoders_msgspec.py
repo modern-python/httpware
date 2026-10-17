@@ -10,10 +10,10 @@ import msgspec
 import pydantic
 import pytest
 
-from httpware import AsyncClient, DecodeError
+from httpware import AsyncClient, Client, DecodeError, MissingDecoderError
 from httpware._internal import import_checker
 from httpware.decoders import ResponseDecoder
-from httpware.decoders.msgspec import MsgspecDecoder, _contains_custom_type
+from httpware.decoders.msgspec import MsgspecDecoder
 
 
 class _Item(msgspec.Struct):
@@ -115,8 +115,8 @@ def test_msgspec_can_decode_uses_cache() -> None:
     decoder = MsgspecDecoder()
     decoder.can_decode(_Item)
     decoder.can_decode(_Item)
-    assert len(decoder._msgspec_decoders) == 1  # noqa: SLF001
-    assert _Item in decoder._msgspec_decoders  # noqa: SLF001
+    assert len(decoder._adapters) == 1  # noqa: SLF001
+    assert _Item in decoder._adapters  # noqa: SLF001
 
 
 def test_can_decode_returns_false_when_type_info_raises() -> None:
@@ -129,10 +129,9 @@ def test_can_decode_returns_false_when_type_info_raises() -> None:
 
 
 def test_can_decode_returns_false_when_decoder_build_raises() -> None:
-    """A `_get_msgspec_decoder` failure after type_info-classification is a soft 'no'."""
-    with patch.object(
-        MsgspecDecoder,
-        "_get_msgspec_decoder",
+    """A `msgspec.json.Decoder` failure after type_info-classification is a soft 'no'."""
+    with patch(
+        "httpware.decoders.msgspec.msgspec.json.Decoder",
         side_effect=TypeError("cannot build decoder"),
     ):
         assert MsgspecDecoder().can_decode(_Item) is False
@@ -147,8 +146,8 @@ def test_unhashable_model_falls_back_to_uncached_decoder() -> None:
     `msgspec`'s own decode error, not a `TypeError` from the cache lookup.
     """
     decoder = MsgspecDecoder()
-    decoder._msgspec_decoders = MagicMock()  # noqa: SLF001
-    decoder._msgspec_decoders.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
+    decoder._adapters = MagicMock()  # noqa: SLF001
+    decoder._adapters.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
 
     result = decoder.decode(b"42", int)
     assert result == 42  # noqa: PLR2004
@@ -208,7 +207,7 @@ def test_msgspec_can_decode_result_is_cached() -> None:
         assert decoder.can_decode(_Item) is True
         assert decoder.can_decode(_Item) is True
     assert spy.call_count == 1
-    assert decoder._can_decode_results[_Item] is True  # noqa: SLF001
+    assert decoder._adapters[_Item][1] is not None  # noqa: SLF001
 
 
 def test_msgspec_can_decode_caches_negative_verdict() -> None:
@@ -221,14 +220,14 @@ def test_msgspec_can_decode_caches_negative_verdict() -> None:
         assert decoder.can_decode(_PydanticUser) is False
         assert decoder.can_decode(_PydanticUser) is False
     assert spy.call_count == 1
-    assert decoder._can_decode_results[_PydanticUser] is False  # noqa: SLF001
+    assert decoder._adapters[_PydanticUser] == (_PydanticUser, None)  # noqa: SLF001
 
 
 def test_msgspec_can_decode_unhashable_model_does_not_raise() -> None:
     """An unhashable model falls back to a fresh probe instead of raising from the cache."""
     decoder = MsgspecDecoder()
-    decoder._can_decode_results = MagicMock()  # noqa: SLF001
-    decoder._can_decode_results.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
+    decoder._adapters = MagicMock()  # noqa: SLF001
+    decoder._adapters.get.side_effect = TypeError("unhashable type")  # noqa: SLF001
     assert decoder.can_decode(_Item) is True
 
 
@@ -248,10 +247,117 @@ def test_can_decode_agrees_with_decode_for_unhashable_buildable_model() -> None:
     assert decoder.decode(b"42", model) == 42  # noqa: PLR2004  # ty: ignore[invalid-argument-type]
 
 
-def test_contains_custom_type_raises_import_error_when_msgspec_absent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When msgspec is absent, _contains_custom_type must raise ImportError, not NameError."""
-    monkeypatch.setattr(import_checker, "is_msgspec_installed", False)
-    with pytest.raises(ImportError, match="MsgspecDecoder requires"):
-        _contains_custom_type(None)  # ty: ignore[invalid-argument-type] -- guard fires before isinstance checks
+class _Opaque:
+    pass
+
+
+class _StructWithPydanticField(msgspec.Struct):
+    user: _PydanticUser
+
+
+class _StructWithOptionalPydanticList(msgspec.Struct):
+    users: list[_PydanticUser] | None
+
+
+class _Outer(msgspec.Struct):
+    inner: _StructWithPydanticField
+
+
+@dataclasses.dataclass
+class _DCWithOpaqueField:
+    thing: _Opaque
+
+
+class _TDWithPydanticField(typing.TypedDict):
+    user: _PydanticUser
+
+
+class _NTWithPydanticField(typing.NamedTuple):
+    user: _PydanticUser
+
+
+class _Node(msgspec.Struct):
+    value: int
+    children: "list[_Node]"
+
+
+class _BadNode(msgspec.Struct):
+    children: "list[_BadNode]"
+    user: _PydanticUser
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        _StructWithPydanticField,
+        _StructWithOptionalPydanticList,
+        _Outer,
+        list[_Outer],
+        _DCWithOpaqueField,
+        _TDWithPydanticField,
+        _NTWithPydanticField,
+        _BadNode,
+        typing.Annotated[_StructWithPydanticField, msgspec.Meta(title="x")],
+    ],
+)
+def test_msgspec_rejects_models_with_fields_it_cannot_decode(model: type) -> None:
+    assert MsgspecDecoder().can_decode(model) is False
+
+
+def test_msgspec_accepts_self_referential_struct() -> None:
+    decoder = MsgspecDecoder()
+    assert decoder.can_decode(_Node) is True
+    assert decoder.decode(b'{"value":1,"children":[{"value":2,"children":[]}]}', _Node) == _Node(
+        value=1, children=[_Node(value=2, children=[])]
+    )
+
+
+def test_unhashable_model_builds_decoder_once() -> None:
+    with patch("httpware.decoders.msgspec.msgspec.json.Decoder", wraps=msgspec.json.Decoder) as spy:
+        decoder = MsgspecDecoder()
+        for _ in range(3):
+            model = typing.Annotated[list[int], {"a": 1}]
+            assert decoder.can_decode(model) is True  # ty: ignore[invalid-argument-type]
+            assert decoder.decode(b"[1]", model) == [1]  # ty: ignore[invalid-argument-type]
+    assert spy.call_count == 1
+
+
+def _never_called(request: httpx2.Request) -> httpx2.Response:  # pragma: no cover — the request must not go out
+    raise AssertionError(request.url)
+
+
+def test_client_rejects_struct_with_unsupported_field_before_sending() -> None:
+    client = Client(
+        httpx2_client=httpx2.Client(transport=httpx2.MockTransport(_never_called)),
+        decoders=[MsgspecDecoder()],
+    )
+    with pytest.raises(MissingDecoderError):
+        client.get("https://example.test/x", response_model=_StructWithPydanticField)
+
+
+async def test_async_client_rejects_struct_with_unsupported_field_before_sending() -> None:
+    client = AsyncClient(
+        httpx2_client=httpx2.AsyncClient(transport=httpx2.MockTransport(_never_called)),
+        decoders=[MsgspecDecoder()],
+    )
+    with pytest.raises(MissingDecoderError):
+        await client.get("https://example.test/x", response_model=_StructWithPydanticField)
+
+
+class _BrokenRepr:
+    __hash__ = None
+
+    def __repr__(self) -> str:
+        raise RuntimeError
+
+
+def test_model_that_cannot_be_keyed_is_still_decoded() -> None:
+    model = typing.Annotated[int, _BrokenRepr()]
+    decoder = MsgspecDecoder()
+    assert decoder.can_decode(model) is True  # ty: ignore[invalid-argument-type]
+    assert decoder.decode(b"42", model) == 42  # noqa: PLR2004  # ty: ignore[invalid-argument-type]
+
+
+def test_decode_into_rejected_model_raises_msgspec_error() -> None:
+    with pytest.raises(msgspec.ValidationError):
+        MsgspecDecoder().decode(b'{"id": 1, "name": "Ada"}', _PydanticUser)
