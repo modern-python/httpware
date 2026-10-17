@@ -348,38 +348,52 @@ def _stream_capped(
         response.close()
 
 
-def _assemble_request_kwargs(  # noqa: PLR0913 — 9 per-request kwargs from httpx2 call signatures
-    *,
-    params: typing.Any | None,
-    headers: typing.Any | None,
-    cookies: typing.Any | None,
-    timeout: typing.Any,
-    extensions: typing.Any | None,
-    json: typing.Any | None,
-    content: typing.Any | None,
-    data: typing.Any | None,
-    files: typing.Any | None,
+class _RequestOptionsBase(typing_extensions.TypedDict, total=False):
+    params: typing.Any | None
+    headers: typing.Any | None
+    cookies: typing.Any | None
+    timeout: typing.Any
+    extensions: typing.Any | None
+
+
+class _RequestOptions(_RequestOptionsBase, total=False, closed=True):
+    """Per-request keyword arguments of the methods that send no body."""
+
+
+class _BodyRequestOptions(_RequestOptionsBase, total=False, closed=True):
+    """Per-request keyword arguments of the methods that may send a body."""
+
+    json: typing.Any | None
+    content: typing.Any | None
+    data: typing.Any | None
+    files: typing.Any | None
+
+
+def _option_defaults(names: frozenset[str]) -> dict[str, object]:
+    """Map each option name to the value that means "not given": `USE_CLIENT_DEFAULT` for `timeout`, else `None`."""
+    return {name: httpx2.USE_CLIENT_DEFAULT if name == "timeout" else None for name in names}
+
+
+_REQUEST_OPTION_DEFAULTS = _option_defaults(_RequestOptions.__optional_keys__)
+_BODY_REQUEST_OPTION_DEFAULTS = _option_defaults(_BodyRequestOptions.__optional_keys__)
+_UNKNOWN_OPTION = object()
+
+
+def _request_kwargs(
+    client: object, caller: str, options: Mapping[str, typing.Any], defaults: Mapping[str, object]
 ) -> dict[str, typing.Any]:
-    """Build the kwargs dict for a per-request httpx2 call (build_request/stream)."""
+    """Return the `options` to pass to httpx2, dropping those left at their default.
+
+    Raise TypeError naming the first option that `defaults` does not know.
+    """
     kwargs: dict[str, typing.Any] = {}
-    if params is not None:
-        kwargs["params"] = params
-    if headers is not None:
-        kwargs["headers"] = headers
-    if cookies is not None:
-        kwargs["cookies"] = cookies
-    if timeout is not httpx2.USE_CLIENT_DEFAULT:
-        kwargs["timeout"] = timeout
-    if extensions is not None:
-        kwargs["extensions"] = extensions
-    if json is not None:
-        kwargs["json"] = json
-    if content is not None:
-        kwargs["content"] = content
-    if data is not None:
-        kwargs["data"] = data
-    if files is not None:
-        kwargs["files"] = files
+    for name, value in options.items():
+        default = defaults.get(name, _UNKNOWN_OPTION)
+        if default is _UNKNOWN_OPTION:
+            msg = f"{type(client).__name__}.{caller}() got an unexpected keyword argument {name!r}"
+            raise TypeError(msg)
+        if value is not default:
+            kwargs[name] = value
     return kwargs
 
 
@@ -514,189 +528,74 @@ class AsyncClient:
         """Delegate request construction to the wrapped httpx2.AsyncClient, keeping the URL's own query."""
         return _build_request(self._httpx2_client, method, url, kwargs)
 
-    def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def _prepare_request(
         self,
+        caller: str,
         method: str,
         url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
+        options: Mapping[str, typing.Any],
+        defaults: Mapping[str, object],
     ) -> httpx2.Request:
-        kwargs = _assemble_request_kwargs(
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        kwargs = _request_kwargs(self, caller, options, defaults)
         try:
             request = _build_request(self._httpx2_client, method, url, kwargs)
         except httpx2.InvalidURL as exc:
             raise map_httpx2_exception(exc) from exc
-        if _is_streaming_body_async(content) or _is_streaming_body_async(data) or _is_streaming_body_async(files):
+        if ("content" in kwargs or "data" in kwargs or "files" in kwargs) and (
+            _is_streaming_body_async(kwargs.get("content"))
+            or _is_streaming_body_async(kwargs.get("data"))
+            or _is_streaming_body_async(kwargs.get("files"))
+        ):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
 
-    async def _request_with_body(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    @typing.overload
+    async def get(
         self,
-        method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
+        response_model: None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    async def get(
+        self,
+        url: str,
+        *,
+        response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
+    ) -> T: ...
+
+    async def get(
+        self,
+        url: str,
+        *,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response | T:
-        request = self._prepare_request(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        """Send a GET request."""
+        request = self._prepare_request("get", "GET", url, kwargs, _REQUEST_OPTION_DEFAULTS)
         return await self._send(request, response_model)
 
-    async def _request_with_body_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def get_with_response(
         self,
-        method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> tuple[httpx2.Response, T]:
-        request = self._prepare_request(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        """Send a GET request; return (response, decoded body)."""
+        request = self._prepare_request("get_with_response", "GET", url, kwargs, _REQUEST_OPTION_DEFAULTS)
         return await self._send_with_response(request, response_model)
 
     @typing.overload
-    async def get(
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: None = None,
-    ) -> httpx2.Response: ...
-
-    @typing.overload
-    async def get(
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    async def get(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: type[T] | None = None,
-    ) -> httpx2.Response | T:
-        """Send a GET request."""
-        return await self._request_with_body(
-            "GET",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
-
-    async def get_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: type[T],
-    ) -> tuple[httpx2.Response, T]:
-        """Send a GET request; return (response, decoded body)."""
-        return await self._request_with_body_with_response(
-            "GET",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
-
-    @typing.overload
     async def post(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -704,95 +603,39 @@ class AsyncClient:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    async def post(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def post(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a POST request."""
-        return await self._request_with_body(
-            "POST",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("post", "POST", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send(request, response_model)
 
-    async def post_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def post_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a POST request; return (response, decoded body)."""
-        return await self._request_with_body_with_response(
-            "POST",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("post_with_response", "POST", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send_with_response(request, response_model)
 
     @typing.overload
     async def put(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -800,95 +643,39 @@ class AsyncClient:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    async def put(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def put(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a PUT request."""
-        return await self._request_with_body(
-            "PUT",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("put", "PUT", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send(request, response_model)
 
-    async def put_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def put_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a PUT request; return (response, decoded body)."""
-        return await self._request_with_body_with_response(
-            "PUT",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("put_with_response", "PUT", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send_with_response(request, response_model)
 
     @typing.overload
     async def patch(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -896,95 +683,39 @@ class AsyncClient:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    async def patch(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def patch(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a PATCH request."""
-        return await self._request_with_body(
-            "PATCH",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("patch", "PATCH", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send(request, response_model)
 
-    async def patch_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def patch_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a PATCH request; return (response, decoded body)."""
-        return await self._request_with_body_with_response(
-            "PATCH",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("patch_with_response", "PATCH", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send_with_response(request, response_model)
 
     @typing.overload
     async def delete(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -992,91 +723,39 @@ class AsyncClient:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    async def delete(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def delete(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a DELETE request."""
-        return await self._request_with_body(
-            "DELETE",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("delete", "DELETE", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send(request, response_model)
 
-    async def delete_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def delete_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a DELETE request; return (response, decoded body)."""
-        return await self._request_with_body_with_response(
-            "DELETE",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("delete_with_response", "DELETE", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send_with_response(request, response_model)
 
     @typing.overload
     async def head(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -1084,48 +763,28 @@ class AsyncClient:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> T: ...
 
-    async def head(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def head(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response | T:
         """Send a HEAD request."""
-        return await self._request_with_body(
-            "HEAD",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
+        request = self._prepare_request("head", "HEAD", url, kwargs, _REQUEST_OPTION_DEFAULTS)
+        return await self._send(request, response_model)
 
     @typing.overload
     async def options(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -1133,36 +792,20 @@ class AsyncClient:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> T: ...
 
-    async def options(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def options(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response | T:
         """Send an OPTIONS request."""
-        return await self._request_with_body(
-            "OPTIONS",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
+        request = self._prepare_request("options", "OPTIONS", url, kwargs, _REQUEST_OPTION_DEFAULTS)
+        return await self._send(request, response_model)
 
     @typing.overload
     async def request(
@@ -1170,16 +813,8 @@ class AsyncClient:
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -1188,97 +823,40 @@ class AsyncClient:
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    async def request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def request(
         self,
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a request with an arbitrary HTTP method."""
-        return await self._request_with_body(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("request", method, url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send(request, response_model)
 
-    async def request_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    async def request_with_response(
         self,
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a request with an explicit method; return (response, decoded body)."""
-        return await self._request_with_body_with_response(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("request_with_response", method, url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return await self._send_with_response(request, response_model)
 
     @contextlib.asynccontextmanager
-    async def stream(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    async def stream(
         self,
         method: str,
         url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> AsyncGenerator[httpx2.Response]:
         """Stream an HTTP response. Bypasses the middleware chain.
 
@@ -1299,23 +877,13 @@ class AsyncClient:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions.
         """
-        kwargs = _assemble_request_kwargs(
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        forwarded = _request_kwargs(self, "stream", kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
 
         cap = self._max_response_body_bytes
         opened = (
-            _stream_async(self._httpx2_client, method, url, kwargs)
+            _stream_async(self._httpx2_client, method, url, forwarded)
             if cap is None
-            else _stream_capped_async(self._httpx2_client, method, url, kwargs, cap)
+            else _stream_capped_async(self._httpx2_client, method, url, forwarded, cap)
         )
         try:
             async with opened as response:
@@ -1496,189 +1064,74 @@ class Client:
         """Delegate request construction to the wrapped httpx2.Client, keeping the URL's own query."""
         return _build_request(self._httpx2_client, method, url, kwargs)
 
-    def _prepare_request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def _prepare_request(
         self,
+        caller: str,
         method: str,
         url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
+        options: Mapping[str, typing.Any],
+        defaults: Mapping[str, object],
     ) -> httpx2.Request:
-        kwargs = _assemble_request_kwargs(
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        kwargs = _request_kwargs(self, caller, options, defaults)
         try:
             request = _build_request(self._httpx2_client, method, url, kwargs)
         except httpx2.InvalidURL as exc:
             raise map_httpx2_exception(exc) from exc
-        if _is_streaming_body_sync(content) or _is_streaming_body_sync(data) or _is_streaming_body_sync(files):
+        if ("content" in kwargs or "data" in kwargs or "files" in kwargs) and (
+            _is_streaming_body_sync(kwargs.get("content"))
+            or _is_streaming_body_sync(kwargs.get("data"))
+            or _is_streaming_body_sync(kwargs.get("files"))
+        ):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
 
-    def _request_with_body(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    @typing.overload
+    def get(
         self,
-        method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
+        response_model: None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
+    ) -> httpx2.Response: ...
+
+    @typing.overload
+    def get(
+        self,
+        url: str,
+        *,
+        response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
+    ) -> T: ...
+
+    def get(
+        self,
+        url: str,
+        *,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response | T:
-        request = self._prepare_request(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        """Send a GET request."""
+        request = self._prepare_request("get", "GET", url, kwargs, _REQUEST_OPTION_DEFAULTS)
         return self._send(request, response_model)
 
-    def _request_with_body_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def get_with_response(
         self,
-        method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> tuple[httpx2.Response, T]:
-        request = self._prepare_request(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        """Send a GET request; return (response, decoded body)."""
+        request = self._prepare_request("get_with_response", "GET", url, kwargs, _REQUEST_OPTION_DEFAULTS)
         return self._send_with_response(request, response_model)
 
     @typing.overload
-    def get(
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: None = None,
-    ) -> httpx2.Response: ...
-
-    @typing.overload
-    def get(
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: type[T],
-    ) -> T: ...
-
-    def get(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: type[T] | None = None,
-    ) -> httpx2.Response | T:
-        """Send a GET request."""
-        return self._request_with_body(
-            "GET",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
-
-    def get_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
-        self,
-        url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        response_model: type[T],
-    ) -> tuple[httpx2.Response, T]:
-        """Send a GET request; return (response, decoded body)."""
-        return self._request_with_body_with_response(
-            "GET",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
-
-    @typing.overload
     def post(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -1686,95 +1139,39 @@ class Client:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    def post(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def post(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a POST request."""
-        return self._request_with_body(
-            "POST",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("post", "POST", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send(request, response_model)
 
-    def post_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def post_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a POST request; return (response, decoded body)."""
-        return self._request_with_body_with_response(
-            "POST",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("post_with_response", "POST", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send_with_response(request, response_model)
 
     @typing.overload
     def put(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -1782,95 +1179,39 @@ class Client:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    def put(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def put(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a PUT request."""
-        return self._request_with_body(
-            "PUT",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("put", "PUT", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send(request, response_model)
 
-    def put_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def put_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a PUT request; return (response, decoded body)."""
-        return self._request_with_body_with_response(
-            "PUT",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("put_with_response", "PUT", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send_with_response(request, response_model)
 
     @typing.overload
     def patch(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -1878,95 +1219,39 @@ class Client:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    def patch(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def patch(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a PATCH request."""
-        return self._request_with_body(
-            "PATCH",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("patch", "PATCH", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send(request, response_model)
 
-    def patch_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def patch_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a PATCH request; return (response, decoded body)."""
-        return self._request_with_body_with_response(
-            "PATCH",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("patch_with_response", "PATCH", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send_with_response(request, response_model)
 
     @typing.overload
     def delete(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -1974,91 +1259,39 @@ class Client:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    def delete(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def delete(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a DELETE request."""
-        return self._request_with_body(
-            "DELETE",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("delete", "DELETE", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send(request, response_model)
 
-    def delete_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def delete_with_response(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a DELETE request; return (response, decoded body)."""
-        return self._request_with_body_with_response(
-            "DELETE",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("delete_with_response", "DELETE", url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send_with_response(request, response_model)
 
     @typing.overload
     def head(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -2066,48 +1299,28 @@ class Client:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> T: ...
 
-    def head(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def head(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response | T:
         """Send a HEAD request."""
-        return self._request_with_body(
-            "HEAD",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
+        request = self._prepare_request("head", "HEAD", url, kwargs, _REQUEST_OPTION_DEFAULTS)
+        return self._send(request, response_model)
 
     @typing.overload
     def options(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -2115,36 +1328,20 @@ class Client:
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> T: ...
 
-    def options(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def options(
         self,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_RequestOptions],
     ) -> httpx2.Response | T:
         """Send an OPTIONS request."""
-        return self._request_with_body(
-            "OPTIONS",
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            response_model=response_model,
-        )
+        request = self._prepare_request("options", "OPTIONS", url, kwargs, _REQUEST_OPTION_DEFAULTS)
+        return self._send(request, response_model)
 
     @typing.overload
     def request(
@@ -2152,16 +1349,8 @@ class Client:
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response: ...
 
     @typing.overload
@@ -2170,97 +1359,40 @@ class Client:
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> T: ...
 
-    def request(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def request(
         self,
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T] | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> httpx2.Response | T:
         """Send a request with an arbitrary HTTP method."""
-        return self._request_with_body(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("request", method, url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send(request, response_model)
 
-    def request_with_response(  # noqa: PLR0913 — mirrors httpx2 per-method signatures
+    def request_with_response(
         self,
         method: str,
         url: str,
         *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
         response_model: type[T],
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> tuple[httpx2.Response, T]:
         """Send a request with an explicit method; return (response, decoded body)."""
-        return self._request_with_body_with_response(
-            method,
-            url,
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-            response_model=response_model,
-        )
+        request = self._prepare_request("request_with_response", method, url, kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
+        return self._send_with_response(request, response_model)
 
     @contextlib.contextmanager
-    def stream(  # noqa: PLR0913 — mirrors httpx2 per-method signatures; kwargs-forwarding complexity is structural
+    def stream(
         self,
         method: str,
         url: str,
-        *,
-        params: typing.Any | None = None,
-        headers: typing.Any | None = None,
-        cookies: typing.Any | None = None,
-        timeout: typing.Any = httpx2.USE_CLIENT_DEFAULT,
-        extensions: typing.Any | None = None,
-        json: typing.Any | None = None,
-        content: typing.Any | None = None,
-        data: typing.Any | None = None,
-        files: typing.Any | None = None,
+        **kwargs: typing.Unpack[_BodyRequestOptions],
     ) -> Generator[httpx2.Response]:
         """Stream an HTTP response. Bypasses the middleware chain.
 
@@ -2278,23 +1410,13 @@ class Client:
         Maps httpx2 exceptions raised during the request OR body consumption to
         httpware exceptions.
         """
-        kwargs = _assemble_request_kwargs(
-            params=params,
-            headers=headers,
-            cookies=cookies,
-            timeout=timeout,
-            extensions=extensions,
-            json=json,
-            content=content,
-            data=data,
-            files=files,
-        )
+        forwarded = _request_kwargs(self, "stream", kwargs, _BODY_REQUEST_OPTION_DEFAULTS)
 
         cap = self._max_response_body_bytes
         opened = (
-            _stream(self._httpx2_client, method, url, kwargs)
+            _stream(self._httpx2_client, method, url, forwarded)
             if cap is None
-            else _stream_capped(self._httpx2_client, method, url, kwargs, cap)
+            else _stream_capped(self._httpx2_client, method, url, forwarded, cap)
         )
         try:
             with opened as response:

@@ -193,7 +193,7 @@ def test_base_url_is_applied() -> None:
 
 
 def test_get_with_cookies_forwarded() -> None:
-    """Exercises the cookies branch in _request_with_body."""
+    """Exercises the cookies branch in _request_kwargs."""
     captured: list[httpx2.Request] = []
 
     def handler(request: httpx2.Request) -> httpx2.Response:
@@ -206,35 +206,35 @@ def test_get_with_cookies_forwarded() -> None:
 
 
 def test_get_with_explicit_timeout() -> None:
-    """Exercises the timeout branch in _request_with_body."""
+    """Exercises the timeout branch in _request_kwargs."""
     client = _client_with_handler(_echo_handler)
     response = client.get("https://example.test/x", timeout=5.0)
     assert response.status_code == HTTPStatus.OK
 
 
 def test_get_with_extensions() -> None:
-    """Exercises the extensions branch in _request_with_body."""
+    """Exercises the extensions branch in _request_kwargs."""
     client = _client_with_handler(_echo_handler)
     response = client.get("https://example.test/x", extensions={"trace": True})
     assert response.status_code == HTTPStatus.OK
 
 
 def test_post_with_content_body() -> None:
-    """Exercises the content branch in _request_with_body."""
+    """Exercises the content branch in _request_kwargs."""
     client = _client_with_handler(_echo_handler)
     response = client.post("https://example.test/x", content=b"raw-bytes")
     assert response.json()["content"] == "raw-bytes"
 
 
 def test_post_with_data_body() -> None:
-    """Exercises the data branch in _request_with_body."""
+    """Exercises the data branch in _request_kwargs."""
     client = _client_with_handler(_echo_handler)
     response = client.post("https://example.test/x", data={"field": "value"})
     assert response.status_code == HTTPStatus.OK
 
 
 def test_post_with_files_body() -> None:
-    """Exercises the files branch in _request_with_body."""
+    """Exercises the files branch in _request_kwargs."""
     client = _client_with_handler(_echo_handler)
     response = client.post("https://example.test/x", files={"upload": b"file-content"})
     assert response.status_code == HTTPStatus.OK
