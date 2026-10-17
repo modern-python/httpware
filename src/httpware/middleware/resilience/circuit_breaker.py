@@ -114,51 +114,58 @@ class CircuitState(enum.Enum):
 class _RollingWindow:
     """Time-bucketed success/failure counters over a rolling window.
 
-    `window_seconds` is split into `_BUCKET_COUNT` buckets. Each bucket holds
-    [successes, failures] tagged with the integer time-slot it represents; a
-    bucket whose slot is stale is reset on write, and `totals` filters to the
-    live slot range so data older than the window never counts. Every method is
-    synchronous and reads `now` from its caller (so the breaker's critical
-    section owns the clock read).
+    `window_seconds` is split into `_BUCKET_COUNT` buckets, one per integer time-slot; the
+    window is the current slot and the `_BUCKET_COUNT - 1` before it. Running totals are
+    kept beside the buckets, so recording and reading are constant-time. Every method is
+    synchronous and reads `now` from its caller (so the breaker's critical section owns
+    the clock read).
     """
 
     def __init__(self, window_seconds: float) -> None:
         self._bucket_width = window_seconds / _BUCKET_COUNT
-        self._slot = [-1] * _BUCKET_COUNT
+        self._slot: float = -math.inf
+        self._index = 0
         self._success = [0] * _BUCKET_COUNT
         self._failure = [0] * _BUCKET_COUNT
+        self._total = 0
+        self._failures = 0
 
-    def _current_slot(self, now: float) -> int:
-        return int(now // self._bucket_width)
+    def _advance(self, now: float) -> None:
+        slot = now // self._bucket_width
+        if slot <= self._slot:
+            return
+        current = int(slot)
+        if current - self._slot >= _BUCKET_COUNT:
+            self.clear()
+        else:
+            for stale in range(int(self._slot) + 1, current + 1):
+                index = stale % _BUCKET_COUNT
+                self._total -= self._success[index] + self._failure[index]
+                self._failures -= self._failure[index]
+                self._success[index] = 0
+                self._failure[index] = 0
+        self._slot = current
+        self._index = current % _BUCKET_COUNT
 
     def record(self, now: float, *, failed: bool) -> None:
-        slot = self._current_slot(now)
-        index = slot % _BUCKET_COUNT
-        if self._slot[index] != slot:  # bucket reused for a new slot — evict
-            self._slot[index] = slot
-            self._success[index] = 0
-            self._failure[index] = 0
+        self._advance(now)
         if failed:
-            self._failure[index] += 1
+            self._failure[self._index] += 1
+            self._failures += 1
         else:
-            self._success[index] += 1
+            self._success[self._index] += 1
+        self._total += 1
 
     def totals(self, now: float) -> tuple[int, int]:
         """Return (total, failures) across buckets still inside the window at `now`."""
-        slot = self._current_slot(now)
-        oldest = slot - _BUCKET_COUNT + 1
-        total = 0
-        failures = 0
-        for i in range(_BUCKET_COUNT):
-            if oldest <= self._slot[i] <= slot:
-                total += self._success[i] + self._failure[i]
-                failures += self._failure[i]
-        return total, failures
+        self._advance(now)
+        return self._total, self._failures
 
     def clear(self) -> None:
-        self._slot = [-1] * _BUCKET_COUNT
         self._success = [0] * _BUCKET_COUNT
         self._failure = [0] * _BUCKET_COUNT
+        self._total = 0
+        self._failures = 0
 
 
 _Event = tuple[str, int, str, dict[str, typing.Any]]

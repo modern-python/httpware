@@ -68,3 +68,56 @@ def test_totals_match_live_events(events: list[tuple[float, bool]]) -> None:
     assert total == len(expected_live)
     assert failures == sum(1 for _, f in expected_live if f)
     assert 0 <= failures <= total
+
+
+def test_partial_advance_evicts_only_expired_buckets() -> None:
+    w = _RollingWindow(window_seconds=10.0)
+    w.record(0.0, failed=True)
+    w.record(4.0, failed=False)
+    w.record(5.0, failed=True)
+    assert w.totals(10.0) == (2, 1)
+    assert w.totals(14.0) == (1, 1)
+    assert w.totals(15.0) == (0, 0)
+
+
+def test_earlier_timestamp_counts_in_the_current_bucket() -> None:
+    w = _RollingWindow(window_seconds=10.0)
+    w.record(5.0, failed=False)
+    w.record(4.0, failed=True)
+    assert w.totals(14.5) == (2, 1)
+    assert w.totals(15.0) == (0, 0)
+
+
+_EDGE = 1e-9
+
+
+@given(
+    window_seconds=st.floats(min_value=0.1, max_value=120.0, allow_nan=False, allow_infinity=False),
+    start=st.floats(min_value=0.0, max_value=1e6, allow_nan=False, allow_infinity=False),
+    steps=st.lists(
+        st.tuples(st.floats(min_value=0.0, max_value=0.5, allow_nan=False, allow_infinity=False), st.booleans()),
+        min_size=1,
+        max_size=300,
+    ),
+)
+@settings(max_examples=200, deadline=None)
+def test_totals_within_one_bucket_of_timestamp_reference(
+    window_seconds: float,
+    start: float,
+    steps: list[tuple[float, bool]],
+) -> None:
+    """An outcome counts until somewhere between 0.9 and 1.0 window lengths after it was recorded."""
+    w = _RollingWindow(window_seconds=window_seconds)
+    shortest = 0.9 * window_seconds * (1 - _EDGE)
+    longest = window_seconds * (1 + _EDGE)
+    now = start
+    events: list[tuple[float, bool]] = []
+    for step, failed in steps:
+        now += step * window_seconds
+        w.record(now, failed=failed)
+        events.append((now, failed))
+        total, failures = w.totals(now)
+        assert sum(1 for t, _ in events if now - t <= shortest) <= total
+        assert total <= sum(1 for t, _ in events if now - t <= longest)
+        assert sum(1 for t, f in events if f and now - t <= shortest) <= failures
+        assert failures <= sum(1 for t, f in events if f and now - t <= longest)
