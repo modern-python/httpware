@@ -390,6 +390,8 @@ def _build_request(
     client: httpx2.Client | httpx2.AsyncClient, method: str, url: httpx2.URL | str, kwargs: dict[str, typing.Any]
 ) -> httpx2.Request:
     """Build via `client`, keeping the URL's own query bytes ahead of any params, which httpx2 would replace."""
+    if (isinstance(url, str) and "?" not in url) or (kwargs.get("params") is None and not client.params):
+        return client.build_request(method, url, **kwargs)
     parsed = httpx2.URL(url)
     if not parsed.query:
         return client.build_request(method, url, **kwargs)
