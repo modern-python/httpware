@@ -6,13 +6,13 @@ Guidance for AI agents (Claude Code, etc.) working in this repository.
 
 `httpware` is a thin, opinionated wrapper around `httpx2` with sync and async clients for building
 resilient service clients; [`CONTEXT.md`](CONTEXT.md) opens with what it does and owns the
-vocabulary — read it before naming a concept in code, a test name, or an issue title. It ships
+vocabulary. Read it before naming a concept in code, a test name, or an issue title. It ships
 under the `modern-python` org.
 
 ## Commands
 
-`just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth —
-`just --list`, or read it. The one thing it does not say: `just docs-build` runs `mkdocs --strict`
+`just` (task runner) and `uv` (package manager). The [`justfile`](justfile) is the source of truth:
+run `just --list`, or read it. The one thing it does not say: `just docs-build` runs `mkdocs --strict`
 over the site only, and `docs/adr/` and `docs/agents/` are excluded from it (`exclude_docs` in
 `mkdocs.yml`) because they are read on GitHub rather than published. Their links are covered
 instead by the `links` job in `.github/workflows/_checks.yml`, which runs lychee `--offline` over
@@ -20,9 +20,9 @@ every `*.md` in the repo.
 
 ## Architecture
 
-`httpx2` is public surface, not an abstraction to hide: `httpx2.Request` and `httpx2.Response` are
-re-exported as-is. Three protocol seams — client ↔ middleware chain, client ↔ decoder list, and
-httpware ↔ optional extras — are defined in `CONTEXT.md` and named **A**, **B** and **C** in the
+`httpx2` is part of the public surface: `httpx2.Request` and `httpx2.Response` are
+re-exported as-is. Three protocol seams (client ↔ middleware chain, client ↔ decoder list, and
+httpware ↔ optional extras) are defined in `CONTEXT.md` and named **A**, **B** and **C** in the
 module docstrings that implement them. Never cross a seam except through its protocol.
 
 ### Key files
@@ -30,8 +30,8 @@ module docstrings that implement them. Never cross a seam except through its pro
 Every module under `src/httpware/` is named for what it does; read it. What a single-file read will
 **not** tell you:
 
-- `client.py` holds **both worlds** — `Client` and `AsyncClient` — and they are hand-maintained at
-  parity, not generated. A feature added to one must be mirrored to the other;
+- `client.py` holds **both worlds**, `Client` and `AsyncClient`, hand-maintained at parity;
+  nothing generates one from the other. A feature added to one must be mirrored to the other;
   `tests/test_client_parity.py` says why, and names the sole exception (`AsyncTimeout` has no sync
   sibling).
 - `errors.py` owns the tree and both construction rules. Status-keyed `StatusError` subclasses take
@@ -54,15 +54,15 @@ Every module under `src/httpware/` is named for what it does; read it. What a si
   `RetryBudget`, `_backoff`, `_event_loop_guard`) written once and driven by both worlds. New
   resilience logic goes in a shared object, not into each world's shell.
 
-**House invariants, review-only** — nothing in CI catches these: no `httpx2._` private API (ruff
+**House invariants, review-only.** Nothing in CI catches these: no `httpx2._` private API (ruff
 `SLF001` flags private *attribute* access but not a used private *import*); no
-`from __future__ import annotations` (3.11+ floor); no global logging config —
-`logging.getLogger("httpware")` and namespaced children only.
+`from __future__ import annotations` (3.11+ floor); no global logging config
+(`logging.getLogger("httpware")` and namespaced children only).
 
 ### Testing patterns
 
-Transport mocking is `httpx2.MockTransport` passed as `transport=`, never `respx` — `respx`
-targets `httpx`, not `httpx2`, and patches its internals. Concurrency-sensitive components carry
+Transport mocking is `httpx2.MockTransport` passed as `transport=`, never `respx`, which
+targets `httpx` rather than `httpx2` and patches its internals. Concurrency-sensitive components carry
 Hypothesis property tests in `test_*_props.py`, and `stress`-marked tests drive real thread
 parallelism: they run under the GIL for coverage, but the proof comes from the free-threaded
 `3.14t` CI job.
@@ -78,10 +78,10 @@ description, and PyPI does not rewrite relative links, so a relative one 404s on
 - Design principle: thin wrapper, small public surface. `httpware.__all__` is checked against an
   explicit expected set in `tests/test_public_api.py`, so a symbol cannot appear unnoticed
 - `Http` is two letters in a class name (`AsyncClient`, not `ASYNCClient`); no `a` prefix on async
-  methods, matching `httpx2` — `aclose()` is the sole exception
+  methods, matching `httpx2`; `aclose()` is the sole exception
 - Docstrings: public API documents the contract; internal helpers get a one-line contract, plus at
-  most 1–2 lines for a genuinely non-obvious constraint. Never narrate implementation or justify
-  code to a reviewer — cross-file rationale lives in an invariant test's docstring
+  most one or two lines for a non-obvious constraint. Never narrate implementation or justify
+  code to a reviewer; cross-file rationale lives in an invariant test's docstring
 
 ## Agent skills
 
