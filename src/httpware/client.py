@@ -14,6 +14,7 @@ from httpware._internal.body_cap import _read_capped, _read_capped_async, _valid
 from httpware._internal.exception_mapping import (
     _httpx2_exception_mapper,
     _httpx2_exception_mapper_sync,
+    map_httpx2_exception,
 )
 from httpware._internal.status import (
     STREAMING_BODY_MARKER,
@@ -489,7 +490,10 @@ class AsyncClient:
             data=data,
             files=files,
         )
-        request = _build_request(self._httpx2_client, method, url, kwargs)
+        try:
+            request = _build_request(self._httpx2_client, method, url, kwargs)
+        except httpx2.InvalidURL as exc:
+            raise map_httpx2_exception(exc) from exc
         if _is_streaming_body_async(content) or _is_streaming_body_async(data) or _is_streaming_body_async(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request
@@ -1448,7 +1452,10 @@ class Client:
             data=data,
             files=files,
         )
-        request = _build_request(self._httpx2_client, method, url, kwargs)
+        try:
+            request = _build_request(self._httpx2_client, method, url, kwargs)
+        except httpx2.InvalidURL as exc:
+            raise map_httpx2_exception(exc) from exc
         if _is_streaming_body_sync(content) or _is_streaming_body_sync(data) or _is_streaming_body_sync(files):
             request.extensions[STREAMING_BODY_MARKER] = True
         return request

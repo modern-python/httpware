@@ -117,6 +117,40 @@ def test_sync_retry_retries_remote_protocol_error() -> None:
     assert len(calls) == 2  # noqa: PLR2004
 
 
+@pytest.mark.parametrize("method", ["get", "post", "put", "patch", "delete", "head", "options"])
+async def test_async_invalid_url_on_verb_maps_to_transport_error(method: str) -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok))
+    with pytest.raises(TransportError, match="non-printable") as info:
+        await getattr(client, method)(_INVALID_URL)
+    assert not isinstance(info.value, NetworkError)
+    assert isinstance(info.value.__cause__, httpx2.InvalidURL)
+
+
+@pytest.mark.parametrize("method", ["get", "post", "put", "patch", "delete", "head", "options"])
+def test_sync_invalid_url_on_verb_maps_to_transport_error(method: str) -> None:
+    client = Client(transport=httpx2.MockTransport(_ok))
+    with pytest.raises(TransportError, match="non-printable") as info:
+        getattr(client, method)(_INVALID_URL)
+    assert not isinstance(info.value, NetworkError)
+    assert isinstance(info.value.__cause__, httpx2.InvalidURL)
+
+
+async def test_async_invalid_url_on_request_and_with_response_maps_to_transport_error() -> None:
+    client = AsyncClient(transport=httpx2.MockTransport(_ok))
+    with pytest.raises(TransportError, match="non-printable"):
+        await client.request("GET", _INVALID_URL)
+    with pytest.raises(TransportError, match="non-printable"):
+        await client.get_with_response(_INVALID_URL, response_model=dict)
+
+
+def test_sync_invalid_url_on_request_and_with_response_maps_to_transport_error() -> None:
+    client = Client(transport=httpx2.MockTransport(_ok))
+    with pytest.raises(TransportError, match="non-printable"):
+        client.request("GET", _INVALID_URL)
+    with pytest.raises(TransportError, match="non-printable"):
+        client.get_with_response(_INVALID_URL, response_model=dict)
+
+
 def _async_retry_client(handler: typing.Any) -> AsyncClient:  # noqa: ANN401
     return AsyncClient(
         transport=httpx2.MockTransport(handler),

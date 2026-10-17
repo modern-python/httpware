@@ -42,7 +42,7 @@ An exception from `httpx2` is re-raised as an httpware one, with the original on
 | `RemoteProtocolError`, such as a server dropping a keep-alive connection mid-response | `NetworkError` |
 | any other `HTTPError`, `InvalidURL`, `CookieConflict` | `TransportError` |
 
-`NetworkError` and `TimeoutError` are the transient ones: `AsyncRetry` and `Retry` retry them, and the circuit breaker counts them.
+`NetworkError` and `TimeoutError` are the transient ones: `AsyncRetry` and `Retry` retry them, and the circuit breaker counts them. An invalid URL raises `TransportError` from every method, whether `httpx2` rejects it while the request is built or while it is sent.
 
 ## Status-to-exception mapping
 
