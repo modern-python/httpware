@@ -10,6 +10,8 @@ from collections.abc import Callable, Hashable
 
 V = typing.TypeVar("V")
 
+_MAX_ENTRIES = 4096
+
 _Cache: typing.TypeAlias = dict[Hashable, tuple[object, V | None]]
 
 
@@ -28,6 +30,7 @@ def _lookup(cache: "_Cache[V]", model: object, build: Callable[[typing.Any], V |
     """Return the cached `build(model)`, building it on a miss; None means `model` cannot be decoded.
 
     `build` must not raise. Concurrent first calls may build twice; the last write wins.
+    A full cache is emptied before the next insert, so a model seen again after that is rebuilt.
     """
     try:
         key = _key(model)
@@ -35,7 +38,7 @@ def _lookup(cache: "_Cache[V]", model: object, build: Callable[[typing.Any], V |
     except Exception:  # noqa: BLE001 — unhashable models fall back to a repr key
         return _lookup_by_repr(cache, model, build)
     if entry is None:
-        entry = cache[key] = (model, build(model))
+        entry = _store(cache, key, model, build)
     return entry[1]
 
 
@@ -48,5 +51,15 @@ def _lookup_by_repr(cache: "_Cache[V]", model: object, build: Callable[[typing.A
             return entry[1]
     except Exception:  # noqa: BLE001 — a model that cannot be keyed is built uncached
         return build(model)
-    entry = cache[key] = (model, build(model))
-    return entry[1]
+    return _store(cache, key, model, build)[1]
+
+
+def _store(
+    cache: "_Cache[V]", key: Hashable, model: object, build: Callable[[typing.Any], V | None]
+) -> tuple[object, V | None]:
+    """Build and cache the entry for `model`, emptying `cache` first once it holds `_MAX_ENTRIES`."""
+    entry = (model, build(model))
+    if len(cache) >= _MAX_ENTRIES:
+        cache.clear()
+    cache[key] = entry
+    return entry
