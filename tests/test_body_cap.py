@@ -7,7 +7,7 @@ and extension sanitisation, independent of client wiring.
 """
 
 import gzip
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import httpx2
 import pytest
@@ -157,6 +157,69 @@ def test_read_capped_empty_body_passes() -> None:
         client.close()
 
 
+def test_read_capped_returns_the_same_response_for_an_unencoded_body() -> None:
+    body = b"hello world"
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, content=iter([body]))
+
+    client, resp = _sync_stream(handler)
+    try:
+        out = _read_capped(resp, 1000, resp.request)
+        assert out is resp
+        assert out.content == body
+        assert out.is_closed
+        assert out.num_bytes_downloaded == len(body)
+        assert out.headers["transfer-encoding"] == "chunked"
+    finally:
+        resp.close()
+        client.close()
+
+
+def test_read_capped_rebuilds_the_response_for_an_encoded_body() -> None:
+    raw = gzip.compress(b"A" * 500)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, headers={"content-encoding": "gzip"}, content=raw)
+
+    client, resp = _sync_stream(handler)
+    try:
+        out = _read_capped(resp, 1_000_000, resp.request)
+        assert out is not resp
+        assert out.num_bytes_downloaded == 0
+    finally:
+        resp.close()
+        client.close()
+
+
+def test_read_capped_unencoded_over_cap_closes_the_stream() -> None:
+    closed: list[bool] = []
+
+    class _Body(httpx2.SyncByteStream):
+        def __iter__(self) -> Iterator[bytes]:
+            yield b"a" * 50
+            yield b"b" * 50
+
+        def close(self) -> None:
+            closed.append(True)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, stream=_Body())
+
+    client, resp = _sync_stream(handler)
+    try:
+        with pytest.raises(ResponseTooLargeError) as caught:
+            _read_capped(resp, 70, resp.request)
+        assert caught.value.reason == "streamed"
+        assert caught.value.limit == 70  # noqa: PLR2004 — cap above
+        assert caught.value.status_code == 200  # noqa: PLR2004 — mirrors handler
+        assert resp.is_closed
+        assert closed == [True]
+    finally:
+        resp.close()
+        client.close()
+
+
 # ---- async ----
 
 
@@ -254,6 +317,70 @@ async def test_read_capped_async_streamed_over_cap() -> None:
         with pytest.raises(ResponseTooLargeError) as caught:
             await _read_capped_async(resp, 70, resp.request)  # trips on the second 50-byte chunk
         assert caught.value.reason == "streamed"
+    finally:
+        await resp.aclose()
+        await client.aclose()
+
+
+async def test_read_capped_async_returns_the_same_response_for_an_unencoded_body() -> None:
+    body = b"hello world"
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield body
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, content=chunks())
+
+    client, resp = await _async_stream(handler)
+    try:
+        out = await _read_capped_async(resp, 1000, resp.request)
+        assert out is resp
+        assert out.content == body
+        assert out.is_closed
+        assert out.num_bytes_downloaded == len(body)
+    finally:
+        await resp.aclose()
+        await client.aclose()
+
+
+async def test_read_capped_async_rebuilds_the_response_for_an_encoded_body() -> None:
+    raw = gzip.compress(b"A" * 500)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, headers={"content-encoding": "gzip"}, content=raw)
+
+    client, resp = await _async_stream(handler)
+    try:
+        out = await _read_capped_async(resp, 1_000_000, resp.request)
+        assert out is not resp
+        assert out.num_bytes_downloaded == 0
+    finally:
+        await resp.aclose()
+        await client.aclose()
+
+
+async def test_read_capped_async_unencoded_over_cap_closes_the_stream() -> None:
+    closed: list[bool] = []
+
+    class _Body(httpx2.AsyncByteStream):
+        async def __aiter__(self) -> AsyncIterator[bytes]:
+            yield b"a" * 50
+            yield b"b" * 50
+
+        async def aclose(self) -> None:
+            closed.append(True)
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        return httpx2.Response(200, stream=_Body())
+
+    client, resp = await _async_stream(handler)
+    try:
+        with pytest.raises(ResponseTooLargeError) as caught:
+            await _read_capped_async(resp, 70, resp.request)
+        assert caught.value.reason == "streamed"
+        assert caught.value.limit == 70  # noqa: PLR2004 — cap above
+        assert resp.is_closed
+        assert closed == [True]
     finally:
         await resp.aclose()
         await client.aclose()
