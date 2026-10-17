@@ -17,6 +17,7 @@ import asyncio
 import datetime as dt
 import email.utils
 import logging
+import math
 import time
 from collections.abc import Awaitable, Callable
 from http import HTTPStatus
@@ -56,6 +57,8 @@ DEFAULT_IDEMPOTENT_METHODS = frozenset(
 _RETRYABLE_EXCEPTIONS = (StatusError, NetworkError, TimeoutError)
 
 _MAX_ATTEMPTS_INVALID = "max_attempts must be >= 1"
+_BASE_DELAY_INVALID = "base_delay must be >= 0"
+_MAX_DELAY_INVALID = "max_delay must be a finite number >= 0"
 _STREAMING_BODY_REFUSAL_NOTE = (
     "httpware: not retrying because the request body is a stream that cannot replay across attempts"
 )
@@ -64,6 +67,15 @@ _RETRY_AFTER_EXCEEDS_MAX_DELAY_NOTE = (
 )
 
 _LOGGER = logging.getLogger("httpware.retry")
+
+
+def _validate_retry_config(*, max_attempts: int, base_delay: float, max_delay: float) -> None:
+    if max_attempts < 1:
+        raise ValueError(_MAX_ATTEMPTS_INVALID)
+    if not base_delay >= 0:
+        raise ValueError(_BASE_DELAY_INVALID)
+    if not (max_delay >= 0 and math.isfinite(max_delay)):
+        raise ValueError(_MAX_DELAY_INVALID)
 
 
 def _parse_retry_after(value: str) -> float | None:
@@ -105,8 +117,7 @@ class _RetryPolicy:
         respect_retry_after: bool,
         budget: RetryBudget | None,
     ) -> None:
-        if max_attempts < 1:
-            raise ValueError(_MAX_ATTEMPTS_INVALID)
+        _validate_retry_config(max_attempts=max_attempts, base_delay=base_delay, max_delay=max_delay)
         self.max_attempts = max_attempts
         self.base_delay = base_delay
         self.max_delay = max_delay

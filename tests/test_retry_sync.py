@@ -147,6 +147,16 @@ def test_max_attempts_zero_rejected() -> None:
         Retry(max_attempts=0)
 
 
+def test_negative_base_delay_rejected() -> None:
+    with pytest.raises(ValueError, match="base_delay must be >= 0"):
+        Retry(base_delay=-1)
+
+
+def test_negative_max_delay_rejected() -> None:
+    with pytest.raises(ValueError, match="max_delay must be a finite number >= 0"):
+        Retry(max_delay=-1)
+
+
 def test_streamed_body_request_is_refused() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])

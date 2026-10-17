@@ -4,7 +4,10 @@ Tests inject a deterministic `_now` callable rather than monkeypatching `time.mo
 so they cannot be perturbed by other tests sharing the same module.
 """
 
+import math
 import time
+
+import pytest
 
 from httpware.middleware.resilience.budget import RetryBudget
 
@@ -106,3 +109,30 @@ def test_default_now_is_time_monotonic() -> None:
     """When _now is not passed, the budget uses time.monotonic by default."""
     budget = RetryBudget()
     assert budget._now is time.monotonic  # noqa: SLF001
+
+
+@pytest.mark.parametrize("ttl", [0.0, -1.0, math.nan, math.inf])
+def test_invalid_ttl_rejected(ttl: float) -> None:
+    with pytest.raises(ValueError, match="ttl must be a finite number > 0"):
+        RetryBudget(ttl=ttl)
+
+
+@pytest.mark.parametrize("min_retries_per_sec", [-1.0, math.nan, math.inf])
+def test_invalid_min_retries_per_sec_rejected(min_retries_per_sec: float) -> None:
+    with pytest.raises(ValueError, match="min_retries_per_sec must be a finite number >= 0"):
+        RetryBudget(min_retries_per_sec=min_retries_per_sec)
+
+
+@pytest.mark.parametrize("percent_can_retry", [-0.1, math.nan, math.inf])
+def test_invalid_percent_can_retry_rejected(percent_can_retry: float) -> None:
+    with pytest.raises(ValueError, match="percent_can_retry must be a finite number >= 0"):
+        RetryBudget(percent_can_retry=percent_can_retry)
+
+
+def test_boundary_budget_values_accepted() -> None:
+    clock = _Clock()
+    budget = RetryBudget(ttl=0.001, min_retries_per_sec=0.0, percent_can_retry=2.0, _now=clock.now)
+    budget.deposit()
+    assert budget.try_withdraw() is True
+    assert budget.try_withdraw() is True
+    assert budget.try_withdraw() is False
