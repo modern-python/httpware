@@ -122,7 +122,7 @@ class _RetryPolicy:
         self.base_delay = base_delay
         self.max_delay = max_delay
         self.retry_status_codes = retry_status_codes
-        self.retry_methods = retry_methods
+        self.retry_methods = frozenset(method.upper() for method in retry_methods)
         self.respect_retry_after = respect_retry_after
         self.budget = budget if budget is not None else RetryBudget()
 
@@ -139,7 +139,7 @@ class _RetryPolicy:
         exception. `exc` is the currently-handled exception (one of
         _RETRYABLE_EXCEPTIONS); see the class docstring for chaining semantics.
         """
-        method_eligible = request.method.upper() in self.retry_methods
+        method_eligible = request.method in self.retry_methods
         if isinstance(exc, StatusError):
             retryable_status = exc.response.status_code in self.retry_status_codes
             if not method_eligible or not retryable_status:

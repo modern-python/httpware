@@ -128,6 +128,18 @@ async def test_retries_post_when_method_explicitly_included() -> None:
     assert handler.calls == 2  # noqa: PLR2004 — "2" is intentional literal in test assertion
 
 
+async def test_retry_methods_match_case_insensitively() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
+    client = _client(
+        handler,
+        retry=AsyncRetry(_sleep=sleeper, retry_methods=frozenset({"post"}), base_delay=0.01, max_delay=0.02),
+    )
+    response = await client.post("https://example.test/x", json={"x": 1})
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
+
+
 async def test_max_attempts_one_means_no_retries() -> None:
     sleeper = _SleepRecorder()
     handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE])

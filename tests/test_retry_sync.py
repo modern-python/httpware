@@ -457,6 +457,18 @@ def test_retries_post_when_method_explicitly_included() -> None:
     assert len(sleeper.calls) == 1
 
 
+def test_retry_methods_match_case_insensitively() -> None:
+    sleeper = _SleepRecorder()
+    handler = _ResponseSequence([HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.OK])
+    client = _client(
+        handler,
+        retry=Retry(_sleep=sleeper, retry_methods=frozenset({"post"}), base_delay=0.01, max_delay=0.02),
+    )
+    response = client.post("https://example.test/x", json={"k": "v"})
+    assert response.status_code == HTTPStatus.OK
+    assert handler.calls == 2  # noqa: PLR2004 — initial attempt + 1 retry
+
+
 def test_default_budget_is_fresh_per_instance() -> None:
     r1 = Retry()
     r2 = Retry()
