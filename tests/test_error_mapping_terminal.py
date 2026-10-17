@@ -118,6 +118,18 @@ async def test_send_on_closed_client_raises_transport_error() -> None:
         await client.send(httpx2.Request("GET", "https://example.test/x"))
 
 
+async def test_runtime_error_on_open_client_propagates() -> None:
+    raised = RuntimeError("synthetic runtime error")
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        raise raised
+
+    client = _client_with_handler(handler)
+    with pytest.raises(RuntimeError) as info:
+        await client.send(httpx2.Request("GET", "https://example.test/x"))
+    assert info.value is raised
+
+
 async def test_httpx2_decoding_error_maps_to_transport_error() -> None:
     """Non-transient HTTPError (e.g. DecodingError) maps to bare TransportError, not NetworkError."""
 
@@ -233,6 +245,18 @@ def test_sync_send_on_closed_client_raises_transport_error() -> None:
     underlying.close()
     with pytest.raises(TransportError):
         client.send(httpx2.Request("GET", "https://example.test/x"))
+
+
+def test_sync_runtime_error_on_open_client_propagates() -> None:
+    raised = RuntimeError("synthetic runtime error")
+
+    def handler(request: httpx2.Request) -> httpx2.Response:  # noqa: ARG001
+        raise raised
+
+    client = _sync_client_with_handler(handler)
+    with pytest.raises(RuntimeError) as info:
+        client.send(httpx2.Request("GET", "https://example.test/x"))
+    assert info.value is raised
 
 
 def test_sync_httpx2_decoding_error_maps_to_transport_error() -> None:
