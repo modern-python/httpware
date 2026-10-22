@@ -65,7 +65,7 @@ Transport mocking is `httpx2.MockTransport` passed as `transport=`, never `respx
 targets `httpx` rather than `httpx2` and patches its internals. Concurrency-sensitive components carry
 Hypothesis property tests in `test_*_props.py`, and `stress`-marked tests drive real thread
 parallelism: they run under the GIL for coverage, but the proof comes from the free-threaded
-`3.14t` CI job.
+`3.14t` and `3.15t` CI jobs.
 
 ## Workflow
 
