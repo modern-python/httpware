@@ -80,3 +80,6 @@ markdown_extensions:
   - pymdownx.superfences
   - admonition
   - attr_list
+
+plugins:
+  - search
