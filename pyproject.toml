@@ -105,7 +105,7 @@ isort.no-lines-before = ["standard-library", "local-folder"]
 
 [[tool.ty.overrides]]
 include = ["scripts/**"]
-rules = { unresolved-import = "ignore" }
+rules = { import-not-found = "ignore" }
 
 [[tool.ty.overrides]]
 include = ["tests/test_client_typing.py"]
