@@ -190,8 +190,8 @@ def test_events_carry_the_circuit_key(caplog: pytest.LogCaptureFixture) -> None:
         with pytest.raises(CircuitOpenError):
             client.get("https://a.test/x")
     records = [r for r in caplog.records if r.name == "httpware.circuit_breaker"]
-    assert [r.event for r in records] == ["circuit.opened", "circuit.rejected"]  # ty: ignore[unresolved-attribute]
-    assert all(r.circuit_key == "https://a.test" for r in records)  # ty: ignore[unresolved-attribute]
+    assert [r.event for r in records] == ["circuit.opened", "circuit.rejected"]  # ty: ignore[missing-attribute]
+    assert all(r.circuit_key == "https://a.test" for r in records)  # ty: ignore[missing-attribute]
 
 
 def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pytest.LogCaptureFixture) -> None:
@@ -202,7 +202,7 @@ def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pytest.Lo
     ):
         _fail_n(client, "https://user:secret@A.test:443/x?q=1", 1)
         _fail_n(client, "http://a.test:8080/x", 1)
-    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
+    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[missing-attribute]
     assert keys == ["https://a.test", "http://a.test:8080"]
 
 
@@ -214,7 +214,7 @@ def test_circuit_key_of_a_custom_key_is_its_str(caplog: pytest.LogCaptureFixture
         caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"),
     ):
         _fail_n(client, "https://a.test/x", 1)
-    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
+    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[missing-attribute]
     assert keys == ["('a.test', 1)"]
 
 

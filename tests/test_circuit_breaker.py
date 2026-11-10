@@ -133,13 +133,13 @@ async def test_open_emits_opened_event_and_rejects(caplog: pytest.LogCaptureFixt
     opened = [r for r in records if "opened" in r.message]
     rejected = [r for r in records if "rejecting" in r.message]
     assert len(opened) == 1
-    assert opened[0].event == "circuit.opened"  # ty: ignore[unresolved-attribute]
-    assert opened[0].failure_threshold == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
-    assert opened[0].failures == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert opened[0].event == "circuit.opened"  # ty: ignore[missing-attribute]
+    assert opened[0].failure_threshold == 2  # noqa: PLR2004  # ty: ignore[missing-attribute]
+    assert opened[0].failures == 2  # noqa: PLR2004  # ty: ignore[missing-attribute]
     assert len(rejected) == 1
-    assert rejected[0].event == "circuit.rejected"  # ty: ignore[unresolved-attribute]
-    assert rejected[0].retry_after is not None  # ty: ignore[unresolved-attribute]
-    assert rejected[0].method == "GET"  # ty: ignore[unresolved-attribute]
+    assert rejected[0].event == "circuit.rejected"  # ty: ignore[missing-attribute]
+    assert rejected[0].retry_after is not None  # ty: ignore[missing-attribute]
+    assert rejected[0].method == "GET"  # ty: ignore[missing-attribute]
 
 
 async def test_success_resets_failure_streak() -> None:
@@ -342,8 +342,8 @@ async def test_probe_failure_reopens_circuit(caplog: pytest.LogCaptureFixture) -
         r
         for r in caplog.records
         if r.name == "httpware.circuit_breaker"
-        and r.event == "circuit.opened"  # ty: ignore[unresolved-attribute]
-        and r.failures == 1  # ty: ignore[unresolved-attribute]
+        and r.event == "circuit.opened"  # ty: ignore[missing-attribute]
+        and r.failures == 1  # ty: ignore[missing-attribute]
     ]
     assert len(reopen_records) == 1
 
@@ -664,11 +664,11 @@ async def test_rate_mode_open_event_carries_rate_attributes(caplog: pytest.LogCa
                 await client.get("https://example.test/x")
         for _ in range(2):
             await client.get("https://example.test/x")
-    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[unresolved-attribute]
+    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[missing-attribute]
     assert opened, "expected a circuit.opened record"
     rec = opened[-1]
-    assert rec.failure_rate_threshold == 0.5  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
-    assert rec.observed_calls >= 4  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert rec.failure_rate_threshold == 0.5  # noqa: PLR2004  # ty: ignore[missing-attribute]
+    assert rec.observed_calls >= 4  # noqa: PLR2004  # ty: ignore[missing-attribute]
     assert hasattr(rec, "failure_rate")
     assert not hasattr(rec, "failure_threshold")  # classic attribute absent in rate mode
 
@@ -732,10 +732,10 @@ async def test_rate_mode_probe_failure_reopens_with_classic_attributes(caplog: p
         with pytest.raises(InternalServerError):
             await probe.get("https://example.test/x")
     assert breaker.state is CircuitState.OPEN  # the failed probe re-opened it
-    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[unresolved-attribute]
+    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[missing-attribute]
     assert opened
     rec = opened[-1]
-    assert rec.failures == 1  # ty: ignore[unresolved-attribute]  # classic probe-failure shape
+    assert rec.failures == 1  # ty: ignore[missing-attribute]  # classic probe-failure shape
     assert hasattr(rec, "failure_threshold")
     assert not hasattr(rec, "failure_rate")  # NOT the rate shape
 
@@ -929,8 +929,8 @@ async def test_rejected_event_is_emitted_at_most_once_per_second(caplog: pytest.
             clock.advance(step)
             with pytest.raises(CircuitOpenError):
                 await breaker(httpx2.Request("GET", "https://example.test/x"), _unreachable)
-    rejected = [r for r in caplog.records if r.event == "circuit.rejected"]  # ty: ignore[unresolved-attribute]
-    assert [r.suppressed for r in rejected] == [0, 4]  # ty: ignore[unresolved-attribute]
+    rejected = [r for r in caplog.records if r.event == "circuit.rejected"]  # ty: ignore[missing-attribute]
+    assert [r.suppressed for r in rejected] == [0, 4]  # ty: ignore[missing-attribute]
 
 
 # ── rejection accounting runs per outage episode ──
@@ -962,7 +962,7 @@ async def test_first_rejection_of_a_new_outage_is_emitted(caplog: pytest.LogCapt
         await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
         await _open_now(breaker)
         await _reject(breaker)
-    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[missing-attribute]
 
 
 async def test_closed_event_reports_every_rejection_of_the_outage(caplog: pytest.LogCaptureFixture) -> None:
@@ -978,8 +978,8 @@ async def test_closed_event_reports_every_rejection_of_the_outage(caplog: pytest
         await _reject(breaker)
         clock.advance(5.0)
         await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
-    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 1]  # ty: ignore[unresolved-attribute]
-    assert [r.rejected for r in _events(caplog, "circuit.closed")] == [4]  # ty: ignore[unresolved-attribute]
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 1]  # ty: ignore[missing-attribute]
+    assert [r.rejected for r in _events(caplog, "circuit.closed")] == [4]  # ty: ignore[missing-attribute]
 
 
 async def test_suppressed_never_counts_a_previous_outage(caplog: pytest.LogCaptureFixture) -> None:
@@ -993,7 +993,7 @@ async def test_suppressed_never_counts_a_previous_outage(caplog: pytest.LogCaptu
         await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
         await _open_now(breaker)
         await _reject(breaker)
-    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[missing-attribute]
 
 
 async def test_events_of_one_call_arrive_in_transition_order(caplog: pytest.LogCaptureFixture) -> None:
@@ -1004,7 +1004,7 @@ async def test_events_of_one_call_arrive_in_transition_order(caplog: pytest.LogC
         await _reject(breaker)
         clock.advance(1.0)
         await breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
-    assert [r.event for r in caplog.records] == [  # ty: ignore[unresolved-attribute]
+    assert [r.event for r in caplog.records] == [  # ty: ignore[missing-attribute]
         "circuit.opened",
         "circuit.rejected",
         "circuit.half_open",

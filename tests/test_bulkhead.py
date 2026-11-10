@@ -482,10 +482,10 @@ async def test_bulkhead_rejected_emits_observability_event(caplog: pytest.LogCap
     assert len(rejected_records) == 1
     record = rejected_records[0]
     assert record.levelno == logging.WARNING
-    assert record.max_concurrent == 1  # ty: ignore[unresolved-attribute]
-    assert record.acquire_timeout == 0.0  # ty: ignore[unresolved-attribute]
-    assert record.method == "GET"  # ty: ignore[unresolved-attribute]
-    assert "example.test/y" in record.url  # ty: ignore[unresolved-attribute]
+    assert record.max_concurrent == 1  # ty: ignore[missing-attribute]
+    assert record.acquire_timeout == 0.0  # ty: ignore[missing-attribute]
+    assert record.method == "GET"  # ty: ignore[missing-attribute]
+    assert "example.test/y" in record.url  # ty: ignore[missing-attribute]
 
 
 # ───── Single-event-loop guard ──────────────────────────────────────────────
