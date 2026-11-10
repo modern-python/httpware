@@ -488,9 +488,9 @@ def test_emits_giving_up_log_event(caplog: pytest.LogCaptureFixture) -> None:
     client = _client(handler, retry=Retry(_sleep=sleeper, base_delay=0.01, max_attempts=2))
     with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
         client.get("https://example.test/x")
-    giving_up = [r for r in caplog.records if r.name == "httpware.retry" and r.event == "retry.giving_up"]  # ty: ignore[unresolved-attribute]
+    giving_up = [r for r in caplog.records if r.name == "httpware.retry" and r.event == "retry.giving_up"]  # ty: ignore[missing-attribute]
     assert len(giving_up) == 1
-    assert giving_up[0].reason == "max_attempts"  # ty: ignore[unresolved-attribute]
+    assert giving_up[0].reason == "max_attempts"  # ty: ignore[missing-attribute]
 
 
 def test_retry_after_exceeding_max_delay_emits_giving_up_event(caplog: pytest.LogCaptureFixture) -> None:
@@ -501,17 +501,17 @@ def test_retry_after_exceeding_max_delay_emits_giving_up_event(caplog: pytest.Lo
     with caplog.at_level(logging.WARNING, logger="httpware.retry"), pytest.raises(ServiceUnavailableError):
         client.get("https://example.test/x")
 
-    records = [r for r in caplog.records if r.name == "httpware.retry" and r.event == "retry.giving_up"]  # ty: ignore[unresolved-attribute]
+    records = [r for r in caplog.records if r.name == "httpware.retry" and r.event == "retry.giving_up"]  # ty: ignore[missing-attribute]
     assert len(records) == 1
     record = records[0]
     assert record.levelno == logging.WARNING
-    assert record.reason == "retry_after_exceeds_max_delay"  # ty: ignore[unresolved-attribute]
-    assert record.attempts == 1  # ty: ignore[unresolved-attribute]
-    assert record.method == "GET"  # ty: ignore[unresolved-attribute]
-    assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[unresolved-attribute]
-    assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[unresolved-attribute]
-    assert record.retry_after == 9999.0  # noqa: PLR2004 — matches the header above  # ty: ignore[unresolved-attribute]
-    assert record.max_delay == 2.5  # noqa: PLR2004 — matches max_delay above  # ty: ignore[unresolved-attribute]
+    assert record.reason == "retry_after_exceeds_max_delay"  # ty: ignore[missing-attribute]
+    assert record.attempts == 1  # ty: ignore[missing-attribute]
+    assert record.method == "GET"  # ty: ignore[missing-attribute]
+    assert record.last_status == HTTPStatus.SERVICE_UNAVAILABLE  # ty: ignore[missing-attribute]
+    assert record.last_exception_type == "ServiceUnavailableError"  # ty: ignore[missing-attribute]
+    assert record.retry_after == 9999.0  # noqa: PLR2004 — matches the header above  # ty: ignore[missing-attribute]
+    assert record.max_delay == 2.5  # noqa: PLR2004 — matches max_delay above  # ty: ignore[missing-attribute]
 
 
 def test_emits_budget_refused_log_event(caplog: pytest.LogCaptureFixture) -> None:
@@ -604,8 +604,8 @@ def test_retry_event_url_attribute_masks_query_secret_sync(caplog: pytest.LogCap
 
     giving_up = [r for r in caplog.records if r.name == "httpware.retry" and r.message.startswith("retry gave up")]
     assert len(giving_up) == 1
-    assert "topsecret" not in giving_up[0].url  # ty: ignore[unresolved-attribute]
-    assert "api_key=REDACTED" in giving_up[0].url  # ty: ignore[unresolved-attribute]
+    assert "topsecret" not in giving_up[0].url  # ty: ignore[missing-attribute]
+    assert "api_key=REDACTED" in giving_up[0].url  # ty: ignore[missing-attribute]
 
 
 def test_retry_after_exceeds_max_delay_does_not_consume_budget_token_sync() -> None:

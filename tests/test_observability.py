@@ -27,9 +27,9 @@ def test_emit_event_logs_at_warning_with_extra_fields(caplog: pytest.LogCaptureF
     record = caplog.records[0]
     assert record.levelno == logging.WARNING
     assert record.message == "something interesting happened"
-    assert record.foo == 1  # ty: ignore[unresolved-attribute]
-    assert record.bar == "x"  # ty: ignore[unresolved-attribute]
-    assert record.event == "test.event"  # ty: ignore[unresolved-attribute]
+    assert record.foo == 1  # ty: ignore[missing-attribute]
+    assert record.bar == "x"  # ty: ignore[missing-attribute]
+    assert record.event == "test.event"  # ty: ignore[missing-attribute]
 
 
 def test_emit_event_redacts_url_secret_in_log_record(caplog: pytest.LogCaptureFixture) -> None:
@@ -44,7 +44,7 @@ def test_emit_event_redacts_url_secret_in_log_record(caplog: pytest.LogCaptureFi
         )
 
     record = caplog.records[0]
-    assert record.url == "https://example.test/x?api_key=REDACTED&X-Amz-Signature=REDACTED"  # ty: ignore[unresolved-attribute]
+    assert record.url == "https://example.test/x?api_key=REDACTED&X-Amz-Signature=REDACTED"  # ty: ignore[missing-attribute]
 
 
 def test_emit_event_redacts_url_secret_in_otel_event() -> None:
@@ -138,7 +138,7 @@ def test_emit_event_works_when_otel_installed_but_no_active_span(
     record = caplog.records[0]
     assert record.levelno == logging.WARNING
     assert record.message == "real-otel-but-no-tracer"
-    assert record.event == "test.event"  # ty: ignore[unresolved-attribute]
+    assert record.event == "test.event"  # ty: ignore[missing-attribute]
 
 
 def test_emit_event_swallows_add_event_failure() -> None:
@@ -180,4 +180,4 @@ def test_emit_event_drops_none_attributes_from_otel_event_only(caplog: pytest.Lo
         "test.event",
         attributes={"url": "https://example.test/x?token=REDACTED", "attempts": 3},
     )
-    assert caplog.records[0].last_status is None  # ty: ignore[unresolved-attribute]
+    assert caplog.records[0].last_status is None  # ty: ignore[missing-attribute]

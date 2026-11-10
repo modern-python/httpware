@@ -42,7 +42,7 @@ def test_emit_event_logs_record_without_otel(caplog: pytest.LogCaptureFixture) -
     assert len(caplog.records) == 1
     record = caplog.records[0]
     assert record.message == "works without otel"
-    assert record.x == 1  # ty: ignore[unresolved-attribute]
+    assert record.x == 1  # ty: ignore[missing-attribute]
 
 
 def test_emit_event_does_not_call_opentelemetry_apis_when_flag_false() -> None:

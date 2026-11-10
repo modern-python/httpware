@@ -191,8 +191,8 @@ async def test_events_carry_the_circuit_key(caplog: pytest.LogCaptureFixture) ->
             with pytest.raises(CircuitOpenError):
                 await client.get("https://a.test/x")
     records = [r for r in caplog.records if r.name == "httpware.circuit_breaker"]
-    assert [r.event for r in records] == ["circuit.opened", "circuit.rejected"]  # ty: ignore[unresolved-attribute]
-    assert all(r.circuit_key == "https://a.test" for r in records)  # ty: ignore[unresolved-attribute]
+    assert [r.event for r in records] == ["circuit.opened", "circuit.rejected"]  # ty: ignore[missing-attribute]
+    assert all(r.circuit_key == "https://a.test" for r in records)  # ty: ignore[missing-attribute]
 
 
 async def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pytest.LogCaptureFixture) -> None:
@@ -201,7 +201,7 @@ async def test_circuit_key_is_the_normalized_origin_without_userinfo(caplog: pyt
         with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
             await _fail_n(client, "https://user:secret@A.test:443/x?q=1", 1)
             await _fail_n(client, "http://a.test:8080/x", 1)
-    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
+    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[missing-attribute]
     assert keys == ["https://a.test", "http://a.test:8080"]
 
 
@@ -211,7 +211,7 @@ async def test_circuit_key_of_a_custom_key_is_its_str(caplog: pytest.LogCaptureF
     async with _client(handler, breaker=breaker) as client:
         with caplog.at_level(logging.WARNING, logger="httpware.circuit_breaker"):
             await _fail_n(client, "https://a.test/x", 1)
-    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[unresolved-attribute]
+    keys = [r.circuit_key for r in caplog.records if r.name == "httpware.circuit_breaker"]  # ty: ignore[missing-attribute]
     assert keys == ["('a.test', 1)"]
 
 

@@ -324,8 +324,9 @@ class _CircuitBreakerState:
         raise _RejectionError(retry_after, self.take_events())
 
     def _record_closed(self, request: httpx2.Request, *, failed: bool) -> None:
-        if self._rate_mode:
-            self._record_outcome(request, failed=failed)
+        window = self._window
+        if window is not None:
+            self._record_outcome(request, window, failed=failed)
         elif failed:
             self._consecutive_failures += 1
             if self._consecutive_failures >= self._failure_threshold:
@@ -337,8 +338,9 @@ class _CircuitBreakerState:
             self._move_to(CircuitState.CLOSED)
             self._consecutive_failures = 0
             self._consecutive_successes = 0
-            if self._rate_mode:
-                self._window.clear()  # ty: ignore[unresolved-attribute]
+            window = self._window
+            if window is not None:
+                window.clear()
             attributes = {"rejected": self._episode_rejections}
             self._queue(request, "circuit.closed", logging.INFO, "circuit closed — service recovered", attributes)
 
@@ -377,11 +379,10 @@ class _CircuitBreakerState:
             },
         )
 
-    def _record_outcome(self, request: httpx2.Request, *, failed: bool) -> None:
-        # Only reached in rate mode, where _window and _failure_rate_threshold are non-None.
+    def _record_outcome(self, request: httpx2.Request, window: _RollingWindow, *, failed: bool) -> None:
         now = self._now()
-        self._window.record(now, failed=failed)  # ty: ignore[unresolved-attribute]
-        total, failures = self._window.totals(now)  # ty: ignore[unresolved-attribute]
+        window.record(now, failed=failed)
+        total, failures = window.totals(now)
         threshold = self._failure_rate_threshold
         if threshold is not None and total >= self._minimum_calls and failures / total >= threshold:
             self._open_rate(request, total=total, failures=failures)

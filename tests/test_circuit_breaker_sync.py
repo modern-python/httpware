@@ -98,13 +98,13 @@ def test_open_emits_opened_event_and_rejects(caplog: pytest.LogCaptureFixture) -
     opened = [r for r in records if "opened" in r.message]
     rejected = [r for r in records if "rejecting" in r.message]
     assert len(opened) == 1
-    assert opened[0].event == "circuit.opened"  # ty: ignore[unresolved-attribute]
-    assert opened[0].failure_threshold == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
-    assert opened[0].failures == 2  # noqa: PLR2004  # ty: ignore[unresolved-attribute]
+    assert opened[0].event == "circuit.opened"  # ty: ignore[missing-attribute]
+    assert opened[0].failure_threshold == 2  # noqa: PLR2004  # ty: ignore[missing-attribute]
+    assert opened[0].failures == 2  # noqa: PLR2004  # ty: ignore[missing-attribute]
     assert len(rejected) == 1
-    assert rejected[0].event == "circuit.rejected"  # ty: ignore[unresolved-attribute]
-    assert rejected[0].retry_after is not None  # ty: ignore[unresolved-attribute]
-    assert rejected[0].method == "GET"  # ty: ignore[unresolved-attribute]
+    assert rejected[0].event == "circuit.rejected"  # ty: ignore[missing-attribute]
+    assert rejected[0].retry_after is not None  # ty: ignore[missing-attribute]
+    assert rejected[0].method == "GET"  # ty: ignore[missing-attribute]
 
 
 def test_success_resets_failure_streak() -> None:
@@ -247,8 +247,8 @@ def test_probe_failure_reopens_circuit(caplog: pytest.LogCaptureFixture) -> None
         r
         for r in caplog.records
         if r.name == "httpware.circuit_breaker"
-        and r.event == "circuit.opened"  # ty: ignore[unresolved-attribute]
-        and r.failures == 1  # ty: ignore[unresolved-attribute]
+        and r.event == "circuit.opened"  # ty: ignore[missing-attribute]
+        and r.failures == 1  # ty: ignore[missing-attribute]
     ]
     assert len(reopen_records) == 1
 
@@ -587,10 +587,10 @@ def test_rate_mode_probe_failure_reopens_with_classic_attributes(caplog: pytest.
         with pytest.raises(InternalServerError):
             probe.get("https://example.test/x")
     assert breaker.state is CircuitState.OPEN  # the failed probe re-opened it
-    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[unresolved-attribute]
+    opened = [r for r in caplog.records if r.event == "circuit.opened"]  # ty: ignore[missing-attribute]
     assert opened
     rec = opened[-1]
-    assert rec.failures == 1  # ty: ignore[unresolved-attribute]  # classic probe-failure shape
+    assert rec.failures == 1  # ty: ignore[missing-attribute]  # classic probe-failure shape
     assert hasattr(rec, "failure_threshold")
     assert not hasattr(rec, "failure_rate")  # NOT the rate shape
 
@@ -797,8 +797,8 @@ def test_rejected_event_is_emitted_at_most_once_per_second(caplog: pytest.LogCap
             clock.advance(step)
             with pytest.raises(CircuitOpenError):
                 breaker(httpx2.Request("GET", "https://example.test/x"), _unreachable)
-    rejected = [r for r in caplog.records if r.event == "circuit.rejected"]  # ty: ignore[unresolved-attribute]
-    assert [r.suppressed for r in rejected] == [0, 4]  # ty: ignore[unresolved-attribute]
+    rejected = [r for r in caplog.records if r.event == "circuit.rejected"]  # ty: ignore[missing-attribute]
+    assert [r.suppressed for r in rejected] == [0, 4]  # ty: ignore[missing-attribute]
 
 
 class _LockProbe(logging.Handler):
@@ -946,7 +946,7 @@ def test_first_rejection_of_a_new_outage_is_emitted(caplog: pytest.LogCaptureFix
         breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
         _open_now(breaker)
         _reject(breaker)
-    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[missing-attribute]
 
 
 def test_closed_event_reports_every_rejection_of_the_outage(caplog: pytest.LogCaptureFixture) -> None:
@@ -962,8 +962,8 @@ def test_closed_event_reports_every_rejection_of_the_outage(caplog: pytest.LogCa
         _reject(breaker)
         clock.advance(5.0)
         breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
-    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 1]  # ty: ignore[unresolved-attribute]
-    assert [r.rejected for r in _events(caplog, "circuit.closed")] == [4]  # ty: ignore[unresolved-attribute]
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 1]  # ty: ignore[missing-attribute]
+    assert [r.rejected for r in _events(caplog, "circuit.closed")] == [4]  # ty: ignore[missing-attribute]
 
 
 def test_suppressed_never_counts_a_previous_outage(caplog: pytest.LogCaptureFixture) -> None:
@@ -977,7 +977,7 @@ def test_suppressed_never_counts_a_previous_outage(caplog: pytest.LogCaptureFixt
         breaker(httpx2.Request("GET", "https://example.test/x"), _ok)
         _open_now(breaker)
         _reject(breaker)
-    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[unresolved-attribute]
+    assert [r.suppressed for r in _events(caplog, "circuit.rejected")] == [0, 0]  # ty: ignore[missing-attribute]
 
 
 def test_locked_admission_into_a_circuit_closed_since_the_unlocked_read_gets_the_closed_ticket() -> None:
