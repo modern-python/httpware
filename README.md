@@ -94,6 +94,8 @@ Full guides live at [httpware.modern-python.org](https://httpware.modern-python.
 - [License](https://github.com/modern-python/httpware/blob/main/LICENSE)
 - [Release notes](https://github.com/modern-python/httpware/releases)
 
+If this project saves you time, consider giving it a star on GitHub.
+
 ## Part of `modern-python`
 
 Browse the full list of templates and libraries in
